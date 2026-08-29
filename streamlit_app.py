@@ -58,7 +58,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Inicializar estados de la sesión
+# Inicializar estados de la sesión de manera aislada para evitar acumulación
 if "inventario_activo" not in st.session_state:
     st.session_state.inventario_activo = {}
 if "detalle_factura_activa" not in st.session_state:
@@ -75,7 +75,7 @@ with col_head1:
     st.markdown("""
         <div class="main-header" style="margin-bottom: 0rem;">
             <h1>📦 Procesador Dinámico de Facturas WilPOS</h1>
-            <p>Análisis OCR 100% independiente y sin almacenamiento de datos previos (Margen 35%).</p>
+            <p>Análisis OCR estructurado por bloques y anclaje de precios (Margen 35%).</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -117,7 +117,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
 
-def procesar_factura_fresca(file):
+def procesar_factura_por_bloques(file):
     file_name = file.name.lower()
     extracted_text = ""
     
@@ -164,11 +164,12 @@ def procesar_factura_fresca(file):
         "VALIDO", "ATENDIDO", "BANR", "TRANSFERENCIA", "POPULAR", "BANRESERVAS", 
         "BANESCO", "BHD", "FIRMA", "DIGITAL", "DIRECCION", "TELEFONO", "CLIENTE",
         "CENTRO", "DE", "DISTRIBUCION", "CRISTIAN", "SRL", "CALLE", "DUARTE", 
-        "SANTO", "DOMINGO", "REPUBLICA", "DOMINICANA", "AUT.", "VIEJA", "KM", "ID", "FECHA"
+        "SANTO", "DOMINGO", "REPUBLICA", "DOMINICANA", "AUT.", "VIEJA", "KM", "ID", "FECHA", "DESCRIPCION", "VALOR"
     ]
 
     productos = {}
     
+    # Análisis estructural basado en la línea de cantidad x precio como ancla
     for i, line in enumerate(lines):
         match_cant_precio = re.search(r'([\d\.]+)\s*[xX]\s*([\d,\.]+)', line)
         if match_cant_precio:
@@ -193,33 +194,47 @@ def procesar_factura_fresca(file):
                         except ValueError:
                             pass
 
-            nombre = ""
+            # Escanear HACIA ARRIBA desde la línea de precio para capturar el bloque completo del producto
+            nombre_partes = []
             codigo = f"PROD-{i}"
             emp = 12
             
-            nombre_partes = []
-            for idx in [i-1, i-2, i+1]:
-                if 0 <= idx < len(lines):
-                    l_ctx = lines[idx]
-                    l_ctx_upper = l_ctx.upper()
-                    
-                    if re.match(r'^([A-Z0-9]{4,15})$', l_ctx) and not any(b in l_ctx_upper for b in black_list):
-                        if len(l_ctx) >= 4:
-                            codigo = l_ctx
-                    
-                    if "PAQUETE" in l_ctx_upper or "CAJA" in l_ctx_upper or "DISPLAY" in l_ctx_upper:
-                        nums_emp = re.findall(r'\d+', l_ctx)
-                        if nums_emp:
-                            emp = int(nums_emp[-1])
-                    
-                    elif not any(b in l_ctx_upper for b in black_list) and not re.search(r'[\d]\s*[xX]\s*[\d]', l_ctx):
-                        clean_l = re.sub(r'\d{1,3}(?:,\d{3})*\.\d{2}|[;\\]', '', l_ctx).strip()
-                        if len(clean_l) > 3 and not clean_l.isdigit():
-                            nombre_partes.append(clean_l.upper())
+            for j in range(i - 1, max(-1, i - 5), -1):
+                l_up = lines[j]
+                l_up_upper = l_up.upper()
+                
+                # Si encontramos otra línea de precio hacia arriba, rompemos el bloque
+                if re.search(r'[\d]\s*[xX]\s*[\d]', l_up):
+                    break
+                
+                # Detectar empaque (Paquete, Caja, Unidad)
+                if "PAQUETE" in l_up_upper or "CAJA" in l_up_upper or "DISPLAY" in l_up_upper:
+                    nums_emp = re.findall(r'\d+', l_up)
+                    if nums_emp:
+                        emp = int(nums_emp[-1])
+                    continue
+                elif "UNIDAD" in l_up_upper:
+                    emp = 1
+                    continue
+                
+                # Detectar código de producto o barras (alfanumérico largo o corto)
+                if re.match(r'^([A-Z0-9]{4,15})$', l_up) and not any(b in l_up_upper for b in black_list):
+                    if len(l_up) >= 4 and not codigo.startswith("P1016") and codigo.startswith("PROD"):
+                        codigo = l_up
+                    continue
+                
+                # Filtrar y acumular las líneas de la descripción del producto
+                if not any(b in l_up_upper for b in black_list):
+                    clean_l = re.sub(r'\d{1,3}(?:,\d{3})*\.\d{2}|[;\\]', '', l_up).strip()
+                    if len(clean_l) > 2 and not clean_l.isdigit():
+                        nombre_partes.insert(0, clean_l.upper())
 
-            if nombre_partes:
-                nombre = " ".join(nombre_partes[-2:])
-            else:
+            # Si el código se quedó como genérico, revisamos si la primera parte es un código alfanumérico
+            if codigo.startswith("PROD") and nombre_partes and len(nombre_partes[0]) <= 13 and not " " in nombre_partes[0]:
+                codigo = nombre_partes.pop(0)
+
+            nombre = " ".join(nombre_partes).strip()
+            if not nombre:
                 nombre = f"PRODUCTO TICKET #{i}"
 
             cat = "General"
@@ -246,7 +261,7 @@ def procesar_factura_fresca(file):
     return proveedor, num_factura, fecha, productos
 
 if uploaded_file:
-    prov, num_fac, fecha_fac, prods_extraidos = procesar_factura_fresca(uploaded_file)
+    prov, num_fac, fecha_fac, prods_extraidos = procesar_factura_por_bloques(uploaded_file)
     
     st.session_state.inventario_activo = prods_extraidos
     st.session_state.detalle_factura_activa = {
