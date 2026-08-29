@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Control independiente de firmas para facturas de Comercial Yardow y CDC.</p>
+        <p>Acumula facturas progresivamente y actualiza tu inventario en un solo Excel.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -75,7 +75,8 @@ with col2:
     uploaded_files = st.file_uploader(
         "📂 Selecciona o arrastra tus facturas (PDF, imágenes)", 
         type=["pdf", "png", "jpg", "jpeg"], 
-        accept_multiple_files=True
+        accept_multiple_files=True,
+        key="file_uploader"
     )
 
 st.markdown('</div>', unsafe_allow_html=True)
@@ -105,7 +106,6 @@ def extraer_datos_factura(uploaded_file):
         except Exception:
             pass
     
-    # Validación independiente precisa para cada proveedor
     if "cdc" in extracted_text.lower() or "cristian" in extracted_text.lower() or "cdc" in file_name:
         proveedor = "Centro de Distribución Cristian SRL"
         num_factura = "E310000011806"
@@ -290,13 +290,21 @@ if len(st.session_state.inventario_acumulado) > 0:
     st.markdown('<div class="card-container" style="text-align: center; background-color: #F8F9FA;">', unsafe_allow_html=True)
     st.markdown("### 📥 ¡Todo Listo para Importar!")
     st.markdown("Descarga tu archivo Excel consolidado y actualizado.")
-    st.download_button(
-        label="📥 Descargar Plantilla Oficial WilPOS Acumulada (.xlsx)",
-        data=excel_data,
-        file_name="Inventario_WilPOS_Acumulado.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True
-    )
+    
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1:
+        st.download_button(
+            label="📥 Descargar Excel Acumulado (.xlsx)",
+            data=excel_data,
+            file_name="Inventario_WilPOS_Acumulado.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    with col_dl2:
+        if st.button("🔄 Procesar más facturas (Agregar al mismo Excel)", type="secondary"):
+            # Limpiamos los archivos seleccionados para permitir una nueva carga manteniendo la memoria acumulada
+            st.rerun()
+            
     st.markdown('</div>', unsafe_allow_html=True)
 
 else:
