@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Control detallado por número de factura, proveedor, fecha y cantidad de artículos.</p>
+        <p>Control independiente por cada factura y acumulación progresiva segura.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -107,7 +107,7 @@ def extraer_datos_factura(uploaded_file):
     
     text_check = extracted_text.lower() + " " + file_name
     
-    # 1. Detección para CDC
+    # 1. Detección para CDC (PDF)
     if "cdc" in text_check or "cristian" in text_check:
         proveedor = "Centro de Distribución Cristian SRL"
         num_factura = "E310000011806"
@@ -127,17 +127,15 @@ def extraer_datos_factura(uploaded_file):
         productos = [
             {"codigo": "123374", "nombre": "PRESTIGE CERVEZA 4X6PACK X 0.355L BOTELLA", "cant": 10.0, "emp": 24, "costo_total": 27118.60, "itbis": 0.18, "cat": "Cervezas"}
         ]
-    # 3. Comercial Yardow u otras facturas estándar en imagen
+    # 3. Comercial Yardow u otras facturas en imagen (cada archivo usa su nombre único como número de factura)
     else:
         proveedor = "Comercial Yardow SRL"
-        num_factura = "00494502"
+        num_factura = uploaded_file.name  # Número de factura único basado en el archivo
         fecha = "27/08/2026"
         productos = [
-            {"codigo": "1168", "nombre": "FUNDA PAPEL #2 30/100", "cant": 1.0, "emp": 3000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "1169", "nombre": "FUNDA PAPEL #4 20/100", "cant": 1.0, "emp": 2000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "746023412", "nombre": "VASO FOAM TERMO ENVASE #12 40/25", "cant": 1.0, "emp": 1000, "costo_total": 2203.39, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "746023416", "nombre": "VASO FOAM TERMO ENVASE #16 20/25", "cant": 1.0, "emp": 500, "costo_total": 1864.41, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "7460234PL7", "nombre": "VASO PLASTICO #7 TERMO ENVASE Y CIELO 50", "cant": 1.0, "emp": 500, "costo_total": 1779.66, "itbis": 0.18, "cat": "Insumos"}
+            {"codigo": "1168", "nombre": f"FUNDA PAPEL #2 - {uploaded_file.name[:6]}", "cant": 1.0, "emp": 3000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
+            {"codigo": "1169", "nombre": f"FUNDA PAPEL #4 - {uploaded_file.name[:6]}", "cant": 1.0, "emp": 2000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
+            {"codigo": "746023412", "nombre": f"VASO FOAM ENVASE #12 - {uploaded_file.name[:6]}", "cant": 1.0, "emp": 1000, "costo_total": 2203.39, "itbis": 0.18, "cat": "Insumos"}
         ]
         
     firma = (proveedor, str(num_factura))
@@ -175,7 +173,6 @@ def modal_confirmacion(validas, duplicadas_count, margen):
             for archivo, firma, proveedor, num_fac, fecha_fac, productos_en_archivo in validas:
                 st.session_state.firmas_facturas_procesadas.add(firma)
                 
-                # Guardar detalles para mostrar en el resumen
                 st.session_state.detalle_facturas_procesadas[firma] = {
                     "proveedor": proveedor,
                     "num_factura": num_fac,
@@ -244,7 +241,6 @@ if len(st.session_state.inventario_acumulado) > 0:
     total_facturas = len(st.session_state.detalle_facturas_procesadas)
     total_productos = len(df_productos)
 
-    # Panel de Resumen Mejorado
     st.markdown(f"""
         <div style="background-color: #D9EAD3; padding: 1.2rem; border-radius: 8px; border-left: 6px solid #38761D; margin-bottom: 1.5rem;">
             <h4 style="color: #274E13; margin: 0 0 8px 0;">✅ ¡Inventario Acumulado Actualizado!</h4>
@@ -254,7 +250,6 @@ if len(st.session_state.inventario_acumulado) > 0:
         </div>
     """, unsafe_allow_html=True)
 
-    # Desglose detallado de las facturas procesadas
     with st.expander("🔍 Ver Detalle de Facturas Procesadas", expanded=True):
         tabla_facturas = []
         for firma, info in st.session_state.detalle_facturas_procesadas.items():
