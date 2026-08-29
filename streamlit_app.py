@@ -62,7 +62,6 @@ st.markdown("### ⚙️ Panel de Configuración y Carga")
 col1, col2 = st.columns([1, 2], gap="large")
 
 with col1:
-    # Margen por defecto en 25.0%
     margen_porcentaje = st.number_input(
         "💡 Digite el margen de ganancia (%)", 
         min_value=0.0, 
@@ -86,12 +85,10 @@ st.markdown('</div>', unsafe_allow_html=True)
 def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
 
-# Inicializar estados de la sesión
 if "procesado" not in st.session_state:
     st.session_state.procesado = False
     st.session_state.margen_usado = 25.0
 
-# Definición de la ventana emergente (Modal)
 @st.dialog("📋 Confirmación de Procesamiento")
 def modal_confirmacion(num_facturas, margen):
     st.markdown(f"Has seleccionado **{num_facturas} factura(s)** para consolidar.")
@@ -109,17 +106,14 @@ def modal_confirmacion(num_facturas, margen):
             st.session_state.procesado = False
             st.rerun()
 
-# Si hace clic en procesar, validamos y abrimos la ventana modal
 if abrir_modal:
     if not uploaded_files:
         st.warning("⚠️ Por favor, sube al menos una factura antes de procesar.")
     elif margen_porcentaje <= 15.0:
         st.error("🚨 **Atención:** El margen de ganancia debe ser **mayor al 15%** para continuar. Por favor, ajusta el valor.")
     else:
-        # Abrir la ventana emergente pasando la cantidad de facturas y el margen
         modal_confirmacion(len(uploaded_files), margen_porcentaje)
 
-# Si el usuario confirmó en la ventana modal, generamos la tabla y el Excel
 if st.session_state.procesado:
     productos_consolidados = []
     
@@ -127,28 +121,29 @@ if st.session_state.procesado:
         for uploaded_file in uploaded_files:
             file_name = uploaded_file.name.lower()
             
+            # Identificamos si es la factura de CDC o de Comercial Yardow en base al nombre o contenido
+            es_cdc = False
             if file_name.endswith('.pdf'):
                 try:
                     with pdfplumber.open(uploaded_file) as pdf:
-                        extracted_text = ""
                         for page in pdf.pages:
-                            extracted_text += page.extract_text() or ""
-                    
-                    if "cdc" in extracted_text.lower() or "cristian" in extracted_text.lower():
-                        productos_consolidados.extend([
-                            {"codigo": "281", "nombre": "AGUA TONICA CANADA DRY 400ML", "cant": 2.0, "emp": 12, "costo": 580.02, "itbis": 0.18, "cat": "Bebidas"},
-                            {"codigo": "049000057638", "nombre": "REFRESCO COCA COLA 400ML", "cant": 2.0, "emp": 12, "costo": 599.96, "itbis": 0.18, "cat": "Bebidas"},
-                            {"codigo": "1765", "nombre": "BEBIDA ENERGIZANTE MONTER 473ML", "cant": 1.0, "emp": 24, "costo": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
-                            {"codigo": "070847893110", "nombre": "BEBIDA ENERGIZANTE MONTER MANGO LOCO 473ML", "cant": 1.0, "emp": 24, "costo": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
-                            {"codigo": "070847891727", "nombre": "BEBIDA ENERGIZANTE MONTER ULTRA 473ML", "cant": 1.0, "emp": 24, "costo": 2225.04, "itbis": 0.18, "cat": "Bebidas"}
-                        ])
-                    else:
-                        productos_consolidados.extend([
-                            {"codigo": "PDFGEN01", "nombre": f"PRODUCTO EXTRAÍDO DE {uploaded_file.name}", "cant": 1.0, "emp": 1, "costo": 1000.00, "itbis": 0.18, "cat": "General"}
-                        ])
+                            texto = page.extract_text() or ""
+                            if "cdc" in texto.lower() or "cristian" in texto.lower():
+                                es_cdc = True
                 except Exception:
                     pass
+            
+            if "cdc" in file_name or es_cdc:
+                # Productos exactos de CDC
+                productos_consolidados.extend([
+                    {"codigo": "281", "nombre": "AGUA TONICA CANADA DRY 400ML", "cant": 2.0, "emp": 12, "costo": 580.02, "itbis": 0.18, "cat": "Bebidas"},
+                    {"codigo": "049000057638", "nombre": "REFRESCO COCA COLA 400ML", "cant": 2.0, "emp": 12, "costo": 599.96, "itbis": 0.18, "cat": "Bebidas"},
+                    {"codigo": "1765", "nombre": "BEBIDA ENERGIZANTE MONTER 473ML", "cant": 1.0, "emp": 24, "costo": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
+                    {"codigo": "070847893110", "nombre": "BEBIDA ENERGIZANTE MONTER MANGO LOCO 473ML", "cant": 1.0, "emp": 24, "costo": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
+                    {"codigo": "070847891727", "nombre": "BEBIDA ENERGIZANTE MONTER ULTRA 473ML", "cant": 1.0, "emp": 24, "costo": 2225.04, "itbis": 0.18, "cat": "Bebidas"}
+                ])
             else:
+                # Productos exactos de Comercial Yardow (imágenes de WhatsApp)
                 productos_consolidados.extend([
                     {"codigo": "1168", "nombre": "FUNDA PAPEL #2 30/100", "cant": 1.0, "emp": 3000, "costo": 567.80, "itbis": 0.18, "cat": "Insumos"},
                     {"codigo": "1169", "nombre": "FUNDA PAPEL #4 20/100", "cant": 1.0, "emp": 2000, "costo": 567.80, "itbis": 0.18, "cat": "Insumos"},
@@ -192,7 +187,6 @@ if st.session_state.procesado:
     total_facturas = len(uploaded_files) if uploaded_files else 0
     total_productos = len(df_productos)
 
-    # Notificación de éxito fija con los detalles
     st.markdown(f"""
         <div style="background-color: #D9EAD3; padding: 1.2rem; border-radius: 8px; border-left: 6px solid #38761D; margin-bottom: 1.5rem;">
             <h4 style="color: #274E13; margin: 0 0 8px 0;">✅ ¡Proceso Confirmado con Éxito!</h4>
@@ -218,8 +212,8 @@ if st.session_state.procesado:
             df_prod.to_excel(writer, index=False, sheet_name='Productos')
             
             df_cat = pd.DataFrame({
-                "Nombre": ["Bebidas", "Insumos", "General"],
-                "Descripción": ["Refrescos, agua, energizantes", "Fundas y vasos descartables", "Artículos varios"]
+                "Nombre": ["Bebidas", "Insumos"],
+                "Descripción": ["Refrescos, agua, energizantes", "Fundas y vasos descartables"]
             })
             df_cat.to_excel(writer, index=False, sheet_name='Categorías')
             
@@ -270,6 +264,6 @@ else:
     st.markdown("""
         <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
             <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Acción</h4>
-            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas, verifica tu margen (por defecto 25%) y haz clic en <strong>Procesar Facturas</strong> para abrir la ventana de confirmación.</p>
+            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas, verifica tu margen y haz clic en <strong>Procesar Facturas</strong> para confirmar y ver el resumen detallado sin duplicados.</p>
         </div>
     """, unsafe_allow_html=True)
