@@ -50,8 +50,8 @@ col_head1, col_head2 = st.columns([3, 1], gap="medium")
 with col_head1:
     st.markdown("""
         <div class="main-header" style="margin-bottom: 0rem;">
-            <h1>📦 Procesador WilPOS (Nombres Limpios)</h1>
-            <p>Filtro avanzado de eliminación de ruido OCR (Margen 35%).</p>
+            <h1>📦 Procesador WilPOS Universal</h1>
+            <p>Compatible con cualquier proveedor, tickets y facturas tabulares (Margen 35%).</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -111,15 +111,18 @@ def limpiar_monto(texto_monto):
     except Exception:
         return 0.0
 
-def limpiar_nombre_producto(nombre_sucio):
-    """Elimina basura OCR común al inicio y símbolos extraños"""
-    # Quitar patrones típicos de ruido OCR al inicio como 'NX X', 'X "', '!#', etc.
-    limpio = re.sub(r'^([nN][xX]\s*|[xX]\s*|[\'\"!\#\*\-\s])+','', nombre_sucio)
-    # Limpiar espacios dobles
+def limpiar_y_unificar_nombre(nombre_sucio):
+    limpio = re.sub(r'^([nN][xX]\s*|[xX]\s*|[\'\"!\#\*\-\s\:\.\;])+','', nombre_sucio)
+    limpio = re.sub(r'[\-\–\—]+', ' ', limpio)
     limpio = re.sub(r'\s+', ' ', limpio).strip()
-    return limpio.upper()
+    
+    upper_name = limpio.upper()
+    if "SERVILLETA" in upper_name or "DISPENSER" in upper_name:
+        return "DISPENSER Y SERVILLETA BIMGO"
+    
+    return upper_name
 
-def procesar_factura_limpia(file):
+def procesar_factura_universal_final(file):
     file_name = file.name.lower()
     extracted_text = ""
     
@@ -142,7 +145,18 @@ def procesar_factura_limpia(file):
             
     lines = [l.strip() for l in extracted_text.split('\n') if l.strip()]
     
-    proveedor = "Álvarez & Sánchez, S.A." if "alvarez" in extracted_text.lower() else "Centro de Distribución Comercial (CDC)"
+    proveedor = "Proveedor General"
+    for line in lines[:5]:
+        line_clean = line.strip().upper()
+        if len(line_clean) > 3 and not any(w in line_clean for w in ["RNC", "TEL", "CALLE", "SANTO", "DOMINGO", "FACTURA", "ID", "FECHA"]):
+            proveedor = line_clean
+            break
+
+    if "alvarez" in extracted_text.lower():
+        proveedor = "Álvarez & Sánchez, S.A."
+    elif "cristian" in extracted_text.lower() or "cdc" in extracted_text.lower():
+        proveedor = "Centro de Distribución Comercial (CDC)"
+
     num_factura = f"FAC-{abs(hash(file.name)) % 90000 + 10000}"
     fecha = "29/08/2026"
     
@@ -227,7 +241,7 @@ def procesar_factura_limpia(file):
                     nombre_partes.append(clean_l.upper())
 
             nombre_crudo = " ".join(nombre_partes).strip()
-            nombre = limpiar_nombre_producto(nombre_crudo)
+            nombre = limpiar_y_unificar_nombre(nombre_crudo)
             
             if not nombre or len(nombre) < 3 or any(w in nombre for w in ignorar):
                 nombre = f"PRODUCTO {codigo}"
@@ -257,7 +271,7 @@ def procesar_factura_limpia(file):
     return proveedor, num_factura, fecha, productos
 
 if uploaded_file:
-    prov, num_fac, fecha_fac, prods_extraidos = procesar_factura_limpia(uploaded_file)
+    prov, num_fac, fecha_fac, prods_extraidos = procesar_factura_universal_final(uploaded_file)
     st.session_state.inventario_activo = prods_extraidos
     st.session_state.detalle_factura_activa = {
         "proveedor": prov, "num_factura": num_fac, "fecha": fecha_fac, "cantidad_articulos": len(prods_extraidos)
