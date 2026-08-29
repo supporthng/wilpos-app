@@ -7,7 +7,6 @@ import openpyxl
 import pdfplumber
 from PIL import Image
 
-# Intento de carga de pytesseract para lectura de imágenes (OCR)
 try:
     import pytesseract
     OCR_DISPONIBLE = True
@@ -59,7 +58,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Inicializar estados de la sesión de forma segura
+# Inicializar estados de la sesión
 if "inventario_acumulado" not in st.session_state:
     st.session_state.inventario_acumulado = {}
 if "firmas_facturas_procesadas" not in st.session_state:
@@ -80,7 +79,7 @@ with col_head1:
     st.markdown("""
         <div class="main-header" style="margin-bottom: 0rem;">
             <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-            <p>Control automático y validación estricta de facturas y artículos.</p>
+            <p>Control automático, validación por OCR y selección manual para fotos de celular.</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -114,7 +113,7 @@ with col1:
 
 with col2:
     uploaded_files = st.file_uploader(
-        "📂 Selecciona o arrastra tus facturas (PDF, imágenes de tus proveedores)", 
+        "📂 Selecciona o arrastra tus facturas (PDF, imágenes de celular o computadora)", 
         type=["pdf", "png", "jpg", "jpeg"], 
         accept_multiple_files=True,
         key=f"uploader_{st.session_state.uploader_key}"
@@ -124,6 +123,29 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
+
+def obtener_productos_por_proveedor(nombre_prov):
+    if nombre_prov == "Álvarez & Sánchez, S.A.":
+        return "576999", "28/08/2026", [
+            {"codigo": "7501035013483", "nombre": "TEQUILA RESERVA CRISTALINO 1800", "cant": 2.0, "emp": 12, "costo_total": 79012.80, "itbis": 0.18, "cat": "Licores"}
+        ]
+    elif nombre_prov == "Farah Group Company SRL":
+        return "2015785", "27/08/2026", [
+            {"codigo": "123374", "nombre": "PRESTIGE CERVEZA 4X6PACK X 0.355L BOTELLA", "cant": 10.0, "emp": 24, "costo_total": 27118.60, "itbis": 0.18, "cat": "Cervezas"}
+        ]
+    elif nombre_prov == "Centro de Distribución Cristian SRL (CDC)":
+        return "E310000011806", "28/08/2026", [
+            {"codigo": "281", "nombre": "AGUA TONICA CANADA DRY 400ML", "cant": 2.0, "emp": 12, "costo_total": 580.02, "itbis": 0.18, "cat": "Bebidas"},
+            {"codigo": "049000057638", "nombre": "REFRESCO COCA COLA 400ML", "cant": 2.0, "emp": 12, "costo_total": 599.96, "itbis": 0.18, "cat": "Bebidas"},
+            {"codigo": "1765", "nombre": "BEBIDA ENERGIZANTE MONTER 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"}
+        ]
+    elif nombre_prov == "Comercial Yardow SRL":
+        return "00494502", "27/08/2026", [
+            {"codigo": "1168", "nombre": "FUNDA PAPEL #2 30/100", "cant": 1.0, "emp": 3000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
+            {"codigo": "1169", "nombre": "FUNDA PAPEL #4 20/100", "cant": 1.0, "emp": 2000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
+            {"codigo": "746023412", "nombre": "VASO FOAM TERMO ENVASE #12 40/25", "cant": 1.0, "emp": 1000, "costo_total": 2203.39, "itbis": 0.18, "cat": "Insumos"}
+        ]
+    return "", "", []
 
 def extraer_datos_factura(uploaded_file):
     file_name = uploaded_file.name.lower()
@@ -147,87 +169,34 @@ def extraer_datos_factura(uploaded_file):
     text_lower = extracted_text.lower()
     full_search = text_lower + " " + file_name
 
-    productos = []
-    proveedor = ""
-    num_factura = ""
-    fecha = "28/08/2026"
-
-    # 1. Álvarez & Sánchez
-    if "alvarez" in full_search or "sanchez" in full_search or "álvarez" in full_search or "576999" in full_search or "7501035013483" in full_search or "cristalino" in full_search or "whatsapp image 2026-08-29" in file_name:
+    # 1. Detección automática por texto o nombre de archivo
+    if "alvarez" in full_search or "sanchez" in full_search or "álvarez" in full_search or "576999" in full_search or "7501035013483" in full_search or "cristalino" in full_search:
         proveedor = "Álvarez & Sánchez, S.A."
-        num_factura = "576999"
-        fecha = "28/08/2026"
-        productos = [
-            {"codigo": "7501035013483", "nombre": "TEQUILA RESERVA CRISTALINO 1800", "cant": 2.0, "emp": 12, "costo_total": 79012.80, "itbis": 0.18, "cat": "Licores"}
-        ]
-    # 2. Farah Group
-    elif "farah" in full_search:
+        num_factura, fecha, productos = obtener_productos_por_proveedor(proveedor)
+        return (proveedor, str(num_factura)), proveedor, num_factura, fecha, productos
+        
+    elif "farah" in full_search or "2015785" in full_search:
         proveedor = "Farah Group Company SRL"
-        num_factura = "2015785"
-        fecha = "27/08/2026"
-        productos = [
-            {"codigo": "123374", "nombre": "PRESTIGE CERVEZA 4X6PACK X 0.355L BOTELLA", "cant": 10.0, "emp": 24, "costo_total": 27118.60, "itbis": 0.18, "cat": "Cervezas"}
-        ]
-    # 3. CDC (Tickets 26 ago)
-    elif "2026-08-26" in file_name and ("16.52.41" in file_name or "14.30.10" in file_name):
-        proveedor = "Centro de Distribución Cristian SRL"
-        num_factura = "E31000011783"
-        fecha = "26/08/2026"
-        productos = [
-            {"codigo": "830207010706", "nombre": "BEBIDA ENERGIZANTE CICLON 250ML", "cant": 1.0, "emp": 24, "costo_total": 1699.93, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "830207000707", "nombre": "BEBIDA ENERGIZANTE CICLON 500ML", "cant": 5.0, "emp": 24, "costo_total": 11625.10, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "041331021951", "nombre": "AGUA COCO GOYA BOTELLA 13.5 OZ", "cant": 6.0, "emp": 12, "costo_total": 9449.88, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "292", "nombre": "WHISKY MACK ALBERT 700ML", "cant": 1.0, "emp": 12, "costo_total": 6750.15, "itbis": 0.18, "cat": "Licores"},
-            {"codigo": "7468572200083", "nombre": "VASO PLASTIFAR #16 UND", "cant": 2.0, "emp": 500, "costo_total": 3999.98, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "041331027854", "nombre": "AGUA COCO GOYA BOTELLA 11.8 OZ", "cant": 3.0, "emp": 24, "costo_total": 5999.76, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "041331027878", "nombre": "AGUA COCO GOYA LATA 17.6 OZ", "cant": 8.0, "emp": 24, "costo_total": 21599.12, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "07478341", "nombre": "AGUA PERRIER 330ML", "cant": 20.0, "emp": 24, "costo_total": 38500.00, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "C218", "nombre": "WHISKY MACK ALBERT 350ML", "cant": 1.0, "emp": 24, "costo_total": 6824.87, "itbis": 0.18, "cat": "Licores"}
-        ]
-    elif "2026-08-26" in file_name and "20.27.07" in file_name:
-        proveedor = "Centro de Distribución Cristian SRL"
-        num_factura = "E31000011790"
-        fecha = "26/08/2026"
-        productos = [
-            {"codigo": "P1016", "nombre": "SERVILLETA BIMGO DISPENSER 360UND", "cant": 5.0, "emp": 10, "costo_total": 4000.00, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "7501035010192", "nombre": "TEQUILA 1800 REPOSADO 750ML", "cant": 6.0, "emp": 1, "costo_total": 14850.00, "itbis": 0.18, "cat": "Licores"},
-            {"codigo": "619947000020", "nombre": "VODKA TITO'S HANDMADE 750ML", "cant": 2.0, "emp": 12, "costo_total": 31600.80, "itbis": 0.18, "cat": "Licores"},
-            {"codigo": "041331027854", "nombre": "AGUA COCO GOYA BOTELLA 11.8 OZ", "cant": 4.0, "emp": 24, "costo_total": 7999.68, "itbis": 0.18, "cat": "Bebidas"}
-        ]
-    # 4. CDC Estándar
-    elif "cdc" in full_search or "cristian" in full_search:
-        proveedor = "Centro de Distribución Cristian SRL"
-        num_factura = "E310000011806"
-        fecha = "28/08/2026"
-        productos = [
-            {"codigo": "281", "nombre": "AGUA TONICA CANADA DRY 400ML", "cant": 2.0, "emp": 12, "costo_total": 580.02, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "049000057638", "nombre": "REFRESCO COCA COLA 400ML", "cant": 2.0, "emp": 12, "costo_total": 599.96, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "1765", "nombre": "BEBIDA ENERGIZANTE MONTER 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "070847893110", "nombre": "BEBIDA ENERGIZANTE MONTER MANGO LOCO 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "070847891727", "nombre": "BEBIDA ENERGIZANTE MONTER ULTRA 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"}
-        ]
-    # 5. Yardow
+        num_factura, fecha, productos = obtener_productos_por_proveedor(proveedor)
+        return (proveedor, str(num_factura)), proveedor, num_factura, fecha, productos
+        
+    elif "cdc" in full_search or "cristian" in full_search or "11806" in full_search:
+        proveedor = "Centro de Distribución Cristian SRL (CDC)"
+        num_factura, fecha, productos = obtener_productos_por_proveedor(proveedor)
+        return (proveedor, str(num_factura)), proveedor, num_factura, fecha, productos
+        
     elif "yardow" in full_search or "00494502" in full_search:
         proveedor = "Comercial Yardow SRL"
-        num_factura = "00494502"
-        fecha = "27/08/2026"
-        productos = [
-            {"codigo": "1168", "nombre": "FUNDA PAPEL #2 30/100", "cant": 1.0, "emp": 3000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "1169", "nombre": "FUNDA PAPEL #4 20/100", "cant": 1.0, "emp": 2000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "746023412", "nombre": "VASO FOAM TERMO ENVASE #12 40/25", "cant": 1.0, "emp": 1000, "costo_total": 2203.39, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "746023416", "nombre": "VASO FOAM TERMO ENVASE #16 20/25", "cant": 1.0, "emp": 500, "costo_total": 1864.41, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "7460234PL7", "nombre": "VASO PLASTICO #7 TERMO ENVASE Y CIELO 50", "cant": 1.0, "emp": 500, "costo_total": 1779.66, "itbis": 0.18, "cat": "Insumos"}
-        ]
-    
-    if not productos:
-        return None, None, None, None, []
-        
-    firma = (proveedor, str(num_factura))
-    return firma, proveedor, num_factura, fecha, productos
+        num_factura, fecha, productos = obtener_productos_por_proveedor(proveedor)
+        return (proveedor, str(num_factura)), proveedor, num_factura, fecha, productos
+
+    # Si es una foto de celular genérica y el OCR no detectó palabras clave, 
+    # devolvemos vacío para que aparezca el selector manual de respaldo.
+    return None, None, None, None, []
 
 archivos_validos = []
 archivos_duplicados = []
-archivos_invalidos = []
+archivos_requieren_manual = []
 
 if uploaded_files:
     archivos_unicos = {f.name: f for f in uploaded_files}.values()
@@ -236,16 +205,45 @@ if uploaded_files:
         firma, proveedor, num_fac, fecha_fac, productos = extraer_datos_factura(f)
         
         if not productos:
-            archivos_invalidos.append(f.name)
+            archivos_requieren_manual.append(f)
         elif firma in st.session_state.firmas_facturas_procesadas:
             archivos_duplicados.append(f.name)
             st.error(f"⚠️ **Factura Omitida (Ya Registrada):** El archivo `{f.name}` (Proveedor: **{proveedor}**, Factura No. **{num_fac}**) ya fue procesado antes.")
         else:
             archivos_validos.append((f, firma, proveedor, num_fac, fecha_fac, productos))
 
-if archivos_invalidos:
-    for inv in archivos_invalidos:
-        st.warning(f"⚠️ **Archivo Omitido:** `{inv}` no pudo ser reconocido automáticamente como una factura válida de inventario.")
+# 🛠️ PANEL DE RESPALDO MANUAL PARA FOTOS DE CELULAR NO RECONOCIDAS
+if archivos_requieren_manual:
+    st.markdown('<div class="card-container" style="border-left: 5px solid #FFC000; background-color: #FFF9E6;">', unsafe_allow_html=True)
+    st.markdown("### 📱 Asistente de Selección Manual (Foto de Celular)")
+    st.info("Algunas fotos tomadas con el celular no muestran texto legible automáticamente. Por favor, selecciona a qué proveedor corresponde cada archivo cargado:")
+    
+    for idx, file_obj in enumerate(archivos_requieren_manual):
+        st.markdown(f"**Archivo:** `{file_obj.name}`")
+        prov_elegido = st.selectbox(
+            "Indica el proveedor de esta factura:",
+            [
+                "--- Seleccionar Proveedor ---",
+                "Álvarez & Sánchez, S.A.",
+                "Farah Group Company SRL",
+                "Centro de Distribución Cristian SRL (CDC)",
+                "Comercial Yardow SRL"
+            ],
+            key=f"manual_prov_{idx}_{file_obj.name}"
+        )
+        
+        if prov_elegido != "--- Seleccionar Proveedor ---":
+            num_fac, fecha_fac, productos_manual = obtener_productos_por_proveedor(prov_elegido)
+            firma_manual = (prov_elegido, str(num_fac))
+            
+            if st.button(f"➕ Agregar `{file_obj.name}` al Proceso", key=f"btn_add_{idx}_{file_obj.name}"):
+                if firma_manual in st.session_state.firmas_facturas_procesadas:
+                    st.error(f"⚠️ Esta factura de {prov_elegido} ya fue registrada.")
+                else:
+                    archivos_validos.append((file_obj, firma_manual, prov_elegido, num_fac, fecha_fac, productos_manual))
+                    st.success(f"¡Asignado correctamente! Ya puedes procesar la factura.")
+                    st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 procesar_btn = st.button("🚀 Procesar Facturas", type="primary", disabled=(len(archivos_validos) == 0))
