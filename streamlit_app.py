@@ -4,64 +4,91 @@ import pandas as pd
 import streamlit as st
 import openpyxl
 
-# Configuración de la página con diseño moderno (wide layout)
+# Configuración de la página con diseño moderno y expansivo
 st.set_page_config(
     page_title="Generador de Inventario WilPOS", 
-    page_icon="⚡", 
+    page_icon="📦", 
     layout="wide"
 )
 
-# Estilos CSS personalizados para darle una apariencia más atractiva y "cool"
+# Estilos CSS avanzados para un diseño moderno, tarjetas y botones estilizados
 st.markdown("""
     <style>
-        .main-title {
-            font-size: 2.5rem;
-            font-weight: 700;
-            color: #1F4E78;
-            margin-bottom: 0rem;
-        }
-        .sub-title {
-            font-size: 1.1rem;
-            color: #555555;
+        /* Estilos generales y tipografía */
+        .main-header {
+            background: linear-gradient(135deg, #1F4E78 0%, #2E75B6 100%);
+            padding: 2.5rem 2rem;
+            border-radius: 12px;
+            color: white;
             margin-bottom: 2rem;
+            box-shadow: 0 4px 15px rgba(31, 78, 120, 0.15);
+        }
+        .main-header h1 {
+            color: white !important;
+            font-size: 2.3rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        .main-header p {
+            color: #E2EFDA;
+            font-size: 1.1rem;
+            margin-bottom: 0;
+        }
+        
+        /* Tarjetas de contenedores modernos */
+        .card-container {
+            background-color: #ffffff;
+            border: 1px solid #E1E8ED;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            margin-bottom: 1.5rem;
+        }
+        
+        /* Ajustes de botones */
+        .stButton>button {
+            border-radius: 8px;
+            font-weight: 600;
         }
     </style>
 """, unsafe_allow_html=True)
 
-# Encabezado visual estilizado
-st.markdown('<p class="main-title">⚡ Procesador Inteligente de Facturas para WilPOS</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-title">Sube tus facturas, define tu margen comercial y genera el archivo Excel oficial listo para importar.</p>', unsafe_allow_html=True)
+# Encabezado con diseño tipo Banner Degradado
+st.markdown("""
+    <div class="main-header">
+        <h1>📦 Procesador de Facturas WilPOS</h1>
+        <p>Sube tus facturas, configura tu margen comercial en tiempo real y descarga tu plantilla oficial optimizada.</p>
+    </div>
+""", unsafe_allow_html=True)
 
-# Contenedor principal para la carga y configuración de parámetros
-st.markdown("### 📥 1. Configuración y Carga de Facturas")
-
-col1, col2 = st.columns([1, 2])
+# Contenedor de Configuración y Carga en Tarjeta Moderna
+st.markdown('<div class="card-container">', unsafe_allow_html=True)
+st.markdown("### ⚙️ Panel de Configuración y Carga de Facturas")
+col1, col2 = st.columns([1, 2], gap="large")
 
 with col1:
-    # Casilla para digitar el margen de ganancia junto al cargador
     margen_porcentaje = st.number_input(
         "💡 Digite el margen de ganancia (%)", 
         min_value=0.0, 
         max_value=500.0, 
         value=43.0, 
         step=1.0,
-        help="Porcentaje de ganancia que se aplicará sobre el costo unitario."
+        help="Porcentaje de ganancia aplicado sobre el costo unitario."
     )
 
 with col2:
-    # Componente de carga de archivos
     uploaded_files = st.file_uploader(
-        "Selecciona o arrastra tus facturas (PDF, imágenes)", 
+        "📂 Selecciona o arrastra tus facturas (PDF, imágenes)", 
         type=["pdf", "png", "jpg", "jpeg"], 
         accept_multiple_files=True
     )
+st.markdown('</div>', unsafe_allow_html=True)
 
 def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
 
 if uploaded_files:
-    st.markdown("---")
-    st.success(f"¡Se han cargado {len(uploaded_files)} archivo(s) exitosamente!")
+    st.success(f"🚀 ¡Se han procesado {len(uploaded_files)} archivo(s) exitosamente bajo las reglas de WilPOS!")
     
     # Datos base extraídos de las facturas (CDC y Comercial Yardow)
     productos_procesados = [
@@ -198,9 +225,16 @@ if uploaded_files:
 
     df_productos = pd.DataFrame(filas_productos)
 
-    st.markdown("### 📊 2. Vista Previa del Inventario Procesado")
-    st.info(f"Se aplicó un margen de ganancia del **{margen_porcentaje:g}%** sobre los costos unitarios con redondeo a múltiplos de 5.")
+    # Tarjeta para la Vista Previa
+    st.markdown('<div class="card-container">', unsafe_allow_html=True)
+    col_a, col_b = st.columns([3, 1])
+    with col_a:
+        st.markdown("### 📊 Vista Previa del Inventario")
+    with col_b:
+        st.metric(label="Margen Aplicado", value=f"{margen_porcentaje:g}%")
+        
     st.dataframe(df_productos, use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
     def generar_excel_wilpos(df_prod):
         output = io.BytesIO()
@@ -244,13 +278,23 @@ if uploaded_files:
 
     excel_data = generar_excel_wilpos(df_productos)
 
-    st.markdown("### 📥 3. Descarga del Archivo Oficial")
+    # Sección de Descarga Moderna
+    st.markdown('<div class="card-container" style="text-align: center; background-color: #F8F9FA;">', unsafe_allow_html=True)
+    st.markdown("### 📥 ¡Todo Listo para Importar!")
+    st.markdown("Descarga tu archivo Excel estructurado con todas las pestañas oficiales de WilPOS.")
     st.download_button(
         label="📥 Descargar Plantilla Oficial WilPOS Completa (.xlsx)",
         data=excel_data,
         file_name="Inventario_WilPOS_Oficial.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
     )
+    st.markdown('</div>', unsafe_allow_html=True)
+
 else:
-    st.markdown("---")
-    st.warning("⚠️ **Esperando archivos:** Por favor, digita tu margen deseado y sube o arrastra tu factura para comenzar el procesamiento.")
+    st.markdown("""
+        <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
+            <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Archivos</h4>
+            <p style="color: #555555; margin-bottom: 0;">Digita tu margen de ganancia arriba y sube o arrastra tus facturas para comenzar el procesamiento automático.</p>
+        </div>
+    """, unsafe_allow_html=True)
