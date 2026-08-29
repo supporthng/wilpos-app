@@ -50,21 +50,36 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Botón para limpiar memoria en la barra lateral
-with st.sidebar:
-    st.markdown("### ⚙️ Opciones de Sistema")
-    if st.button("🗑️ Limpiar Memoria y Reiniciar", type="secondary"):
+# Inicializar estados de la sesión de forma segura
+if "inventario_acumulado" not in st.session_state:
+    st.session_state.inventario_acumulado = {}
+if "firmas_facturas_procesadas" not in st.session_state:
+    st.session_state.firmas_facturas_procesadas = set()
+if "margen_usado" not in st.session_state:
+    st.session_state.margen_usado = 25.0
+if "detalle_facturas_procesadas" not in st.session_state:
+    st.session_state.detalle_facturas_procesadas = {}
+
+# Cabecera con título a la izquierda y botón de reinicio a la derecha
+col_head1, col_head2 = st.columns([3, 1], gap="medium")
+
+with col_head1:
+    st.markdown("""
+        <div class="main-header" style="margin-bottom: 0rem;">
+            <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
+            <p>Control automático de proveedores, validación de facturas duplicadas y artículos consolidados.</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+with col_head2:
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("🗑️ Limpiar Memoria y Reiniciar", type="secondary", use_container_width=True):
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.success("¡Memoria limpiada correctamente!")
         st.rerun()
 
-st.markdown("""
-    <div class="main-header">
-        <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Control automático de proveedores, validación de facturas duplicadas y artículos consolidados sin repetición.</p>
-    </div>
-""", unsafe_allow_html=True)
+st.markdown("<br>", unsafe_allow_html=True)
 
 st.markdown('<div class="card-container">', unsafe_allow_html=True)
 st.markdown("### ⚙️ Panel de Configuración y Carga de Facturas")
@@ -91,16 +106,6 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
-
-# Inicializar estados de la sesión de forma segura
-if "inventario_acumulado" not in st.session_state:
-    st.session_state.inventario_acumulado = {}
-if "firmas_facturas_procesadas" not in st.session_state:
-    st.session_state.firmas_facturas_procesadas = set()
-if "margen_usado" not in st.session_state:
-    st.session_state.margen_usado = 25.0
-if "detalle_facturas_procesadas" not in st.session_state:
-    st.session_state.detalle_facturas_procesadas = {}
 
 def extraer_datos_factura(uploaded_file):
     file_name = uploaded_file.name.lower()
@@ -221,7 +226,6 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                     "cantidad_articulos": len(productos_en_archivo)
                 }
                 
-                # Validación de duplicados de artículos: Agrupa y acumula por código de barra único
                 for p in productos_en_archivo:
                     codigo = str(p["codigo"]).replace("-", "").strip()
                     cantidad_comprada_unidades = p["cant"] * p["emp"]
