@@ -50,8 +50,8 @@ col_head1, col_head2 = st.columns([3, 1], gap="medium")
 with col_head1:
     st.markdown("""
         <div class="main-header" style="margin-bottom: 0rem;">
-            <h1>📦 Procesador WilPOS Universal (Tablas y Tickets)</h1>
-            <p>Compatible con facturas tabulares de Álvarez & Sánchez y tickets (Margen 35%).</p>
+            <h1>📦 Procesador WilPOS (Nombres Limpios)</h1>
+            <p>Filtro avanzado de eliminación de ruido OCR (Margen 35%).</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -111,7 +111,15 @@ def limpiar_monto(texto_monto):
     except Exception:
         return 0.0
 
-def procesar_factura_universal(file):
+def limpiar_nombre_producto(nombre_sucio):
+    """Elimina basura OCR común al inicio y símbolos extraños"""
+    # Quitar patrones típicos de ruido OCR al inicio como 'NX X', 'X "', '!#', etc.
+    limpio = re.sub(r'^([nN][xX]\s*|[xX]\s*|[\'\"!\#\*\-\s])+','', nombre_sucio)
+    # Limpiar espacios dobles
+    limpio = re.sub(r'\s+', ' ', limpio).strip()
+    return limpio.upper()
+
+def procesar_factura_limpia(file):
     file_name = file.name.lower()
     extracted_text = ""
     
@@ -157,7 +165,6 @@ def procesar_factura_universal(file):
     while i < len(lines):
         line = lines[i]
         
-        # Detección flexible: Soporta líneas con 'x' (tickets) o filas tabulares que inician con cantidad numérica (ej: "1 CAJA" o "1 ")
         es_fila_producto = False
         cant = 1.0
         
@@ -169,7 +176,6 @@ def procesar_factura_universal(file):
             except ValueError:
                 cant = 1.0
         else:
-            # Detectar formato tabular de facturas (ej: la línea empieza con un número de cantidad entero del 1 al 99)
             match_tabla = re.match(r'^(\d{1,2})\b', line)
             if match_tabla and not any(w in line.upper() for w in ignorar) and len(re.findall(r'[\d,\.]+', line)) >= 2:
                 es_fila_producto = True
@@ -190,12 +196,10 @@ def procesar_factura_universal(file):
             codigo = f"PROD-{i}"
             emp = 12
             
-            # Si la línea misma tiene texto descriptivo (como en facturas tabulares), lo aprovechamos
             clean_self = re.sub(r'^\d+\s*(?:CAJA|UNIDAD|PAQUETE)?\s*|\d{1,3}(?:[,\.]\d{3})*(?:[,\.]\d{2})?|[;\\:]', '', line).strip()
             if len(clean_self) > 3 and not any(w in clean_self.upper() for w in ignorar):
                 nombre_partes.append(clean_self.upper())
 
-            # Escanear líneas cercanas para extraer descripción o código
             for j in range(max(0, i - 2), min(len(lines), i + 3)):
                 if j == i:
                     continue
@@ -222,8 +226,10 @@ def procesar_factura_universal(file):
                 if len(clean_l) > 2 and not clean_l.isdigit() and clean_l.upper() not in nombre_partes:
                     nombre_partes.append(clean_l.upper())
 
-            nombre = " ".join(nombre_partes).strip()
-            if not nombre or any(w in nombre.upper() for w in ignorar):
+            nombre_crudo = " ".join(nombre_partes).strip()
+            nombre = limpiar_nombre_producto(nombre_crudo)
+            
+            if not nombre or len(nombre) < 3 or any(w in nombre for w in ignorar):
                 nombre = f"PRODUCTO {codigo}"
 
             cat = "General"
@@ -251,7 +257,7 @@ def procesar_factura_universal(file):
     return proveedor, num_factura, fecha, productos
 
 if uploaded_file:
-    prov, num_fac, fecha_fac, prods_extraidos = procesar_factura_universal(uploaded_file)
+    prov, num_fac, fecha_fac, prods_extraidos = procesar_factura_limpia(uploaded_file)
     st.session_state.inventario_activo = prods_extraidos
     st.session_state.detalle_factura_activa = {
         "proveedor": prov, "num_factura": num_fac, "fecha": fecha_fac, "cantidad_articulos": len(prods_extraidos)
