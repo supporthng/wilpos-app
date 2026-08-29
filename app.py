@@ -153,7 +153,7 @@ if uploaded_files:
             "Precio Venta": precio_venta,
             "Costo": round(costo_unitario, 4),
             "Stock": stock_actual,
-            "Stock Mínimo": 25,  # Stock mínimo configurado en 25
+            "Stock Mínimo": 25,
             "ITBIS": p["itbis_val"],
             "Unidad Medida": "unidad",
             "Venta Granel": p["venta_granel"],
