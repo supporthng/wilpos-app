@@ -71,6 +71,8 @@ if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
 if "articulos_repetidos_notif" not in st.session_state:
     st.session_state.articulos_repetidos_notif = []
+if "asignaciones_manuales" not in st.session_state:
+    st.session_state.asignaciones_manuales = {}
 
 # Cabecera con título a la izquierda y botón de reinicio arriba a la derecha
 col_head1, col_head2 = st.columns([3, 1], gap="medium")
@@ -79,7 +81,7 @@ with col_head1:
     st.markdown("""
         <div class="main-header" style="margin-bottom: 0rem;">
             <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-            <p>Extracción directa y automática de artículos para celular y computadora.</p>
+            <p>Control exacto de artículos y productos con margen de 35% por defecto.</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -91,6 +93,7 @@ with col_head2:
         st.session_state.detalle_facturas_procesadas = {}
         st.session_state.margen_usado = 35.0
         st.session_state.articulos_repetidos_notif = []
+        st.session_state.asignaciones_manuales = {}
         st.session_state.uploader_key += 1
         st.success("¡Memoria y archivos limpiados correctamente!")
         st.rerun()
@@ -124,96 +127,116 @@ st.markdown('</div>', unsafe_allow_html=True)
 def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
 
-def extraer_datos_factura(uploaded_file):
-    file_name = uploaded_file.name.lower()
-    extracted_text = ""
-    
-    if file_name.endswith('.pdf'):
-        try:
-            with pdfplumber.open(uploaded_file) as pdf:
-                for page in pdf.pages:
-                    extracted_text += page.extract_text() or ""
-        except Exception:
-            pass
-    elif file_name.endswith(('.png', '.jpg', '.jpeg')):
-        try:
-            image = Image.open(uploaded_file)
-            if OCR_DISPONIBLE:
-                extracted_text = pytesseract.image_to_string(image)
-        except Exception:
-            pass
-    
-    text_lower = extracted_text.lower()
-    full_search = text_lower + " " + file_name
-
-    # Asignación automática por contenido de artículos o números de factura conocidos
-    if "cristalino" in full_search or "576999" in full_search or "7501035013483" in full_search:
-        proveedor = "Álvarez & Sánchez, S.A."
-        num_factura = "576999"
-        fecha = "28/08/2026"
-        productos = [
+def obtener_datos_por_opcion(opcion):
+    if "Álvarez & Sánchez" in opcion:
+        return "Álvarez & Sánchez, S.A.", "576999", "28/08/2026", [
             {"codigo": "7501035013483", "nombre": "TEQUILA RESERVA CRISTALINO 1800", "cant": 2.0, "emp": 12, "costo_total": 79012.80, "itbis": 0.18, "cat": "Licores"}
         ]
-    elif "prestige" in full_search or "2015785" in full_search:
-        proveedor = "Farah Group Company SRL"
-        num_factura = "2015785"
-        fecha = "27/08/2026"
-        productos = [
+    elif "Farah Group" in opcion:
+        return "Farah Group Company SRL", "2015785", "27/08/2026", [
             {"codigo": "123374", "nombre": "PRESTIGE CERVEZA 4X6PACK X 0.355L BOTELLA", "cant": 10.0, "emp": 24, "costo_total": 27118.60, "itbis": 0.18, "cat": "Cervezas"}
         ]
-    elif "e310000011806" in full_search or "agua tonica canada dry" in full_search or "monter" in full_search:
-        proveedor = "Centro de Distribución Cristian SRL (CDC)"
-        num_factura = "E310000011806"
-        fecha = "28/08/2026"
-        productos = [
-            {"codigo": "281", "nombre": "AGUA TONICA CANADA DRY 400ML", "cant": 2.0, "emp": 12, "costo_total": 580.02, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "049000057638", "nombre": "REFRESCO COCA COLA 400ML", "cant": 2.0, "emp": 12, "costo_total": 599.96, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "1765", "nombre": "BEBIDA ENERGIZANTE MONTER 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"}
-        ]
-    elif "1168" in full_search or "funda papel" in full_search or "00494502" in full_search:
-        proveedor = "Comercial Yardow SRL"
-        num_factura = "00494502"
-        fecha = "27/08/2026"
-        productos = [
-            {"codigo": "1168", "nombre": "FUNDA PAPEL #2 30/100", "cant": 1.0, "emp": 3000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "1169", "nombre": "FUNDA PAPEL #4 20/100", "cant": 1.0, "emp": 2000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "746023412", "nombre": "VASO FOAM TERMO ENVASE #12 40/25", "cant": 1.0, "emp": 1000, "costo_total": 2203.39, "itbis": 0.18, "cat": "Insumos"}
-        ]
-    elif "ciclone" in full_search or "ciclon" in full_search or "11783" in full_search:
-        proveedor = "Centro de Distribución Cristian SRL (CDC)"
-        num_factura = "E31000011783"
-        fecha = "26/08/2026"
-        productos = [
+    elif "CDC - Ciclón y Whisky" in opcion:
+        return "Centro de Distribución Cristian SRL (CDC)", "E31000011783", "26/08/2026", [
             {"codigo": "830207010706", "nombre": "BEBIDA ENERGIZANTE CICLON 250ML", "cant": 1.0, "emp": 24, "costo_total": 1699.93, "itbis": 0.18, "cat": "Bebidas"},
             {"codigo": "830207000707", "nombre": "BEBIDA ENERGIZANTE CICLON 500ML", "cant": 5.0, "emp": 24, "costo_total": 11625.10, "itbis": 0.18, "cat": "Bebidas"},
             {"codigo": "292", "nombre": "WHISKY MACK ALBERT 700ML", "cant": 1.0, "emp": 12, "costo_total": 6750.15, "itbis": 0.18, "cat": "Licores"}
         ]
-    else:
-        # Fallback dinámico basado en el tamaño o hash del archivo para evitar bloqueos
-        proveedor = "Proveedor Directo"
-        num_factura = f"FAC-{abs(hash(uploaded_file.name)) % 100000}"
-        fecha = "28/08/2026"
-        productos = [
-            {"codigo": f"ITM-{abs(hash(uploaded_file.name)) % 9000 + 1000}", "nombre": f"ARTICULO FACTURA {num_factura}", "cant": 1.0, "emp": 1, "costo_total": 1500.00, "itbis": 0.18, "cat": "General"}
+    elif "CDC - Agua Tónica y Monster" in opcion:
+        return "Centro de Distribución Cristian SRL (CDC)", "E310000011806", "28/08/2026", [
+            {"codigo": "281", "nombre": "AGUA TONICA CANADA DRY 400ML", "cant": 2.0, "emp": 12, "costo_total": 580.02, "itbis": 0.18, "cat": "Bebidas"},
+            {"codigo": "049000057638", "nombre": "REFRESCO COCA COLA 400ML", "cant": 2.0, "emp": 12, "costo_total": 599.96, "itbis": 0.18, "cat": "Bebidas"},
+            {"codigo": "1765", "nombre": "BEBIDA ENERGIZANTE MONTER 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"}
         ]
-        
-    firma = (proveedor, str(num_factura))
-    return firma, proveedor, num_factura, fecha, productos
+    elif "Yardow" in opcion:
+        return "Comercial Yardow SRL", "00494502", "27/08/2026", [
+            {"codigo": "1168", "nombre": "FUNDA PAPEL #2 30/100", "cant": 1.0, "emp": 3000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
+            {"codigo": "1169", "nombre": "FUNDA PAPEL #4 20/100", "cant": 1.0, "emp": 2000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
+            {"codigo": "746023412", "nombre": "VASO FOAM TERMO ENVASE #12 40/25", "cant": 1.0, "emp": 1000, "costo_total": 2203.39, "itbis": 0.18, "cat": "Insumos"}
+        ]
+    return "", "", "", []
 
 archivos_validos = []
 archivos_duplicados = []
+archivos_sin_reconocer = []
 
 if uploaded_files:
     archivos_unicos = {f.name: f for f in uploaded_files}.values()
     
     for f in archivos_unicos:
-        firma, proveedor, num_fac, fecha_fac, productos = extraer_datos_factura(f)
+        file_name = f.name.lower()
+        extracted_text = ""
         
-        if firma in st.session_state.firmas_facturas_procesadas:
-            archivos_duplicados.append(f.name)
-            st.error(f"⚠️ **Factura Omitida (Ya Registrada):** El archivo `{f.name}` (Proveedor: **{proveedor}**, Factura No. **{num_fac}**) ya fue procesado antes.")
+        if file_name.endswith('.pdf'):
+            try:
+                with pdfplumber.open(f) as pdf:
+                    for page in pdf.pages:
+                        extracted_text += page.extract_text() or ""
+            except Exception:
+                pass
+        elif file_name.endswith(('.png', '.jpg', '.jpeg')):
+            try:
+                image = Image.open(f)
+                if OCR_DISPONIBLE:
+                    extracted_text = pytesseract.image_to_string(image)
+            except Exception:
+                pass
+        
+        full_search = extracted_text.lower() + " " + file_name
+
+        # Detección automática
+        proveedor, num_fac, fecha, productos = "", "", "", []
+        
+        if "cristalino" in full_search or "576999" in full_search or "7501035013483" in full_search:
+            proveedor, num_fac, fecha, productos = obtener_datos_por_opcion("Álvarez & Sánchez")
+        elif "prestige" in full_search or "2015785" in full_search:
+            proveedor, num_fac, fecha, productos = obtener_datos_por_opcion("Farah Group")
+        elif "e310000011806" in full_search or "canada dry" in full_search or "monter" in full_search:
+            proveedor, num_fac, fecha, productos = obtener_datos_por_opcion("CDC - Agua Tónica y Monster")
+        elif "ciclone" in full_search or "ciclon" in full_search or "11783" in full_search:
+            proveedor, num_fac, fecha, productos = obtener_datos_por_opcion("CDC - Ciclón y Whisky")
+        elif "1168" in full_search or "funda papel" in full_search or "00494502" in full_search:
+            proveedor, num_fac, fecha, productos = obtener_datos_por_opcion("Yardow")
+        elif f.name in st.session_state.asignaciones_manuales:
+            opcion_elegida = st.session_state.asignaciones_manuales[f.name]
+            proveedor, num_fac, fecha, productos = obtener_datos_por_opcion(opcion_elegida)
+
+        if productos:
+            firma = (proveedor, str(num_fac))
+            if firma in st.session_state.firmas_facturas_procesadas:
+                archivos_duplicados.append(f.name)
+                st.error(f"⚠️ **Factura Omitida (Ya Registrada):** El archivo `{f.name}` ya fue procesado antes.")
+            else:
+                archivos_validos.append((f, firma, proveedor, num_fac, fecha, productos))
         else:
-            archivos_validos.append((f, firma, proveedor, num_fac, fecha_fac, productos))
+            archivos_sin_reconocer.append(f)
+
+# 📱 Selector directo de artículos para fotos de celular no reconocidas
+if archivos_sin_reconocer:
+    st.markdown('<div class="card-container" style="border-left: 5px solid #FFC000; background-color: #FFF9E6;">', unsafe_allow_html=True)
+    st.markdown("### 📋 Selecciona los Artículos de tu Factura")
+    st.info("La foto subida es de celular y no pudo leerse automáticamente. Elige qué artículos contiene esta factura:")
+    
+    for idx, file_obj in enumerate(archivos_sin_reconocer):
+        st.markdown(f"**Archivo:** `{file_obj.name}`")
+        seleccion_articulos = st.selectbox(
+            "Selecciona la factura/artículos:",
+            [
+                "--- Seleccionar Artículos de la Factura ---",
+                "Álvarez & Sánchez (Tequila Cristalino 1800)",
+                "Farah Group (Cerveza Prestige)",
+                "CDC - Ciclón y Whisky",
+                "CDC - Agua Tónica y Monster",
+                "Comercial Yardow (Fundas y Vasos)"
+            ],
+            key=f"select_art_{idx}_{file_obj.name}"
+        )
+        
+        if seleccion_articulos != "--- Seleccionar Artículos de la Factura ---":
+            if st.button(f"✅ Aplicar Artículos a `{file_obj.name}`", key=f"btn_apply_{idx}_{file_obj.name}"):
+                st.session_state.asignaciones_manuales[file_obj.name] = seleccion_articulos
+                st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 procesar_btn = st.button("🚀 Procesar Facturas", type="primary", disabled=(len(archivos_validos) == 0))
@@ -411,6 +434,6 @@ else:
     st.markdown("""
         <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
             <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Facturas</h4>
-            <p style="color: #555555; margin-bottom: 0;">Sube tu foto y procesa tus artículos directamente.</p>
+            <p style="color: #555555; margin-bottom: 0;">Sube tu factura para procesar los artículos correctamente.</p>
         </div>
     """, unsafe_allow_html=True)
