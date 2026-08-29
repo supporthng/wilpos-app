@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Control de firmas independientes y acumulación progresiva segura.</p>
+        <p>Control estricto de duplicados y acumulación progresiva segura.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -105,7 +105,6 @@ def extraer_datos_factura(uploaded_file):
         except Exception:
             pass
     
-    # Identificar si es la factura PDF de CDC o una imagen de Comercial Yardow
     if "cdc" in extracted_text.lower() or "cristian" in extracted_text.lower() or "cdc" in file_name:
         proveedor = "Centro de Distribución Cristian SRL"
         num_factura = "E310000011806"
@@ -120,7 +119,6 @@ def extraer_datos_factura(uploaded_file):
         ]
     else:
         proveedor = "Comercial Yardow SRL"
-        # Usamos el nombre único del archivo como identificador para que cada imagen sea tratada como una factura distinta
         num_factura = uploaded_file.name
         fecha = "27/08/2026"
         cliente = "ROYAL LIQUOR"
@@ -145,12 +143,13 @@ if uploaded_files:
         firma, productos = extraer_datos_factura(f)
         if firma in st.session_state.firmas_facturas_procesadas:
             tiene_duplicados = True
-            st.error(f"🚨 **Factura Ya Registrada:** El archivo `{f.name}` ya fue procesado anteriormente y no se volverá a incluir.")
+            st.error(f"🚨 **Factura Ya Registrada:** El archivo `{f.name}` ya fue procesado anteriormente. Por favor, elimínalo del recuadro superior haciendo clic en la **'X'** para poder continuar.")
         else:
             archivos_validos.append((f, firma, productos))
 
 st.markdown("<br>", unsafe_allow_html=True)
-procesar_btn = st.button("🚀 Procesar Facturas", type="primary", disabled=(len(uploaded_files) == 0 or tiene_duplicados))
+# El botón se deshabilita si hay archivos duplicados O si no hay archivos válidos nuevos
+procesar_btn = st.button("🚀 Procesar Facturas", type="primary", disabled=(len(uploaded_files) == 0 or tiene_duplicados or len(archivos_validos) == 0))
 
 @st.dialog("📋 Confirmación de Procesamiento")
 def modal_confirmacion(validas, margen):
