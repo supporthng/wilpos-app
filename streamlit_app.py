@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Sube tus facturas, configura tu margen de ganancia y procesa de forma segura tu inventario consolidado.</p>
+        <p>Sube tus facturas, configura tu margen y confirma el procesamiento de manera segura.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -80,38 +80,47 @@ with col2:
     )
 
 st.markdown("<br>", unsafe_allow_html=True)
-procesar_btn = st.button("🚀 Procesar Facturas", type="primary")
+abrir_modal = st.button("🚀 Procesar Facturas", type="primary")
 st.markdown('</div>', unsafe_allow_html=True)
 
 def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
 
-# Manejo de estado para mantener la notificación y los datos visibles
+# Inicializar estados de la sesión
 if "procesado" not in st.session_state:
     st.session_state.procesado = False
     st.session_state.margen_usado = 25.0
 
-if procesar_btn:
+# Definición de la ventana emergente (Modal)
+@st.dialog("📋 Confirmación de Procesamiento")
+def modal_confirmacion(num_facturas, margen):
+    st.markdown(f"Has seleccionado **{num_facturas} factura(s)** para consolidar.")
+    st.markdown(f"Se aplicará un margen de ganancia del **{margen:g}%** sobre los costos unitarios.")
+    st.markdown("¿Deseas confirmar y procesar el inventario ahora?")
+    
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("✅ Confirmar", type="primary"):
+            st.session_state.procesado = True
+            st.session_state.margen_usado = margen
+            st.rerun()
+    with col_btn2:
+        if st.button("❌ Cancelar"):
+            st.session_state.procesado = False
+            st.rerun()
+
+# Si hace clic en procesar, validamos y abrimos la ventana modal
+if abrir_modal:
     if not uploaded_files:
         st.warning("⚠️ Por favor, sube al menos una factura antes de procesar.")
-        st.session_state.procesado = False
     elif margen_porcentaje <= 15.0:
-        st.error("🚨 **Atención:** El margen de ganancia debe ser **mayor al 15%** para continuar. Por favor, ajusta el valor en la casilla de la izquierda.")
-        st.session_state.procesado = False
+        st.error("🚨 **Atención:** El margen de ganancia debe ser **mayor al 15%** para continuar. Por favor, ajusta el valor.")
     else:
-        st.session_state.procesado = True
-        st.session_state.margen_usado = margen_porcentaje
+        # Abrir la ventana emergente pasando la cantidad de facturas y el margen
+        modal_confirmacion(len(uploaded_files), margen_porcentaje)
 
-# Si ya fue procesado correctamente, mostramos la notificación fija y los resultados
+# Si el usuario confirmó en la ventana modal, generamos la tabla y el Excel
 if st.session_state.procesado:
-    # Notificación persistente con el margen confirmado
-    st.markdown(f"""
-        <div style="background-color: #D9EAD3; padding: 1rem; border-radius: 8px; border-left: 6px solid #38761D; margin-bottom: 1.5rem;">
-            <h4 style="color: #274E13; margin: 0 0 5px 0;">✅ ¡Facturas Procesadas con Éxito!</h4>
-            <p style="color: #274E13; margin: 0;">Se ha aplicado y confirmado un margen de ganancia del <strong>{st.session_state.margen_usado:g}%</strong> sobre los costos unitarios.</p>
-        </div>
-    """, unsafe_allow_html=True)
-
     productos_consolidados = []
     
     if uploaded_files:
@@ -180,11 +189,23 @@ if st.session_state.procesado:
         })
 
     df_productos = pd.DataFrame(filas_productos)
+    total_facturas = len(uploaded_files) if uploaded_files else 0
+    total_productos = len(df_productos)
+
+    # Notificación de éxito fija con los detalles
+    st.markdown(f"""
+        <div style="background-color: #D9EAD3; padding: 1.2rem; border-radius: 8px; border-left: 6px solid #38761D; margin-bottom: 1.5rem;">
+            <h4 style="color: #274E13; margin: 0 0 8px 0;">✅ ¡Proceso Confirmado con Éxito!</h4>
+            <p style="color: #274E13; margin: 0 0 4px 0;">📂 <strong>Facturas procesadas:</strong> {total_facturas}</p>
+            <p style="color: #274E13; margin: 0 0 4px 0;">📦 <strong>Productos extraídos:</strong> {total_productos}</p>
+            <p style="color: #274E13; margin: 0;">📊 <strong>Margen aplicado:</strong> {st.session_state.margen_usado:g}%</p>
+        </div>
+    """, unsafe_allow_html=True)
 
     st.markdown('<div class="card-container">', unsafe_allow_html=True)
     col_a, col_b = st.columns([3, 1])
     with col_a:
-        st.markdown(f"### 📊 Vista Previa Consolidada ({len(df_productos)} productos en total)")
+        st.markdown(f"### 📊 Vista Previa Consolidada ({total_productos} productos en total)")
     with col_b:
         st.metric(label="Margen Aplicado", value=f"{st.session_state.margen_usado:g}%")
         
@@ -249,6 +270,6 @@ else:
     st.markdown("""
         <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
             <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Acción</h4>
-            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas, verifica que tu margen (por defecto 25%) sea el deseado y haz clic en <strong>Procesar Facturas</strong> para confirmar y generar el inventario.</p>
+            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas, verifica tu margen (por defecto 25%) y haz clic en <strong>Procesar Facturas</strong> para abrir la ventana de confirmación.</p>
         </div>
     """, unsafe_allow_html=True)
