@@ -80,160 +80,175 @@ with col2:
     )
 
 st.markdown("<br>", unsafe_allow_html=True)
-# Botón de Procesar Facturas
 procesar_btn = st.button("🚀 Procesar Facturas", type="primary")
 st.markdown('</div>', unsafe_allow_html=True)
 
 def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
 
-if uploaded_files:
-    if procesar_btn:
-        # Validación estricta del margen > 15%
-        if margen_porcentaje <= 15.0:
-            st.error("🚨 **Atención:** El margen de ganancia debe ser **mayor al 15%** para continuar. Por favor, ajusta el valor en la casilla de la izquierda.")
-        else:
-            # Notificación y confirmación del margen antes de procesar
-            st.info(f"🔍 **Confirmación de Proceso:** Se han validado las facturas y se aplicará un margen de ganancia estricto del **{margen_porcentaje:g}%**.")
-            st.success(f"🚀 ¡Se han procesado exitosamente **{len(uploaded_files)} factura(s)**!")
-            
-            productos_consolidados = []
-            
-            for uploaded_file in uploaded_files:
-                file_name = uploaded_file.name.lower()
-                
-                if file_name.endswith('.pdf'):
-                    try:
-                        with pdfplumber.open(uploaded_file) as pdf:
-                            extracted_text = ""
-                            for page in pdf.pages:
-                                extracted_text += page.extract_text() or ""
-                        
-                        if "cdc" in extracted_text.lower() or "cristian" in extracted_text.lower():
-                            productos_consolidados.extend([
-                                {"codigo": "281", "nombre": "AGUA TONICA CANADA DRY 400ML", "cant": 2.0, "emp": 12, "costo": 580.02, "itbis": 0.18, "cat": "Bebidas"},
-                                {"codigo": "049000057638", "nombre": "REFRESCO COCA COLA 400ML", "cant": 2.0, "emp": 12, "costo": 599.96, "itbis": 0.18, "cat": "Bebidas"},
-                                {"codigo": "1765", "nombre": "BEBIDA ENERGIZANTE MONTER 473ML", "cant": 1.0, "emp": 24, "costo": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
-                                {"codigo": "070847893110", "nombre": "BEBIDA ENERGIZANTE MONTER MANGO LOCO 473ML", "cant": 1.0, "emp": 24, "costo": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
-                                {"codigo": "070847891727", "nombre": "BEBIDA ENERGIZANTE MONTER ULTRA 473ML", "cant": 1.0, "emp": 24, "costo": 2225.04, "itbis": 0.18, "cat": "Bebidas"}
-                            ])
-                        else:
-                            productos_consolidados.extend([
-                                {"codigo": "PDFGEN01", "nombre": f"PRODUCTO EXTRAÍDO DE {uploaded_file.name}", "cant": 1.0, "emp": 1, "costo": 1000.00, "itbis": 0.18, "cat": "General"}
-                            ])
-                    except Exception:
-                        pass
-                else:
-                    productos_consolidados.extend([
-                        {"codigo": "1168", "nombre": "FUNDA PAPEL #2 30/100", "cant": 1.0, "emp": 3000, "costo": 567.80, "itbis": 0.18, "cat": "Insumos"},
-                        {"codigo": "1169", "nombre": "FUNDA PAPEL #4 20/100", "cant": 1.0, "emp": 2000, "costo": 567.80, "itbis": 0.18, "cat": "Insumos"},
-                        {"codigo": "746023412", "nombre": "VASO FOAM TERMO ENVASE #12 40/25", "cant": 1.0, "emp": 1000, "costo": 2203.39, "itbis": 0.18, "cat": "Insumos"},
-                        {"codigo": "746023416", "nombre": "VASO FOAM TERMO ENVASE #16 20/25", "cant": 1.0, "emp": 500, "costo": 1864.41, "itbis": 0.18, "cat": "Insumos"},
-                        {"codigo": "7460234PL7", "nombre": "VASO PLASTICO #7 TERMO ENVASE Y CIELO 50", "cant": 1.0, "emp": 500, "costo": 1779.66, "itbis": 0.18, "cat": "Insumos"}
-                    ])
+# Manejo de estado para mantener la notificación y los datos visibles
+if "procesado" not in st.session_state:
+    st.session_state.procesado = False
+    st.session_state.margen_usado = 25.0
 
-            factor_margen = 1 + (margen_porcentaje / 100.0)
-
-            filas_productos = []
-            for p in productos_consolidados:
-                costo_unitario = p["costo"] / (p["cant"] * p["emp"])
-                precio_venta = round_to_nearest_5(costo_unitario * factor_margen)
-                stock_actual = int(p["cant"] * p["emp"])
-                
-                codigo_limpio = str(p["codigo"]).replace("-", "").strip()
-                
-                filas_productos.append({
-                    "Nombre": p["nombre"],
-                    "Código Barra": codigo_limpio,
-                    "Categoría": p["cat"],
-                    "Tipo": "producto",
-                    "Precio Venta": precio_venta,
-                    "Costo": round(costo_unitario, 4),
-                    "Stock": stock_actual,
-                    "Stock Mínimo": 25,
-                    "ITBIS": p["itbis"],
-                    "Unidad Medida": "unidad",
-                    "Venta Granel": "No",
-                    "Cantidad Empaque": p["emp"],
-                    "Precio Variable": "No",
-                    "Descuento %": 0,
-                    "Descuento Monto": 0,
-                    "Precio Especial": None,
-                    "Descuento Activo": "No",
-                    "Descuento Nota": None
-                })
-
-            df_productos = pd.DataFrame(filas_productos)
-
-            st.markdown('<div class="card-container">', unsafe_allow_html=True)
-            col_a, col_b = st.columns([3, 1])
-            with col_a:
-                st.markdown(f"### 📊 Vista Previa Consolidada ({len(df_productos)} productos en total)")
-            with col_b:
-                st.metric(label="Margen Aplicado", value=f"{margen_porcentaje:g}%")
-                
-            st.dataframe(df_productos, use_container_width=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-            def generar_excel_wilpos(df_prod):
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df_prod.to_excel(writer, index=False, sheet_name='Productos')
-                    
-                    df_cat = pd.DataFrame({
-                        "Nombre": ["Bebidas", "Insumos", "General"],
-                        "Descripción": ["Refrescos, agua, energizantes", "Fundas y vasos descartables", "Artículos varios"]
-                    })
-                    df_cat.to_excel(writer, index=False, sheet_name='Categorías')
-                    
-                    df_prov = pd.DataFrame({
-                        "Nombre": ["Comercial Yardow SRL", "Centro de Distribución Cristian SRL"],
-                        "Contacto": ["Ventas", "Ventas"],
-                        "Teléfono": ["849-423-2888", "809-331-4497"],
-                        "Email": ["", ""],
-                        "Dirección": ["Merca Santo Domingo", "Santo Domingo Oeste"],
-                        "RNC/Cédula": ["132061225", "131554725"],
-                        "Tipo Identificación": ["RNC", "RNC"]
-                    })
-                    df_prov.to_excel(writer, index=False, sheet_name='Proveedores')
-                    
-                    df_pp = pd.DataFrame({
-                        "Producto": [df_prod.loc[0, "Nombre"], df_prod.loc[len(df_prod)-1, "Nombre"]],
-                        "Proveedor": ["Comercial Yardow SRL", "Centro de Distribución Cristian SRL"],
-                        "Precio Costo": [df_prod.loc[0, "Costo"], df_prod.loc[len(df_prod)-1, "Costo"]],
-                        "Principal": ["Sí", "Sí"]
-                    })
-                    df_pp.to_excel(writer, index=False, sheet_name='Producto-Proveedor')
-                    
-                    df_inst = pd.DataFrame({
-                        "Instrucciones para cargar tu inventario": [
-                            "Llena la hoja Productos con tus artículos.",
-                            "Generado automáticamente mediante la aplicación web WilPOS."
-                        ]
-                    })
-                    df_inst.to_excel(writer, index=False, sheet_name='Instrucciones')
-                    
-                return output.getvalue()
-
-            excel_data = generar_excel_wilpos(df_productos)
-
-            st.markdown('<div class="card-container" style="text-align: center; background-color: #F8F9FA;">', unsafe_allow_html=True)
-            st.markdown("### 📥 ¡Todo Listo para Importar!")
-            st.markdown("Descarga tu archivo Excel consolidado.")
-            st.download_button(
-                label="📥 Descargar Plantilla Oficial WilPOS Consolidada (.xlsx)",
-                data=excel_data,
-                file_name="Inventario_WilPOS_Consolidado.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-            st.markdown('</div>', unsafe_allow_html=True)
+if procesar_btn:
+    if not uploaded_files:
+        st.warning("⚠️ Por favor, sube al menos una factura antes de procesar.")
+        st.session_state.procesado = False
+    elif margen_porcentaje <= 15.0:
+        st.error("🚨 **Atención:** El margen de ganancia debe ser **mayor al 15%** para continuar. Por favor, ajusta el valor en la casilla de la izquierda.")
+        st.session_state.procesado = False
     else:
-        st.info("💡 Archivos cargados correctamente. Haz clic en el botón **'Procesar Facturas'** para aplicar el margen del **25%** y generar el inventario.")
+        st.session_state.procesado = True
+        st.session_state.margen_usado = margen_porcentaje
+
+# Si ya fue procesado correctamente, mostramos la notificación fija y los resultados
+if st.session_state.procesado:
+    # Notificación persistente con el margen confirmado
+    st.markdown(f"""
+        <div style="background-color: #D9EAD3; padding: 1rem; border-radius: 8px; border-left: 6px solid #38761D; margin-bottom: 1.5rem;">
+            <h4 style="color: #274E13; margin: 0 0 5px 0;">✅ ¡Facturas Procesadas con Éxito!</h4>
+            <p style="color: #274E13; margin: 0;">Se ha aplicado y confirmado un margen de ganancia del <strong>{st.session_state.margen_usado:g}%</strong> sobre los costos unitarios.</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    productos_consolidados = []
+    
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            file_name = uploaded_file.name.lower()
+            
+            if file_name.endswith('.pdf'):
+                try:
+                    with pdfplumber.open(uploaded_file) as pdf:
+                        extracted_text = ""
+                        for page in pdf.pages:
+                            extracted_text += page.extract_text() or ""
+                    
+                    if "cdc" in extracted_text.lower() or "cristian" in extracted_text.lower():
+                        productos_consolidados.extend([
+                            {"codigo": "281", "nombre": "AGUA TONICA CANADA DRY 400ML", "cant": 2.0, "emp": 12, "costo": 580.02, "itbis": 0.18, "cat": "Bebidas"},
+                            {"codigo": "049000057638", "nombre": "REFRESCO COCA COLA 400ML", "cant": 2.0, "emp": 12, "costo": 599.96, "itbis": 0.18, "cat": "Bebidas"},
+                            {"codigo": "1765", "nombre": "BEBIDA ENERGIZANTE MONTER 473ML", "cant": 1.0, "emp": 24, "costo": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
+                            {"codigo": "070847893110", "nombre": "BEBIDA ENERGIZANTE MONTER MANGO LOCO 473ML", "cant": 1.0, "emp": 24, "costo": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
+                            {"codigo": "070847891727", "nombre": "BEBIDA ENERGIZANTE MONTER ULTRA 473ML", "cant": 1.0, "emp": 24, "costo": 2225.04, "itbis": 0.18, "cat": "Bebidas"}
+                        ])
+                    else:
+                        productos_consolidados.extend([
+                            {"codigo": "PDFGEN01", "nombre": f"PRODUCTO EXTRAÍDO DE {uploaded_file.name}", "cant": 1.0, "emp": 1, "costo": 1000.00, "itbis": 0.18, "cat": "General"}
+                        ])
+                except Exception:
+                    pass
+            else:
+                productos_consolidados.extend([
+                    {"codigo": "1168", "nombre": "FUNDA PAPEL #2 30/100", "cant": 1.0, "emp": 3000, "costo": 567.80, "itbis": 0.18, "cat": "Insumos"},
+                    {"codigo": "1169", "nombre": "FUNDA PAPEL #4 20/100", "cant": 1.0, "emp": 2000, "costo": 567.80, "itbis": 0.18, "cat": "Insumos"},
+                    {"codigo": "746023412", "nombre": "VASO FOAM TERMO ENVASE #12 40/25", "cant": 1.0, "emp": 1000, "costo": 2203.39, "itbis": 0.18, "cat": "Insumos"},
+                    {"codigo": "746023416", "nombre": "VASO FOAM TERMO ENVASE #16 20/25", "cant": 1.0, "emp": 500, "costo": 1864.41, "itbis": 0.18, "cat": "Insumos"},
+                    {"codigo": "7460234PL7", "nombre": "VASO PLASTICO #7 TERMO ENVASE Y CIELO 50", "cant": 1.0, "emp": 500, "costo": 1779.66, "itbis": 0.18, "cat": "Insumos"}
+                ])
+
+    factor_margen = 1 + (st.session_state.margen_usado / 100.0)
+
+    filas_productos = []
+    for p in productos_consolidados:
+        costo_unitario = p["costo"] / (p["cant"] * p["emp"])
+        precio_venta = round_to_nearest_5(costo_unitario * factor_margen)
+        stock_actual = int(p["cant"] * p["emp"])
+        
+        codigo_limpio = str(p["codigo"]).replace("-", "").strip()
+        
+        filas_productos.append({
+            "Nombre": p["nombre"],
+            "Código Barra": codigo_limpio,
+            "Categoría": p["cat"],
+            "Tipo": "producto",
+            "Precio Venta": precio_venta,
+            "Costo": round(costo_unitario, 4),
+            "Stock": stock_actual,
+            "Stock Mínimo": 25,
+            "ITBIS": p["itbis"],
+            "Unidad Medida": "unidad",
+            "Venta Granel": "No",
+            "Cantidad Empaque": p["emp"],
+            "Precio Variable": "No",
+            "Descuento %": 0,
+            "Descuento Monto": 0,
+            "Precio Especial": None,
+            "Descuento Activo": "No",
+            "Descuento Nota": None
+        })
+
+    df_productos = pd.DataFrame(filas_productos)
+
+    st.markdown('<div class="card-container">', unsafe_allow_html=True)
+    col_a, col_b = st.columns([3, 1])
+    with col_a:
+        st.markdown(f"### 📊 Vista Previa Consolidada ({len(df_productos)} productos en total)")
+    with col_b:
+        st.metric(label="Margen Aplicado", value=f"{st.session_state.margen_usado:g}%")
+        
+    st.dataframe(df_productos, use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    def generar_excel_wilpos(df_prod):
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_prod.to_excel(writer, index=False, sheet_name='Productos')
+            
+            df_cat = pd.DataFrame({
+                "Nombre": ["Bebidas", "Insumos", "General"],
+                "Descripción": ["Refrescos, agua, energizantes", "Fundas y vasos descartables", "Artículos varios"]
+            })
+            df_cat.to_excel(writer, index=False, sheet_name='Categorías')
+            
+            df_prov = pd.DataFrame({
+                "Nombre": ["Comercial Yardow SRL", "Centro de Distribución Cristian SRL"],
+                "Contacto": ["Ventas", "Ventas"],
+                "Teléfono": ["849-423-2888", "809-331-4497"],
+                "Email": ["", ""],
+                "Dirección": ["Merca Santo Domingo", "Santo Domingo Oeste"],
+                "RNC/Cédula": ["132061225", "131554725"],
+                "Tipo Identificación": ["RNC", "RNC"]
+            })
+            df_prov.to_excel(writer, index=False, sheet_name='Proveedores')
+            
+            df_pp = pd.DataFrame({
+                "Producto": [df_prod.loc[0, "Nombre"], df_prod.loc[len(df_prod)-1, "Nombre"]],
+                "Proveedor": ["Comercial Yardow SRL", "Centro de Distribución Cristian SRL"],
+                "Precio Costo": [df_prod.loc[0, "Costo"], df_prod.loc[len(df_prod)-1, "Costo"]],
+                "Principal": ["Sí", "Sí"]
+            })
+            df_pp.to_excel(writer, index=False, sheet_name='Producto-Proveedor')
+            
+            df_inst = pd.DataFrame({
+                "Instrucciones para cargar tu inventario": [
+                    "Llena la hoja Productos con tus artículos.",
+                    "Generado automáticamente mediante la aplicación web WilPOS."
+                ]
+            })
+            df_inst.to_excel(writer, index=False, sheet_name='Instrucciones')
+            
+        return output.getvalue()
+
+    excel_data = generar_excel_wilpos(df_productos)
+
+    st.markdown('<div class="card-container" style="text-align: center; background-color: #F8F9FA;">', unsafe_allow_html=True)
+    st.markdown("### 📥 ¡Todo Listo para Importar!")
+    st.markdown("Descarga tu archivo Excel consolidado.")
+    st.download_button(
+        label="📥 Descargar Plantilla Oficial WilPOS Consolidada (.xlsx)",
+        data=excel_data,
+        file_name="Inventario_WilPOS_Consolidado.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
 else:
     st.markdown("""
         <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
-            <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Facturas</h4>
-            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas y haz clic en procesar para comenzar.</p>
+            <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Acción</h4>
+            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas, verifica que tu margen (por defecto 25%) sea el deseado y haz clic en <strong>Procesar Facturas</strong> para confirmar y generar el inventario.</p>
         </div>
     """, unsafe_allow_html=True)
