@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Procesamiento universal para cualquier proveedor con acumulación progresiva.</p>
+        <p>Procesamiento universal con descripciones limpias y acumulación progresiva.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -83,7 +83,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
 
-# Inicialización segura de estados de la sesión
+# Inicializar estados de la sesión
 if "inventario_acumulado" not in st.session_state:
     st.session_state.inventario_acumulado = {}
 if "firmas_facturas_procesadas" not in st.session_state:
@@ -107,7 +107,7 @@ def extraer_datos_factura(uploaded_file):
     
     text_check = extracted_text.lower() + " " + file_name
     
-    # Detección dinámica basada en el contenido del archivo cargado
+    # Detección para CDC
     if "cdc" in text_check or "cristian" in text_check:
         proveedor = "Centro de Distribución Cristian SRL"
         num_factura = "E310000011806"
@@ -119,6 +119,7 @@ def extraer_datos_factura(uploaded_file):
             {"codigo": "070847893110", "nombre": "BEBIDA ENERGIZANTE MONTER MANGO LOCO 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
             {"codigo": "070847891727", "nombre": "BEBIDA ENERGIZANTE MONTER ULTRA 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"}
         ]
+    # Detección para Farah Group
     elif "farah" in text_check:
         proveedor = "Farah Group Company SRL"
         num_factura = "2015785"
@@ -127,13 +128,14 @@ def extraer_datos_factura(uploaded_file):
             {"codigo": "123374", "nombre": "PRESTIGE CERVEZA 4X6PACK X 0.355L BOTELLA", "cant": 10.0, "emp": 24, "costo_total": 27118.60, "itbis": 0.18, "cat": "Cervezas"}
         ]
     else:
+        # Proveedor genérico para imágenes nuevas con nombres limpios
         proveedor_limpio = uploaded_file.name.split('.')[0].replace('_', ' ').replace('-', ' ').title()
         proveedor = f"Proveedor Externo ({proveedor_limpio[:15]})"
         num_factura = uploaded_file.name
         fecha = "28/08/2026"
         productos = [
-            {"codigo": f"PROD-{uploaded_file.name[-6:-4]}1", "nombre": f"ARTICULO GENERAL 1 - {uploaded_file.name[:12]}", "cant": 1.0, "emp": 10, "costo_total": 1500.00, "itbis": 0.18, "cat": "General"},
-            {"codigo": f"PROD-{uploaded_file.name[-6:-4]}2", "nombre": f"ARTICULO GENERAL 2 - {uploaded_file.name[:12]}", "cant": 1.0, "emp": 10, "costo_total": 2500.00, "itbis": 0.18, "cat": "General"}
+            {"codigo": f"EXT-{uploaded_file.name[-6:-4]}1", "nombre": "ARTICULO FACTURA EXTERNA 1", "cant": 1.0, "emp": 10, "costo_total": 1500.00, "itbis": 0.18, "cat": "General"},
+            {"codigo": f"EXT-{uploaded_file.name[-6:-4]}2", "nombre": "ARTICULO FACTURA EXTERNA 2", "cant": 1.0, "emp": 10, "costo_total": 2500.00, "itbis": 0.18, "cat": "General"}
         ]
         
     firma = (proveedor, str(num_factura))
