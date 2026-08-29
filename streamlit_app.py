@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Validación avanzada por número de factura, proveedor, fecha y cliente para evitar duplicados.</p>
+        <p>Validación inmediata de duplicados por número de factura, proveedor, fecha y cliente al cargar.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -78,8 +78,6 @@ with col2:
         accept_multiple_files=True
     )
 
-st.markdown("<br>", unsafe_allow_html=True)
-abrir_modal = st.button("🚀 Procesar Facturas", type="primary")
 st.markdown('</div>', unsafe_allow_html=True)
 
 def round_to_nearest_5(val):
@@ -89,14 +87,13 @@ def round_to_nearest_5(val):
 if "inventario_acumulado" not in st.session_state:
     st.session_state.inventario_acumulado = {}
 if "firmas_facturas_procesadas" not in st.session_state:
-    st.session_state.firmas_facturas_procesadas = set() # Almacena tuplas (proveedor, num_factura, fecha, cliente)
+    st.session_state.firmas_facturas_procesadas = set() # (proveedor, num_factura, fecha, cliente)
 if "margen_usado" not in st.session_state:
     st.session_state.margen_usado = 25.0
 if "total_facturas_contador" not in st.session_state:
     st.session_state.total_facturas_contador = 0
 
 def extraer_datos_factura(uploaded_file):
-    """Extrae los metadatos clave de la factura para construir su firma única."""
     file_name = uploaded_file.name.lower()
     extracted_text = ""
     
@@ -108,12 +105,11 @@ def extraer_datos_factura(uploaded_file):
         except Exception:
             pass
     
-    # Detección inteligente basada en el contenido o nombre del archivo
     if "cdc" in extracted_text.lower() or "cristian" in extracted_text.lower():
         proveedor = "Centro de Distribución Cristian SRL"
-        num_factura = "E310000011806" # Factura CDC[cite: 1]
-        fecha = "28/08/2026"[cite: 1]
-        cliente = "AD ROYAL LICOR SRL"[cite: 1]
+        num_factura = "E310000011806"
+        fecha = "28/08/2026"
+        cliente = "AD ROYAL LICOR SRL"
         productos = [
             {"codigo": "281", "nombre": "AGUA TONICA CANADA DRY 400ML", "cant": 2.0, "emp": 12, "costo_total": 580.02, "itbis": 0.18, "cat": "Bebidas"},
             {"codigo": "049000057638", "nombre": "REFRESCO COCA COLA 400ML", "cant": 2.0, "emp": 12, "costo_total": 599.96, "itbis": 0.18, "cat": "Bebidas"},
@@ -123,7 +119,7 @@ def extraer_datos_factura(uploaded_file):
         ]
     else:
         proveedor = "Comercial Yardow SRL"
-        num_factura = "00494502" # Factura Yardow
+        num_factura = "00494502"
         fecha = "27/08/2026"
         cliente = "ROYAL LIQUOR"
         productos = [
@@ -137,31 +133,33 @@ def extraer_datos_factura(uploaded_file):
     firma = (proveedor, num_factura, fecha, cliente)
     return firma, productos
 
-@st.dialog("📋 Confirmación de Procesamiento y Validación")
-def modal_confirmacion(nuevos_archivos, margen):
-    duplicadas = []
-    validas = []
-    
-    for f in nuevos_archivos:
+# Validación INMEDIATA al cargar los archivos
+archivos_validos = []
+archivos_duplicados = []
+
+if uploaded_files:
+    for f in uploaded_files:
         firma, productos = extraer_datos_factura(f)
         if firma in st.session_state.firmas_facturas_procesadas:
-            duplicadas.append((f.name, firma))
+            archivos_duplicados.append((f.name, firma))
         else:
-            validas.append((f, firma, productos))
+            archivos_validos.append((f, firma, productos))
             
-    if len(duplicadas) > 0:
-        st.error("🚨 **¡Atención! Se detectaron facturas completamente duplicadas:**")
-        for nom, sig in duplicadas:
-            st.markdown(f"- Archivo: `{nom}` | **Proveedor:** {sig[0]} | **No. Factura:** {sig[1]} | **Fecha:** {sig[2]} | **Cliente:** {sig[3]}")
-        st.warning("Las facturas duplicadas han sido bloqueadas y no se procesarán nuevamente.")
-        
-    if len(validas) > 0:
-        st.markdown(f"✅ Archivos **nuevos válidos** para incorporar: **{len(validas)}**")
-        st.markdown(f"📊 Margen de ganancia a aplicar: **{margen:g}%**")
-        
+    if len(archivos_duplicados) > 0:
+        for nom, sig in archivos_duplicados:
+            st.error(f"🚨 **Factura Duplicada Detectada al Cargar:** El archivo `{nom}` corresponde a una factura ya registrada (**Proveedor:** {sig[0]} | **Factura:** {sig[1]} | **Fecha:** {sig[2]} | **Cliente:** {sig[3]}). Por favor, retírala para continuar.")
+
+st.markdown("<br>", unsafe_allow_html=True)
+procesar_btn = st.button("🚀 Procesar Facturas Validadas", type="primary", disabled=(len(uploaded_files) == 0 or len(archivos_duplicados) > 0))
+
+@st.dialog("📋 Confirmación de Procesamiento")
+def modal_confirmacion(validas, margen):
+    st.markdown(f"📁 Archivos **nuevos válidos** listos para incorporar: **{len(validas)}**")
+    st.markdown(f"📊 Margen de ganancia a aplicar: **{margen:g}%**")
+    
     col_btn1, col_btn2 = st.columns(2)
     with col_btn1:
-        if st.button("✅ Confirmar y Actualizar", type="primary", disabled=(len(validas) == 0)):
+        if st.button("✅ Confirmar y Actualizar", type="primary"):
             st.session_state.margen_usado = margen
             
             for archivo, firma, productos_en_archivo in validas:
@@ -190,13 +188,11 @@ def modal_confirmacion(nuevos_archivos, margen):
         if st.button("❌ Cerrar / Cancelar"):
             st.rerun()
 
-if abrir_modal:
-    if not uploaded_files:
-        st.warning("⚠️ Por favor, sube al menos una factura antes de procesar.")
-    elif margen_porcentaje <= 15.0:
+if procesar_btn:
+    if margen_porcentaje <= 15.0:
         st.error("🚨 **Atención:** El margen de ganancia debe ser **mayor al 15%** para continuar.")
     else:
-        modal_confirmacion(uploaded_files, margen_porcentaje)
+        modal_confirmacion(archivos_validos, margen_porcentaje)
 
 if len(st.session_state.inventario_acumulado) > 0:
     factor_margen = 1 + (st.session_state.margen_usado / 100.0)
@@ -308,6 +304,6 @@ else:
     st.markdown("""
         <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
             <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Facturas</h4>
-            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas y haz clic en <strong>Procesar Facturas</strong>. El sistema validará exhaustivamente que el número de factura, proveedor, fecha y cliente no estén duplicados antes de actualizar existencias.</p>
+            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas para validarlas de inmediato. El sistema detectará automáticamente si ya fueron ingresadas antes de permitir el procesamiento.</p>
         </div>
     """, unsafe_allow_html=True)
