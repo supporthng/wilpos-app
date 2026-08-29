@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Validación inmediata de duplicados por número de factura, proveedor, fecha y cliente al cargar.</p>
+        <p>Validación inmediata de duplicados y control estricto de carga de archivos.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -87,7 +87,7 @@ def round_to_nearest_5(val):
 if "inventario_acumulado" not in st.session_state:
     st.session_state.inventario_acumulado = {}
 if "firmas_facturas_procesadas" not in st.session_state:
-    st.session_state.firmas_facturas_procesadas = set() # (proveedor, num_factura, fecha, cliente)
+    st.session_state.firmas_facturas_procesadas = set()
 if "margen_usado" not in st.session_state:
     st.session_state.margen_usado = 25.0
 if "total_facturas_contador" not in st.session_state:
@@ -133,12 +133,14 @@ def extraer_datos_factura(uploaded_file):
     firma = (proveedor, num_factura, fecha, cliente)
     return firma, productos
 
-# Validación INMEDIATA al cargar los archivos
 archivos_validos = []
 archivos_duplicados = []
 
 if uploaded_files:
-    for f in uploaded_files:
+    # Evitar procesar dos veces el mismo archivo exacto si el usuario lo subió repetido en la misma selección
+    archivos_unicos = {f.name: f for f in uploaded_files}.values()
+    
+    for f in archivos_unicos:
         firma, productos = extraer_datos_factura(f)
         if firma in st.session_state.firmas_facturas_procesadas:
             archivos_duplicados.append((f.name, firma))
@@ -147,7 +149,7 @@ if uploaded_files:
             
     if len(archivos_duplicados) > 0:
         for nom, sig in archivos_duplicados:
-            st.error(f"🚨 **Factura Duplicada Detectada al Cargar:** El archivo `{nom}` corresponde a una factura ya registrada (**Proveedor:** {sig[0]} | **Factura:** {sig[1]} | **Fecha:** {sig[2]} | **Cliente:** {sig[3]}). Por favor, retírala para continuar.")
+            st.error(f"🚨 **Factura Duplicada Detectada:** El archivo `{nom}` corresponde a una factura ya registrada previamente (**Proveedor:** {sig[0]} | **Factura:** {sig[1]} | **Fecha:** {sig[2]} | **Cliente:** {sig[3]}).")
 
 st.markdown("<br>", unsafe_allow_html=True)
 procesar_btn = st.button("🚀 Procesar Facturas Validadas", type="primary", disabled=(len(uploaded_files) == 0 or len(archivos_duplicados) > 0))
@@ -304,6 +306,6 @@ else:
     st.markdown("""
         <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
             <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Facturas</h4>
-            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas para validarlas de inmediato. El sistema detectará automáticamente si ya fueron ingresadas antes de permitir el procesamiento.</p>
+            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas para validarlas de inmediato. El sistema filtrará archivos repetidos y validará las facturas ya registradas.</p>
         </div>
     """, unsafe_allow_html=True)
