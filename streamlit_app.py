@@ -59,8 +59,10 @@ if "margen_usado" not in st.session_state:
     st.session_state.margen_usado = 25.0
 if "detalle_facturas_procesadas" not in st.session_state:
     st.session_state.detalle_facturas_procesadas = {}
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
 
-# Cabecera con título a la izquierda y botón de reinicio a la derecha
+# Cabecera con título a la izquierda y botón de reinicio arriba a la derecha
 col_head1, col_head2 = st.columns([3, 1], gap="medium")
 
 with col_head1:
@@ -73,10 +75,13 @@ with col_head1:
 
 with col_head2:
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("🗑️ Limpiar Memoria y Reiniciar", type="secondary", use_container_width=True):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.success("¡Memoria limpiada correctamente!")
+    if st.button("Reiniciar", type="secondary", use_container_width=True):
+        st.session_state.inventario_acumulado = {}
+        st.session_state.firmas_facturas_procesadas = set()
+        st.session_state.detalle_facturas_procesadas = {}
+        st.session_state.margen_usado = 25.0
+        st.session_state.uploader_key += 1
+        st.success("¡Memoria y archivos limpiados correctamente!")
         st.rerun()
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -90,7 +95,7 @@ with col1:
         "💡 Digite el margen de ganancia (%)", 
         min_value=0.0, 
         max_value=500.0, 
-        value=25.0, 
+        value=st.session_state.get("margen_usado", 25.0), 
         step=1.0,
         help="Debe ser mayor al 15% para procesar el inventario."
     )
@@ -99,7 +104,8 @@ with col2:
     uploaded_files = st.file_uploader(
         "📂 Selecciona o arrastra tus facturas (PDF, imágenes de cualquier proveedor)", 
         type=["pdf", "png", "jpg", "jpeg"], 
-        accept_multiple_files=True
+        accept_multiple_files=True,
+        key=f"uploader_{st.session_state.uploader_key}"
     )
 
 st.markdown('</div>', unsafe_allow_html=True)
