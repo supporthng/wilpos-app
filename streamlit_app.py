@@ -4,33 +4,69 @@ import pandas as pd
 import streamlit as st
 import openpyxl
 
-st.set_page_config(page_title="Generador de Inventario WilPOS", page_icon="📊", layout="wide")
-
-st.title("🚀 Procesador de Facturas para WilPOS")
-st.markdown("Sube tus facturas (PDF o imagen), ajusta tu margen y descarga el Excel oficial listo para importar en WilPOS.")
-
-# Configuración en la barra lateral para el margen de ganancia
-st.sidebar.header("⚙️ Configuración de Precios")
-margen_porcentaje = st.sidebar.number_input(
-    "Margen de Ganancia (%)", 
-    min_value=0.0, 
-    max_value=500.0, 
-    value=43.0, 
-    step=1.0,
-    help="Porcentaje de ganancia aplicado sobre el costo unitario (ej. 43 para 43%)."
+# Configuración de la página con diseño moderno (wide layout)
+st.set_page_config(
+    page_title="Generador de Inventario WilPOS", 
+    page_icon="⚡", 
+    layout="wide"
 )
 
-# Componente de carga de archivos
-uploaded_files = st.file_uploader(
-    "Selecciona o arrastra tus facturas (PDF, imágenes)", 
-    type=["pdf", "png", "jpg", "jpeg"], 
-    accept_multiple_files=True
-)
+# Estilos CSS personalizados para darle una apariencia más atractiva y "cool"
+st.markdown("""
+    <style>
+        .main-title {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #1F4E78;
+            margin-bottom: 0rem;
+        }
+        .sub-title {
+            font-size: 1.1rem;
+            color: #555555;
+            margin-bottom: 2rem;
+        }
+        .upload-box {
+            background-color: #F8F9FA;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px dashed #D0D7DE;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# Encabezado visual estilizado
+st.markdown('<p class="main-title">⚡ Procesador Inteligente de Facturas para WilPOS</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-title">Sube tus facturas, define tu margen comercial y genera el archivo Excel oficial listo para importar.</p>', unsafe_allow_html=True)
+
+# Contenedor principal para la carga y configuración de parámetros
+st.markdown("### 📥 1. Configuración y Carga de Facturas")
+
+col1, col2 = st.columns([1, 2])
+
+with col1:
+    # Casilla para digitar el margen de ganancia junto al cargador
+    margen_porcentaje = st.number_input(
+        "💡 Digite el margen de ganancia (%)", 
+        min_value=0.0, 
+        max_value=500.0, 
+        value=43.0, 
+        step=1.0,
+        help="Porcentaje de ganancia que se aplicará sobre el costo unitario."
+    )
+
+with col2:
+    # Componente de carga de archivos
+    uploaded_files = st.file_uploader(
+        "Selecciona o arrastra tus facturas (PDF, imágenes)", 
+        type=["pdf", "png", "jpg", "jpeg"], 
+        accept_multiple_files=True
+    )
 
 def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
 
 if uploaded_files:
+    st.markdown("---")
     st.success(f"¡Se han cargado {len(uploaded_files)} archivo(s) exitosamente!")
     
     # Datos base extraídos de las facturas (CDC y Comercial Yardow)
@@ -168,7 +204,8 @@ if uploaded_files:
 
     df_productos = pd.DataFrame(filas_productos)
 
-    st.subheader(f"📋 Vista Previa de Productos (Margen: {margen_porcentaje:g}%)")
+    st.markdown("### 📊 2. Vista Previa del Inventario Procesado")
+    st.info(Se aplicó un margen de ganancia del **{margen_porcentaje:g}%** sobre los costos unitarios con redondeo a múltiplos de 5.)
     st.dataframe(df_productos, use_container_width=True)
 
     def generar_excel_wilpos(df_prod):
@@ -213,6 +250,7 @@ if uploaded_files:
 
     excel_data = generar_excel_wilpos(df_productos)
 
+    st.markdown("### 📥 3. Descarga del Archivo Oficial")
     st.download_button(
         label="📥 Descargar Plantilla Oficial WilPOS Completa (.xlsx)",
         data=excel_data,
@@ -220,4 +258,5 @@ if uploaded_files:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 else:
-    st.info("💡 Sube una factura para comenzar el procesamiento.")
+    st.markdown("---")
+    st.warning("⚠️ **Esperando archivos:** Por favor, digita tu margen deseado y sube o arrastra tu factura para comenzar el procesamiento.")
