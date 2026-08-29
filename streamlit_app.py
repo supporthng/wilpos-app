@@ -50,8 +50,8 @@ col_head1, col_head2 = st.columns([3, 1], gap="medium")
 with col_head1:
     st.markdown("""
         <div class="main-header" style="margin-bottom: 0rem;">
-            <h1>📦 Procesador WilPOS con Filtro Anti-Cliente</h1>
-            <p>Extracción precisa de productos sin confundir datos de cabecera (Margen 35%).</p>
+            <h1>📦 Procesador WilPOS Universal (Tablas y Tickets)</h1>
+            <p>Compatible con facturas tabulares de Álvarez & Sánchez y tickets (Margen 35%).</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -78,7 +78,7 @@ with col1:
 
 with col2:
     uploaded_file = st.file_uploader(
-        "📂 Sube la foto del ticket o PDF", 
+        "📂 Sube la foto del ticket o factura", 
         type=["pdf", "png", "jpg", "jpeg"],
         key=f"uploader_{st.session_state.uploader_key}"
     )
@@ -111,7 +111,7 @@ def limpiar_monto(texto_monto):
     except Exception:
         return 0.0
 
-def procesar_factura_filtrada(file):
+def procesar_factura_universal(file):
     file_name = file.name.lower()
     extracted_text = ""
     
@@ -134,7 +134,7 @@ def procesar_factura_filtrada(file):
             
     lines = [l.strip() for l in extracted_text.split('\n') if l.strip()]
     
-    proveedor = "Centro de Distribución Comercial (CDC)"
+    proveedor = "Álvarez & Sánchez, S.A." if "alvarez" in extracted_text.lower() else "Centro de Distribución Comercial (CDC)"
     num_factura = f"FAC-{abs(hash(file.name)) % 90000 + 10000}"
     fecha = "29/08/2026"
     
@@ -144,26 +144,41 @@ def procesar_factura_filtrada(file):
             num_factura = ncf_m.group(0).upper()
             break
 
-    # Lista negra estricta para evitar clientes, empresas y metadatos fiscales
     ignorar = [
         "DUSP", "ROYAL", "CLUB", "SRL", "RNC", "NCF", "SUBTOTAL", "ITBIS", "TOTAL", 
         "VALIDO", "HASTA", "ATENDIDO", "BANR", "TRANSFERENCIA", "POPULAR", "BANRESERVAS", 
         "BANESCO", "BHD", "FIRMA", "DIGITAL", "DIRECCION", "TELEFONO", "CLIENTE",
         "CENTRO", "DISTRIBUCION", "CRISTIAN", "CALLE", "SANTO", "DOMINGO", "REPUBLICA", 
-        "DOMINICANA", "DESCRIPCION", "VALOR", "FACTURA", "CREDITO", "FISCAL", "ELECTRONICA"
+        "DOMINICANA", "DESCRIPCION", "VALOR", "FACTURA", "CREDITO", "FISCAL", "ELECTRONICA", "ZONA", "RUTA"
     ]
 
     productos = {}
     i = 0
     while i < len(lines):
         line = lines[i]
+        
+        # Detección flexible: Soporta líneas con 'x' (tickets) o filas tabulares que inician con cantidad numérica (ej: "1 CAJA" o "1 ")
+        es_fila_producto = False
+        cant = 1.0
+        
         match_cant_precio = re.search(r'([\d\.]+)\s*[xX]\s*([\d,\.]+)', line)
         if match_cant_precio:
+            es_fila_producto = True
             try:
                 cant = float(match_cant_precio.group(1))
             except ValueError:
                 cant = 1.0
-                
+        else:
+            # Detectar formato tabular de facturas (ej: la línea empieza con un número de cantidad entero del 1 al 99)
+            match_tabla = re.match(r'^(\d{1,2})\b', line)
+            if match_tabla and not any(w in line.upper() for w in ignorar) and len(re.findall(r'[\d,\.]+', line)) >= 2:
+                es_fila_producto = True
+                try:
+                    cant = float(match_tabla.group(1))
+                except ValueError:
+                    cant = 1.0
+
+        if es_fila_producto:
             costo_total = 1000.00
             partes_linea = re.findall(r'[\d][\d,\.]+', line)
             if partes_linea:
@@ -175,32 +190,36 @@ def procesar_factura_filtrada(file):
             codigo = f"PROD-{i}"
             emp = 12
             
-            for j in range(i - 1, max(-1, i - 5), -1):
-                l_up = lines[j]
-                l_up_upper = l_up.upper()
+            # Si la línea misma tiene texto descriptivo (como en facturas tabulares), lo aprovechamos
+            clean_self = re.sub(r'^\d+\s*(?:CAJA|UNIDAD|PAQUETE)?\s*|\d{1,3}(?:[,\.]\d{3})*(?:[,\.]\d{2})?|[;\\:]', '', line).strip()
+            if len(clean_self) > 3 and not any(w in clean_self.upper() for w in ignorar):
+                nombre_partes.append(clean_self.upper())
+
+            # Escanear líneas cercanas para extraer descripción o código
+            for j in range(max(0, i - 2), min(len(lines), i + 3)):
+                if j == i:
+                    continue
+                l_ctx = lines[j]
+                l_ctx_upper = l_ctx.upper()
                 
-                if re.search(r'[\d]\s*[xX]\s*[\d]', l_up):
-                    break
-                
-                # Omitir cualquier línea que contenga palabras prohibidas de clientes o encabezados
-                if any(w in l_up_upper for w in ignorar):
+                if any(w in l_ctx_upper for w in ignorar):
                     continue
                 
-                if "PAQUETE" in l_up_upper or "CAJA" in l_up_upper or "DISPLAY" in l_up_upper:
-                    nums_emp = re.findall(r'\d+', l_up)
+                if "PAQUETE" in l_ctx_upper or "CAJA" in l_ctx_upper or "DISPLAY" in l_ctx_upper:
+                    nums_emp = re.findall(r'\d+', l_ctx)
                     if nums_emp:
                         emp = int(nums_emp[-1])
                     continue
-                elif "UNIDAD" in l_up_upper:
+                elif "UNIDAD" in l_ctx_upper:
                     emp = 1
                     continue
                 
-                if re.match(r'^([A-Z0-9]{4,15})$', l_up) and len(l_up) >= 4 and codigo.startswith("PROD"):
-                    codigo = l_up
+                if re.match(r'^([A-Z0-9]{4,15})$', l_ctx) and len(l_ctx) >= 4 and codigo.startswith("PROD"):
+                    codigo = l_ctx
                     continue
                 
-                clean_l = re.sub(r'\d{1,3}(?:[,\.]\d{3})*(?:[,\.]\d{2})?|[;\\:]', '', l_up).strip()
-                if len(clean_l) > 2 and not clean_l.isdigit():
+                clean_l = re.sub(r'\d{1,3}(?:[,\.]\d{3})*(?:[,\.]\d{2})?|[;\\:]', '', l_ctx).strip()
+                if len(clean_l) > 2 and not clean_l.isdigit() and clean_l.upper() not in nombre_partes:
                     nombre_partes.append(clean_l.upper())
 
             nombre = " ".join(nombre_partes).strip()
@@ -232,7 +251,7 @@ def procesar_factura_filtrada(file):
     return proveedor, num_factura, fecha, productos
 
 if uploaded_file:
-    prov, num_fac, fecha_fac, prods_extraidos = procesar_factura_filtrada(uploaded_file)
+    prov, num_fac, fecha_fac, prods_extraidos = procesar_factura_universal(uploaded_file)
     st.session_state.inventario_activo = prods_extraidos
     st.session_state.detalle_factura_activa = {
         "proveedor": prov, "num_factura": num_fac, "fecha": fecha_fac, "cantidad_articulos": len(prods_extraidos)
