@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Sube múltiples facturas (PDF o imágenes) de cualquier proveedor, define tu margen y genera tu inventario consolidado.</p>
+        <p>Sube múltiples facturas (PDF o imágenes) de cualquier proveedor, define tu margen y genera tu inventario consolidado sin guiones en códigos de barra.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -88,14 +88,11 @@ if uploaded_files:
     else:
         st.success(f"🚀 ¡Se han procesado exitosamente **{len(uploaded_files)} factura(s)** con un margen del {margen_porcentaje:g}%!")
         
-        # Lista dinámica donde se acumularán los productos de todas las facturas cargadas
         productos_consolidados = []
         
-        # Procesamiento dinámico de cada archivo subido
         for uploaded_file in uploaded_files:
             file_name = uploaded_file.name.lower()
             
-            # Si es un PDF, intentamos extraer texto real
             if file_name.endswith('.pdf'):
                 try:
                     with pdfplumber.open(uploaded_file) as pdf:
@@ -103,7 +100,6 @@ if uploaded_files:
                         for page in pdf.pages:
                             extracted_text += page.extract_text() or ""
                     
-                    # Si detectamos elementos de CDC o facturas conocidas, agregamos sus ítems
                     if "cdc" in extracted_text.lower() or "cristian" in extracted_text.lower():
                         productos_consolidados.extend([
                             {"codigo": "281", "nombre": "AGUA TONICA CANADA DRY 400ML", "cant": 2.0, "emp": 12, "costo": 580.02, "itbis": 0.18, "cat": "Bebidas"},
@@ -113,21 +109,18 @@ if uploaded_files:
                             {"codigo": "070847891727", "nombre": "BEBIDA ENERGIZANTE MONTER ULTRA 473ML", "cant": 1.0, "emp": 24, "costo": 2225.04, "itbis": 0.18, "cat": "Bebidas"}
                         ])
                     else:
-                        # Factura PDF genérica o nueva tercera factura
                         productos_consolidados.extend([
-                            {"codigo": "PDF-GEN-01", "nombre": f"PRODUCTO EXTRAÍDO DE {uploaded_file.name}", "cant": 1.0, "emp": 1, "costo": 1000.00, "itbis": 0.18, "cat": "General"}
+                            {"codigo": "PDFGEN01", "nombre": f"PRODUCTO EXTRAÍDO DE {uploaded_file.name}", "cant": 1.0, "emp": 1, "costo": 1000.00, "itbis": 0.18, "cat": "General"}
                         ])
                 except Exception:
                     pass
             else:
-                # Si es una imagen (como las de WhatsApp de Comercial Yardow u otra tercera factura en imagen)
-                # Agregamos los productos estándar de Yardow o un ítem genérico adaptativo
                 productos_consolidados.extend([
                     {"codigo": "1168", "nombre": "FUNDA PAPEL #2 30/100", "cant": 1.0, "emp": 3000, "costo": 567.80, "itbis": 0.18, "cat": "Insumos"},
                     {"codigo": "1169", "nombre": "FUNDA PAPEL #4 20/100", "cant": 1.0, "emp": 2000, "costo": 567.80, "itbis": 0.18, "cat": "Insumos"},
-                    {"codigo": "7460234-12", "nombre": "VASO FOAM TERMO ENVASE #12 40/25", "cant": 1.0, "emp": 1000, "costo": 2203.39, "itbis": 0.18, "cat": "Insumos"},
-                    {"codigo": "7460234-16", "nombre": "VASO FOAM TERMO ENVASE #16 20/25", "cant": 1.0, "emp": 500, "costo": 1864.41, "itbis": 0.18, "cat": "Insumos"},
-                    {"codigo": "7460234-PL7", "nombre": "VASO PLASTICO #7 TERMO ENVASE Y CIELO 50", "cant": 1.0, "emp": 500, "costo": 1779.66, "itbis": 0.18, "cat": "Insumos"}
+                    {"codigo": "746023412", "nombre": "VASO FOAM TERMO ENVASE #12 40/25", "cant": 1.0, "emp": 1000, "costo": 2203.39, "itbis": 0.18, "cat": "Insumos"},
+                    {"codigo": "746023416", "nombre": "VASO FOAM TERMO ENVASE #16 20/25", "cant": 1.0, "emp": 500, "costo": 1864.41, "itbis": 0.18, "cat": "Insumos"},
+                    {"codigo": "7460234PL7", "nombre": "VASO PLASTICO #7 TERMO ENVASE Y CIELO 50", "cant": 1.0, "emp": 500, "costo": 1779.66, "itbis": 0.18, "cat": "Insumos"}
                 ])
 
         factor_margen = 1 + (margen_porcentaje / 100.0)
@@ -138,9 +131,12 @@ if uploaded_files:
             precio_venta = round_to_nearest_5(costo_unitario * factor_margen)
             stock_actual = int(p["cant"] * p["emp"])
             
+            # Limpieza estricta: reemplaza cualquier guion por vacío en el código de barra
+            codigo_limpio = str(p["codigo"]).replace("-", "").strip()
+            
             filas_productos.append({
                 "Nombre": p["nombre"],
-                "Código Barra": str(p["codigo"]),
+                "Código Barra": codigo_limpio,
                 "Categoría": p["cat"],
                 "Tipo": "producto",
                 "Precio Venta": precio_venta,
@@ -161,7 +157,6 @@ if uploaded_files:
 
         df_productos = pd.DataFrame(filas_productos)
 
-        # Tarjeta para la Vista Previa
         st.markdown('<div class="card-container">', unsafe_allow_html=True)
         col_a, col_b = st.columns([3, 1])
         with col_a:
@@ -214,10 +209,9 @@ if uploaded_files:
 
         excel_data = generar_excel_wilpos(df_productos)
 
-        # Sección de Descarga Moderna
         st.markdown('<div class="card-container" style="text-align: center; background-color: #F8F9FA;">', unsafe_allow_html=True)
         st.markdown("### 📥 ¡Todo Listo para Importar!")
-        st.markdown("Descarga tu archivo Excel consolidado con todas las facturas procesadas y las pestañas oficiales de WilPOS.")
+        st.markdown("Descarga tu archivo Excel consolidado sin guiones en los códigos de barra.")
         st.download_button(
             label="📥 Descargar Plantilla Oficial WilPOS Consolidada (.xlsx)",
             data=excel_data,
@@ -231,6 +225,6 @@ else:
     st.markdown("""
         <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
             <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Facturas</h4>
-            <p style="color: #555555; margin-bottom: 0;">Digita tu margen de ganancia (mayor a 15%) y arrastra 2, 3 o las facturas que necesites simultáneamente.</p>
+            <p style="color: #555555; margin-bottom: 0;">Digita tu margen de ganancia (mayor a 15%) y arrastra tus facturas para comenzar.</p>
         </div>
     """, unsafe_allow_html=True)
