@@ -70,6 +70,8 @@ if "detalle_facturas_procesadas" not in st.session_state:
     st.session_state.detalle_facturas_procesadas = {}
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
+if "articulos_repetidos_notif" not in st.session_state:
+    st.session_state.articulos_repetidos_notif = []
 
 # Cabecera con título a la izquierda y botón de reinicio arriba a la derecha
 col_head1, col_head2 = st.columns([3, 1], gap="medium")
@@ -78,7 +80,7 @@ with col_head1:
     st.markdown("""
         <div class="main-header" style="margin-bottom: 0rem;">
             <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-            <p>Detección universal y automática para cualquier proveedor y factura.</p>
+            <p>Control automático, validación de duplicados y notificación de artículos repetidos entre facturas.</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -89,6 +91,7 @@ with col_head2:
         st.session_state.firmas_facturas_procesadas = set()
         st.session_state.detalle_facturas_procesadas = {}
         st.session_state.margen_usado = 25.0
+        st.session_state.articulos_repetidos_notif = []
         st.session_state.uploader_key += 1
         st.success("¡Memoria y archivos limpiados correctamente!")
         st.rerun()
@@ -126,7 +129,6 @@ def extraer_datos_factura(uploaded_file):
     file_name = uploaded_file.name.lower()
     extracted_text = ""
     
-    # Extracción de texto según el tipo de archivo
     if file_name.endswith('.pdf'):
         try:
             with pdfplumber.open(uploaded_file) as pdf:
@@ -145,8 +147,7 @@ def extraer_datos_factura(uploaded_file):
     text_lower = extracted_text.lower()
     full_search = text_lower + " " + file_name
 
-    # 1. Detección automática robusta para Álvarez & Sánchez (Factura 576999 / Tequila 1800)
-    # Se evalúa tanto el texto OCR como patrones comunes o nombres de archivo asociados
+    # 1. Álvarez & Sánchez
     if "alvarez" in full_search or "sanchez" in full_search or "álvarez" in full_search or "576999" in full_search or "7501035013483" in full_search or "cristalino" in full_search or "whatsapp image 2026-08-29" in file_name:
         proveedor = "Álvarez & Sánchez, S.A."
         num_factura = "576999"
@@ -154,8 +155,7 @@ def extraer_datos_factura(uploaded_file):
         productos = [
             {"codigo": "7501035013483", "nombre": "TEQUILA RESERVA CRISTALINO 1800", "cant": 2.0, "emp": 12, "costo_total": 79012.80, "itbis": 0.18, "cat": "Licores"}
         ]
-        
-    # 2. Detección automática para Farah Group
+    # 2. Farah Group
     elif "farah" in full_search:
         proveedor = "Farah Group Company SRL"
         num_factura = "2015785"
@@ -163,8 +163,7 @@ def extraer_datos_factura(uploaded_file):
         productos = [
             {"codigo": "123374", "nombre": "PRESTIGE CERVEZA 4X6PACK X 0.355L BOTELLA", "cant": 10.0, "emp": 24, "costo_total": 27118.60, "itbis": 0.18, "cat": "Cervezas"}
         ]
-        
-    # 3. Detección automática para tickets de CDC (26 de agosto)
+    # 3. CDC (Tickets 26 ago)
     elif "2026-08-26" in file_name and ("16.52.41" in file_name or "14.30.10" in file_name):
         proveedor = "Centro de Distribución Cristian SRL"
         num_factura = "E31000011783"
@@ -190,6 +189,7 @@ def extraer_datos_factura(uploaded_file):
             {"codigo": "619947000020", "nombre": "VODKA TITO'S HANDMADE 750ML", "cant": 2.0, "emp": 12, "costo_total": 31600.80, "itbis": 0.18, "cat": "Licores"},
             {"codigo": "041331027854", "nombre": "AGUA COCO GOYA BOTELLA 11.8 OZ", "cant": 4.0, "emp": 24, "costo_total": 7999.68, "itbis": 0.18, "cat": "Bebidas"}
         ]
+    # 4. CDC Estándar
     elif "cdc" in full_search or "cristian" in full_search:
         proveedor = "Centro de Distribución Cristian SRL"
         num_factura = "E310000011806"
@@ -201,6 +201,7 @@ def extraer_datos_factura(uploaded_file):
             {"codigo": "070847893110", "nombre": "BEBIDA ENERGIZANTE MONTER MANGO LOCO 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
             {"codigo": "070847891727", "nombre": "BEBIDA ENERGIZANTE MONTER ULTRA 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"}
         ]
+    # 5. Yardow
     elif "yardow" in full_search or "00494502" in full_search:
         proveedor = "Comercial Yardow SRL"
         num_factura = "00494502"
@@ -213,7 +214,7 @@ def extraer_datos_factura(uploaded_file):
             {"codigo": "7460234PL7", "nombre": "VASO PLASTICO #7 TERMO ENVASE Y CIELO 50", "cant": 1.0, "emp": 500, "costo_total": 1779.66, "itbis": 0.18, "cat": "Insumos"}
         ]
     else:
-        # 4. PARSER UNIVERSAL PARA CUALQUIER OTRO PROVEEDOR NUEVO
+        # Proveedor Universal
         lineas = [l.strip() for l in extracted_text.split('\n') if l.strip()]
         proveedor = "Proveedor General SRL"
         num_factura = f"FAC-{abs(hash(uploaded_file.name)) % 100000}"
@@ -262,6 +263,7 @@ def modal_confirmacion(validas, duplicadas_count, margen):
     with col_btn1:
         if st.button("✅ Confirmar y Actualizar", type="primary"):
             st.session_state.margen_usado = margen
+            st.session_state.articulos_repetidos_notif = [] # Limpiar notificación anterior
             
             for archivo, firma, proveedor, num_fac, fecha_fac, productos_en_archivo in validas:
                 st.session_state.firmas_facturas_procesadas.add(firma)
@@ -277,7 +279,12 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                     codigo = str(p["codigo"]).replace("-", "").strip()
                     cantidad_comprada_unidades = p["cant"] * p["emp"]
                     
+                    # Notificar si el artículo ya existía previamente en otra factura
                     if codigo in st.session_state.inventario_acumulado:
+                        nombre_art = p["nombre"]
+                        st.session_state.articulos_repetidos_notif.append(
+                            f"🔄 **Artículo ya existente detectado:** `{nombre_art}` (Código: `{codigo}`) proveniente de **{proveedor}** (Factura #{num_fac}). Su stock fue acumulado y su costo promediado."
+                        )
                         st.session_state.inventario_acumulado[codigo]["stock"] += cantidad_comprada_unidades
                         st.session_state.inventario_acumulado[codigo]["costo_total"] += p["costo_total"]
                     else:
@@ -302,6 +309,12 @@ if procesar_btn:
         modal_confirmacion(archivos_validos, len(archivos_duplicados), margen_porcentaje)
 
 if len(st.session_state.inventario_acumulado) > 0:
+    # Mostrar notificaciones visuales si se detectaron artículos repetidos en diferentes facturas
+    if st.session_state.articulos_repetidos_notif:
+        with st.expander("🔔 **Notificación de Artículos Coincidentes en Facturas Diferentes**", expanded=True):
+            for notif in st.session_state.articulos_repetidos_notif:
+                st.info(notif)
+
     factor_margen = 1 + (st.session_state.margen_usado / 100.0)
     
     filas_productos = []
