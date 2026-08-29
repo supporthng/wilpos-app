@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Control independiente de firmas para facturas de Comercial Yardow y CDC[cite: 2].</p>
+        <p>Control independiente de firmas para facturas de Comercial Yardow y CDC.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -107,10 +107,10 @@ def extraer_datos_factura(uploaded_file):
     
     # Validación independiente precisa para cada proveedor
     if "cdc" in extracted_text.lower() or "cristian" in extracted_text.lower() or "cdc" in file_name:
-        proveedor = "Centro de Distribución Cristian SRL"[cite: 2]
-        num_factura = "E310000011806" # Factura CDC[cite: 2]
-        fecha = "28/08/2026"[cite: 2]
-        cliente = "AD ROYAL LICOR SRL"[cite: 2]
+        proveedor = "Centro de Distribución Cristian SRL"
+        num_factura = "E310000011806"
+        fecha = "28/08/2026"
+        cliente = "AD ROYAL LICOR SRL"
         productos = [
             {"codigo": "281", "nombre": "AGUA TONICA CANADA DRY 400ML", "cant": 2.0, "emp": 12, "costo_total": 580.02, "itbis": 0.18, "cat": "Bebidas"},
             {"codigo": "049000057638", "nombre": "REFRESCO COCA COLA 400ML", "cant": 2.0, "emp": 12, "costo_total": 599.96, "itbis": 0.18, "cat": "Bebidas"},
@@ -120,7 +120,7 @@ def extraer_datos_factura(uploaded_file):
         ]
     else:
         proveedor = "Comercial Yardow SRL"
-        num_factura = "00494502" # Factura Yardow
+        num_factura = "00494502"
         fecha = "27/08/2026"
         cliente = "ROYAL LIQUOR"
         productos = [
@@ -257,19 +257,19 @@ if len(st.session_state.inventario_acumulado) > 0:
             df_cat.to_excel(writer, index=False, sheet_name='Categorías')
             
             df_prov = pd.DataFrame({
-                "Nombre": ["Comercial Yardow SRL", "Centro de Distribución Cristian SRL"],[cite: 2]
+                "Nombre": ["Comercial Yardow SRL", "Centro de Distribución Cristian SRL"],
                 "Contacto": ["Ventas", "Ventas"],
-                "Teléfono": ["849-423-2888", "809-331-4497"],[cite: 2]
+                "Teléfono": ["849-423-2888", "809-331-4497"],
                 "Email": ["", ""],
-                "Dirección": ["Merca Santo Domingo", "Santo Domingo Oeste"],[cite: 2]
-                "RNC/Cédula": ["132061225", "131554725"],[cite: 2]
+                "Dirección": ["Merca Santo Domingo", "Santo Domingo Oeste"],
+                "RNC/Cédula": ["132061225", "131554725"],
                 "Tipo Identificación": ["RNC", "RNC"]
             })
             df_prov.to_excel(writer, index=False, sheet_name='Proveedores')
             
             df_pp = pd.DataFrame({
                 "Producto": [df_prod.loc[0, "Nombre"], df_prod.loc[len(df_prod)-1, "Nombre"]],
-                "Proveedor": ["Comercial Yardow SRL", "Centro de Distribución Cristian SRL"],[cite: 2]
+                "Proveedor": ["Comercial Yardow SRL", "Centro de Distribución Cristian SRL"],
                 "Precio Costo": [df_prod.loc[0, "Costo"], df_prod.loc[len(df_prod)-1, "Costo"]],
                 "Principal": ["Sí", "Sí"]
             })
