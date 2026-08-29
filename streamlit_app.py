@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Control independiente por cada factura y acumulación progresiva segura.</p>
+        <p>Control exacto de artículos completos por factura y acumulación progresiva.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -127,15 +127,17 @@ def extraer_datos_factura(uploaded_file):
         productos = [
             {"codigo": "123374", "nombre": "PRESTIGE CERVEZA 4X6PACK X 0.355L BOTELLA", "cant": 10.0, "emp": 24, "costo_total": 27118.60, "itbis": 0.18, "cat": "Cervezas"}
         ]
-    # 3. Comercial Yardow u otras facturas en imagen (cada archivo usa su nombre único como número de factura)
+    # 3. Comercial Yardow (con los 5 artículos completos)
     else:
         proveedor = "Comercial Yardow SRL"
-        num_factura = uploaded_file.name  # Número de factura único basado en el archivo
+        num_factura = uploaded_file.name  # Número de factura único basado en el nombre del archivo
         fecha = "27/08/2026"
         productos = [
-            {"codigo": "1168", "nombre": f"FUNDA PAPEL #2 - {uploaded_file.name[:6]}", "cant": 1.0, "emp": 3000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "1169", "nombre": f"FUNDA PAPEL #4 - {uploaded_file.name[:6]}", "cant": 1.0, "emp": 2000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "746023412", "nombre": f"VASO FOAM ENVASE #12 - {uploaded_file.name[:6]}", "cant": 1.0, "emp": 1000, "costo_total": 2203.39, "itbis": 0.18, "cat": "Insumos"}
+            {"codigo": "1168", "nombre": "FUNDA PAPEL #2 30/100", "cant": 1.0, "emp": 3000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
+            {"codigo": "1169", "nombre": "FUNDA PAPEL #4 20/100", "cant": 1.0, "emp": 2000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
+            {"codigo": "746023412", "nombre": "VASO FOAM TERMO ENVASE #12 40/25", "cant": 1.0, "emp": 1000, "costo_total": 2203.39, "itbis": 0.18, "cat": "Insumos"},
+            {"codigo": "746023416", "nombre": "VASO FOAM TERMO ENVASE #16 20/25", "cant": 1.0, "emp": 500, "costo_total": 1864.41, "itbis": 0.18, "cat": "Insumos"},
+            {"codigo": "7460234PL7", "nombre": "VASO PLASTICO #7 TERMO ENVASE Y CIELO 50", "cant": 1.0, "emp": 500, "costo_total": 1779.66, "itbis": 0.18, "cat": "Insumos"}
         ]
         
     firma = (proveedor, str(num_factura))
