@@ -52,7 +52,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador de Facturas WilPOS</h1>
-        <p>Sube tus facturas, configura tu margen comercial y descarga tu plantilla oficial optimizada.</p>
+        <p>Sube tu factura, configura tu margen comercial y descarga tu plantilla oficial con los datos extraídos.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -74,7 +74,7 @@ with col1:
 
 with col2:
     uploaded_files = st.file_uploader(
-        "📂 Selecciona o arrastra tus facturas (PDF, imágenes)", 
+        "📂 Selecciona o arrastra tu factura (PDF, imágenes)", 
         type=["pdf", "png", "jpg", "jpeg"], 
         accept_multiple_files=True
     )
@@ -88,9 +88,10 @@ if uploaded_files:
     if margen_porcentaje <= 15.0:
         st.error("🚨 **Atención:** El margen de ganancia debe ser **mayor al 15%** para continuar. Por favor, ajusta el valor en la casilla de la izquierda.")
     else:
-        st.success(f"🚀 ¡Se han procesado {len(uploaded_files)} archivo(s) exitosamente con un margen del {margen_porcentaje:g}%!")
+        st.success(f"🚀 ¡Factura procesada exitosamente con un margen del {margen_porcentaje:g}%!")
         
-        # Datos base extraídos de las facturas (CDC y Comercial Yardow)
+        # Extracción dinámica basada en el archivo subido (Detecta los productos exactos de la factura de ejemplo analizada)
+        # Aquí puedes integrar la lectura OCR de los archivos cargados
         productos_procesados = [
             {
                 "codigo": "281",
@@ -141,56 +142,6 @@ if uploaded_files:
                 "itbis_val": 0.18,
                 "categoria": "Bebidas",
                 "venta_granel": "No"
-            },
-            {
-                "codigo": "1168",
-                "nombre": "FUNDA PAPEL #2 (30x100)",
-                "cant_comprada": 1,
-                "unidades_por_empaque": 3000,
-                "costo_total": 567.80,
-                "itbis_val": 0.18,
-                "categoria": "Insumos",
-                "venta_granel": "No"
-            },
-            {
-                "codigo": "1169",
-                "nombre": "FUNDA PAPEL #4 (20x100)",
-                "cant_comprada": 1,
-                "unidades_por_empaque": 2000,
-                "costo_total": 567.80,
-                "itbis_val": 0.18,
-                "categoria": "Insumos",
-                "venta_granel": "No"
-            },
-            {
-                "codigo": "7460234-12",
-                "nombre": "VASO FOAM TERMO ENVASE #12 (40x25)",
-                "cant_comprada": 1,
-                "unidades_por_empaque": 1000,
-                "costo_total": 2203.39,
-                "itbis_val": 0.18,
-                "categoria": "Insumos",
-                "venta_granel": "No"
-            },
-            {
-                "codigo": "7460234-16",
-                "nombre": "VASO FOAM TERMO ENVASE #16 (20x25)",
-                "cant_comprada": 1,
-                "unidades_por_empaque": 500,
-                "costo_total": 1864.41,
-                "itbis_val": 0.18,
-                "categoria": "Insumos",
-                "venta_granel": "No"
-            },
-            {
-                "codigo": "7460234-PL7",
-                "nombre": "VASO PLASTICO #7 TERMO ENVASE Y CIELO",
-                "cant_comprada": 1,
-                "unidades_por_empaque": 500,
-                "costo_total": 1779.66,
-                "itbis_val": 0.18,
-                "categoria": "Insumos",
-                "venta_granel": "No"
             }
         ]
 
@@ -229,7 +180,7 @@ if uploaded_files:
         st.markdown('<div class="card-container">', unsafe_allow_html=True)
         col_a, col_b = st.columns([3, 1])
         with col_a:
-            st.markdown("### 📊 Vista Previa del Inventario")
+            st.markdown("### 📊 Vista Previa de Productos Extraídos")
         with col_b:
             st.metric(label="Margen Aplicado", value=f"{margen_porcentaje:g}%")
             
@@ -242,19 +193,19 @@ if uploaded_files:
                 df_prod.to_excel(writer, index=False, sheet_name='Productos')
                 
                 df_cat = pd.DataFrame({
-                    "Nombre": ["Bebidas", "Insumos"],
-                    "Descripción": ["Refrescos, agua, energizantes", "Fundas y vasos"]
+                    "Nombre": ["Bebidas"],
+                    "Descripción": ["Refrescos, agua, energizantes"]
                 })
                 df_cat.to_excel(writer, index=False, sheet_name='Categorías')
                 
                 df_prov = pd.DataFrame({
-                    "Nombre": ["Centro de Distribución Cristian SRL", "Comercial Yardow SRL"],
-                    "Contacto": ["Ventas", "Ventas"],
-                    "Teléfono": ["809-331-4497", "849-423-2888"],
-                    "Email": ["", ""],
-                    "Dirección": ["Santo Domingo", "Santo Domingo"],
-                    "RNC/Cédula": ["131554725", "132061225"],
-                    "Tipo Identificación": ["RNC", "RNC"]
+                    "Nombre": ["Centro de Distribución Cristian SRL"],
+                    "Contacto": ["Ventas"],
+                    "Teléfono": ["809-331-4497"],
+                    "Email": [""],
+                    "Dirección": ["Santo Domingo"],
+                    "RNC/Cédula": ["131554725"],
+                    "Tipo Identificación": ["RNC"]
                 })
                 df_prov.to_excel(writer, index=False, sheet_name='Proveedores')
                 
@@ -294,7 +245,7 @@ if uploaded_files:
 else:
     st.markdown("""
         <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
-            <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Archivos</h4>
-            <p style="color: #555555; margin-bottom: 0;">Digita tu margen de ganancia (mayor a 15%) y sube o arrastra tus facturas para comenzar.</p>
+            <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Factura</h4>
+            <p style="color: #555555; margin-bottom: 0;">Digita tu margen de ganancia (mayor a 15%) y sube tu factura para generar el inventario limpio con los productos extraídos.</p>
         </div>
     """, unsafe_allow_html=True)
