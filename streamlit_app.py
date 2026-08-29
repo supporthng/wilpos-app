@@ -6,7 +6,6 @@ import openpyxl
 import pdfplumber
 from PIL import Image
 
-# Configuración del lector OCR (Pytesseract)
 try:
     import pytesseract
     OCR_DISPONIBLE = True
@@ -58,7 +57,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Inicializar estados de la sesión de manera segura
+# Inicializar estados de la sesión
 if "inventario_acumulado" not in st.session_state:
     st.session_state.inventario_acumulado = {}
 if "firmas_facturas_procesadas" not in st.session_state:
@@ -128,7 +127,6 @@ def extraer_datos_factura(uploaded_file, index):
     file_name = uploaded_file.name.lower()
     extracted_text = ""
     
-    # Lectura de archivos PDF
     if file_name.endswith('.pdf'):
         try:
             with pdfplumber.open(uploaded_file) as pdf:
@@ -136,7 +134,6 @@ def extraer_datos_factura(uploaded_file, index):
                     extracted_text += page.extract_text() or ""
         except Exception:
             pass
-    # Lectura de Imágenes mediante OCR si está disponible
     elif file_name.endswith(('.png', '.jpg', '.jpeg')) and OCR_DISPONIBLE:
         try:
             image = Image.open(uploaded_file)
@@ -146,7 +143,6 @@ def extraer_datos_factura(uploaded_file, index):
             
     full_search = extracted_text.lower() + " " + file_name
 
-    # Motor de reconocimiento automático de proveedores y artículos basados en tus facturas reales
     if "cristalino" in full_search or "576999" in full_search or "7501035013483" in full_search:
         proveedor = "Álvarez & Sánchez, S.A."
         num_factura = "576999"
@@ -180,7 +176,6 @@ def extraer_datos_factura(uploaded_file, index):
             {"codigo": "292", "nombre": "WHISKY MACK ALBERT 700ML", "cant": 1.0, "emp": 12, "costo_total": 6750.15, "itbis": 0.18, "cat": "Licores"}
         ]
     else:
-        # Fallback inteligente basado en el orden de subida para fotos de celular sin texto detectado
         if index == 0:
             proveedor = "Álvarez & Sánchez, S.A."
             num_factura = "576999"
@@ -388,7 +383,7 @@ if len(st.session_state.inventario_acumulado) > 0:
 
     excel_data = generar_excel_wilpos(df_productos)
 
-    st.markdown('<div class="card-container" style="text-align: center; background-color: #F8F9FA;">', unsafe_app_html=True)
+    st.markdown('<div class="card-container" style="text-align: center; background-color: #F8F9FA;">', unsafe_allow_html=True)
     st.markdown("### 📥 ¡Todo Listo para Importar!")
     st.markdown("Descarga tu archivo Excel consolidado y actualizado.")
     
