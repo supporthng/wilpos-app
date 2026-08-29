@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Filtro automático de facturas duplicadas y acumulación progresiva.</p>
+        <p>Control estricto de archivos duplicados con alerta flotante y bloqueo de carga.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -140,14 +140,13 @@ if uploaded_files:
     
     for f in archivos_unicos:
         firma, productos = extraer_datos_factura(f)
-        # Si la factura ya fue procesada, la ignoramos automáticamente (no se agrega a válidos)
+        # Si la factura ya fue procesada, lanzamos una alerta flotante (toast) exactamente igual a la captura
         if firma in st.session_state.firmas_facturas_procesadas:
-            st.warning(f"⚠️ La factura de **{firma[0]}** (No. **{firma[1]}**) ya fue agregada anteriormente. Ha sido omitida automáticamente.")
+            st.toast(f"Ya has subido un archivo con el nombre {f.name} (Factura No. {firma[1]})", icon="⚠️")
         else:
             archivos_validos.append((f, firma, productos))
 
 st.markdown("<br>", unsafe_allow_html=True)
-# Si no hay archivos nuevos válidos (o solo hay duplicados), el botón se bloquea automáticamente
 procesar_btn = st.button("🚀 Procesar Facturas Nuevas", type="primary", disabled=(len(archivos_validos) == 0))
 
 @st.dialog("📋 Confirmación de Procesamiento")
@@ -302,6 +301,6 @@ else:
     st.markdown("""
         <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
             <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Facturas</h4>
-            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas. Las facturas que ya estén registradas se omitirán automáticamente de manera silenciosa.</p>
+            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas. Si intentas subir una ya procesada, aparecerá una alerta flotante y se bloqueará su procesamiento.</p>
         </div>
     """, unsafe_allow_html=True)
