@@ -83,14 +83,14 @@ st.markdown('</div>', unsafe_allow_html=True)
 def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
 
-# Inicializar estados de la sesión
+# Inicialización segura de estados de la sesión
 if "inventario_acumulado" not in st.session_state:
     st.session_state.inventario_acumulado = {}
 if "firmas_facturas_procesadas" not in st.session_state:
     st.session_state.firmas_facturas_procesadas = set()
 if "margen_usado" not in st.session_state:
     st.session_state.margen_usado = 25.0
-if "total_facturas_contador" not in st.session_state:
+if "total_facturas_contador" not in st.session_state or not isinstance(st.session_state.total_facturas_contador, (dict, set)):
     st.session_state.total_facturas_contador = {}
 
 def extraer_datos_factura(uploaded_file):
@@ -127,8 +127,6 @@ def extraer_datos_factura(uploaded_file):
             {"codigo": "123374", "nombre": "PRESTIGE CERVEZA 4X6PACK X 0.355L BOTELLA", "cant": 10.0, "emp": 24, "costo_total": 27118.60, "itbis": 0.18, "cat": "Cervezas"}
         ]
     else:
-        # Proveedor Dinámico General para cualquier otra factura o imagen nueva que agregues
-        # Extraemos un nombre legible del archivo como proveedor provisional si es imagen
         proveedor_limpio = uploaded_file.name.split('.')[0].replace('_', ' ').replace('-', ' ').title()
         proveedor = f"Proveedor Externo ({proveedor_limpio[:15]})"
         num_factura = uploaded_file.name
@@ -265,8 +263,10 @@ if len(st.session_state.inventario_acumulado) > 0:
             })
             df_cat.to_excel(writer, index=False, sheet_name='Categorías')
             
-            # Proveedores dinámicos basados en los procesados en la sesión
             lista_provs = list(set(st.session_state.total_facturas_contador.values()))
+            if not lista_provs:
+                lista_provs = ["Proveedor General"]
+                
             df_prov = pd.DataFrame({
                 "Nombre": lista_provs,
                 "Contacto": ["Ventas"] * len(lista_provs),
@@ -319,7 +319,7 @@ if len(st.session_state.inventario_acumulado) > 0:
 
 else:
     st.markdown("""
-        <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: n1rem;">
+        <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
             <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Facturas</h4>
             <p style="color: #555555; margin-bottom: 0;">Sube tus facturas nuevas de cualquier proveedor para comenzar el procesamiento.</p>
         </div>
