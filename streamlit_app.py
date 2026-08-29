@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Control estricto de duplicados y acumulación progresiva segura.</p>
+        <p>Procesa lotes mixtos omitiendo automáticamente facturas duplicadas e incorporando las nuevas.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -134,7 +134,7 @@ def extraer_datos_factura(uploaded_file):
     return firma, productos
 
 archivos_validos = []
-tiene_duplicados = False
+archivos_duplicados = []
 
 if uploaded_files:
     archivos_unicos = {f.name: f for f in uploaded_files}.values()
@@ -142,18 +142,20 @@ if uploaded_files:
     for f in archivos_unicos:
         firma, productos = extraer_datos_factura(f)
         if firma in st.session_state.firmas_facturas_procesadas:
-            tiene_duplicados = True
-            st.error(f"🚨 **Factura Ya Registrada:** El archivo `{f.name}` ya fue procesado anteriormente. Por favor, elimínalo del recuadro superior haciendo clic en la **'X'** para poder continuar.")
+            archivos_duplicados.append(f.name)
+            st.error(f"⚠️ **Factura Omitida (Ya Registrada):** El archivo `{f.name}` ya fue procesado antes y no se duplicará.")
         else:
             archivos_validos.append((f, firma, productos))
 
 st.markdown("<br>", unsafe_allow_html=True)
-# El botón se deshabilita si hay archivos duplicados O si no hay archivos válidos nuevos
-procesar_btn = st.button("🚀 Procesar Facturas", type="primary", disabled=(len(uploaded_files) == 0 or tiene_duplicados or len(archivos_validos) == 0))
+# El botón se habilita si hay al menos un archivo nuevo válido, sin importar si hay duplicados en el lote
+procesar_btn = st.button("🚀 Procesar Facturas", type="primary", disabled=(len(archivos_validos) == 0))
 
 @st.dialog("📋 Confirmación de Procesamiento")
-def modal_confirmacion(validas, margen):
-    st.markdown(f"📁 Facturas **nuevas** listas para incorporar: **{len(validas)}**")
+def modal_confirmacion(validas, duplicadas_count, margen):
+    if duplicadas_count > 0:
+        st.warning(f"⚠️ Se detectaron y omitieron **{duplicadas_count}** factura(s) duplicada(s).")
+    st.markdown(f"📁 Facturas **nuevas** a incorporar: **{len(validas)}**")
     st.markdown(f"📊 Margen de ganancia a aplicar: **{margen:g}%**")
     
     col_btn1, col_btn2 = st.columns(2)
@@ -191,7 +193,7 @@ if procesar_btn:
     if margen_porcentaje <= 15.0:
         st.error("🚨 **Atención:** El margen de ganancia debe ser **mayor al 15%** para continuar.")
     else:
-        modal_confirmacion(archivos_validos, margen_porcentaje)
+        modal_confirmacion(archivos_validos, len(archivos_duplicados), margen_porcentaje)
 
 if len(st.session_state.inventario_acumulado) > 0:
     factor_margen = 1 + (st.session_state.margen_usado / 100.0)
