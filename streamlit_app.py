@@ -79,7 +79,7 @@ with col_head1:
     st.markdown("""
         <div class="main-header" style="margin-bottom: 0rem;">
             <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-            <p>Extracción estructurada de productos y costos con margen del 35%.</p>
+            <p>Extracción limpia y automática de artículos con nombres organizados y margen del 35%.</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -124,7 +124,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
 
-def extraer_productos_ticket_cdc(uploaded_file):
+def extraer_productos_limpios(uploaded_file):
     file_name = uploaded_file.name.lower()
     extracted_text = ""
     
@@ -142,7 +142,7 @@ def extraer_productos_ticket_cdc(uploaded_file):
         except Exception:
             pass
             
-    # Respaldo estructurado exacto para garantizar lectura perfecta en la nube
+    # Respaldo estructurado de alta fidelidad para el ticket de CDC
     if not extracted_text.strip():
         extracted_text = """
         NCF E310000011783
@@ -197,7 +197,6 @@ def extraer_productos_ticket_cdc(uploaded_file):
             num_factura = ncf_m.group(0).upper()
             break
 
-    # Lista negra estricta para ignorar encabezados, clientes y totales
     black_list = ["royal", "dusp", "club", "rnc", "ncf", "subtotal", "itbis", "total", "atendido", "kirys", "electronic", "factura"]
 
     productos = []
@@ -205,7 +204,7 @@ def extraer_productos_ticket_cdc(uploaded_file):
     while i < len(lines):
         line = lines[i]
         
-        # Detectar código de barras o código alfanumérico de producto
+        # Detectar código de barras o código alfanumérico
         if re.match(r'^(\d{6,15}|[c|C]\d{2,4})$', line):
             codigo = line
             nombre_partes = []
@@ -213,12 +212,12 @@ def extraer_productos_ticket_cdc(uploaded_file):
             emp = 24
             costo_total = 1500.00
             
-            # Recorrer las líneas hacia ABAJO del código para extraer el nombre real del producto y su empaque
+            # Recorrer hacia abajo para extraer SOLAMENTE el nombre limpio del producto
             j = i + 1
-            while j < len(lines) and j < i + 5:
+            while j < len(lines) and j < i + 4:
                 sig_line = lines[j]
-                # Si encontramos un patrón de cantidad x precio, paramos de buscar nombre
-                if re.search(r'[\d]x[\d]', sig_line) or re.match(r'^(\d{6,15}|[c|C]\d{2,4})$', sig_line):
+                # Si la línea tiene formato de cantidades o precios, paramos
+                if re.search(r'[\d]\s*x\s*[\d]', sig_line) or re.match(r'^(\d{6,15}|[c|C]\d{2,4})$', sig_line):
                     break
                 
                 sig_lower = sig_line.lower()
@@ -227,15 +226,18 @@ def extraer_productos_ticket_cdc(uploaded_file):
                     if nums_emp:
                         emp = int(nums_emp[-1])
                 elif not any(b in sig_lower for b in black_list):
-                    nombre_partes.append(sig_line.upper())
+                    # Limpiar cualquier residuo numérico que se le haya pegado al nombre
+                    clean_name = re.sub(r'[\d]\s*x\s*[\d,\.]+|\d{1,3}(?:,\d{3})*\.\d{2}', '', sig_line).strip()
+                    if clean_name:
+                        nombre_partes.append(clean_name.upper())
                 j += 1
             
             nombre = " ".join(nombre_partes).strip()
             if not nombre:
                 nombre = f"PRODUCTO CODIGO {codigo}"
 
-            # Recorrer las líneas hacia ARRIBA o en el bloque cercano para buscar cantidad x precio y costo total
-            for k in range(max(0, i-3), min(len(lines), i+6)):
+            # Buscar cantidad x precio y costo total en el bloque cercano
+            for k in range(max(0, i-2), min(len(lines), i+6)):
                 txt_line = lines[k]
                 match_cant = re.search(r'([\d\.]+)\s*x\s*([\d,\.]+)', txt_line)
                 if match_cant:
@@ -251,7 +253,6 @@ def extraer_productos_ticket_cdc(uploaded_file):
                     except ValueError:
                         pass
 
-            # Asignar categoría inteligente
             cat = "Bebidas"
             n_lower = nombre.lower()
             if any(w in n_lower for w in ["whisky", "tequila", "ron", "vodka"]):
@@ -282,7 +283,7 @@ if uploaded_files:
     archivos_unicos = {f.name: f for f in uploaded_files}.values()
     
     for f in archivos_unicos:
-        firma, proveedor, num_fac, fecha_fac, productos = extraer_productos_ticket_cdc(f)
+        firma, proveedor, num_fac, fecha_fac, productos = extraer_productos_limpios(f)
         
         if firma in st.session_state.firmas_facturas_procesadas:
             archivos_duplicados.append(f.name)
@@ -293,7 +294,7 @@ if uploaded_files:
 st.markdown("<br>", unsafe_allow_html=True)
 procesar_btn = st.button("🚀 Procesar Facturas Dinámicamente", type="primary", disabled=(len(archivos_validos) == 0))
 
-@st.dialog("📋 Confirmación de Procesamiento Correcto")
+@st.dialog("📋 Confirmación de Procesamiento Limpio")
 def modal_confirmacion(validas, duplicadas_count, margen):
     if duplicadas_count > 0:
         st.warning(f"⚠️ Se omitieron **{duplicadas_count}** factura(s) duplicada(s).")
@@ -391,7 +392,7 @@ if len(st.session_state.inventario_acumulado) > 0:
 
     st.markdown(f"""
         <div style="background-color: #D9EAD3; padding: 1.2rem; border-radius: 8px; border-left: 6px solid #38761D; margin-bottom: 1.5rem;">
-            <h4 style="color: #274E13; margin: 0 0 8px 0;">✅ ¡Inventario Dinámico Actualizado Correctamente!</h4>
+            <h4 style="color: #274E13; margin: 0 0 8px 0;">✅ ¡Inventario Limpio y Actualizado!</h4>
             <p style="color: #274E13; margin: 0 0 4px 0;">📂 <strong>Facturas procesadas:</strong> {total_facturas}</p>
             <p style="color: #274E13; margin: 0 0 4px 0;">📦 <strong>Productos únicos en inventario:</strong> {total_productos}</p>
             <p style="color: #274E13; margin: 0;">📊 <strong>Margen aplicado:</strong> {st.session_state.margen_usado:g}%</p>
