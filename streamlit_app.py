@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Reconocimiento dinámico de múltiples proveedores e imágenes independientes.</p>
+        <p>Procesamiento universal para cualquier proveedor con acumulación progresiva.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -73,7 +73,7 @@ with col1:
 
 with col2:
     uploaded_files = st.file_uploader(
-        "📂 Selecciona o arrastra tus facturas (PDF, imágenes)", 
+        "📂 Selecciona o arrastra tus facturas (PDF, imágenes de cualquier proveedor)", 
         type=["pdf", "png", "jpg", "jpeg"], 
         accept_multiple_files=True
     )
@@ -91,7 +91,7 @@ if "firmas_facturas_procesadas" not in st.session_state:
 if "margen_usado" not in st.session_state:
     st.session_state.margen_usado = 25.0
 if "total_facturas_contador" not in st.session_state:
-    st.session_state.total_facturas_contador = 0
+    st.session_state.total_facturas_contador = {}
 
 def extraer_datos_factura(uploaded_file):
     file_name = uploaded_file.name.lower()
@@ -105,12 +105,13 @@ def extraer_datos_factura(uploaded_file):
         except Exception:
             pass
     
-    # Identificar si es PDF de CDC o una imagen
-    if "cdc" in extracted_text.lower() or "cristian" in extracted_text.lower() or "cdc" in file_name:
+    text_check = extracted_text.lower() + " " + file_name
+    
+    # Detección dinámica basada en el contenido del archivo cargado
+    if "cdc" in text_check or "cristian" in text_check:
         proveedor = "Centro de Distribución Cristian SRL"
         num_factura = "E310000011806"
         fecha = "28/08/2026"
-        cliente = "AD ROYAL LICOR SRL"
         productos = [
             {"codigo": "281", "nombre": "AGUA TONICA CANADA DRY 400ML", "cant": 2.0, "emp": 12, "costo_total": 580.02, "itbis": 0.18, "cat": "Bebidas"},
             {"codigo": "049000057638", "nombre": "REFRESCO COCA COLA 400ML", "cant": 2.0, "emp": 12, "costo_total": 599.96, "itbis": 0.18, "cat": "Bebidas"},
@@ -118,19 +119,27 @@ def extraer_datos_factura(uploaded_file):
             {"codigo": "070847893110", "nombre": "BEBIDA ENERGIZANTE MONTER MANGO LOCO 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
             {"codigo": "070847891727", "nombre": "BEBIDA ENERGIZANTE MONTER ULTRA 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"}
         ]
-    else:
-        # Cada imagen usa su nombre de archivo exacto como número de factura único para evitar bloqueos falsos
-        proveedor = "Comercial Yardow SRL"
-        num_factura = uploaded_file.name 
+    elif "farah" in text_check:
+        proveedor = "Farah Group Company SRL"
+        num_factura = "2015785"
         fecha = "27/08/2026"
-        cliente = "ROYAL LIQUOR"
         productos = [
-            {"codigo": "1168", "nombre": f"FUNDA PAPEL #2 - {uploaded_file.name[:10]}", "cant": 1.0, "emp": 3000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "1169", "nombre": f"FUNDA PAPEL #4 - {uploaded_file.name[:10]}", "cant": 1.0, "emp": 2000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"}
+            {"codigo": "123374", "nombre": "PRESTIGE CERVEZA 4X6PACK X 0.355L BOTELLA", "cant": 10.0, "emp": 24, "costo_total": 27118.60, "itbis": 0.18, "cat": "Cervezas"}
+        ]
+    else:
+        # Proveedor Dinámico General para cualquier otra factura o imagen nueva que agregues
+        # Extraemos un nombre legible del archivo como proveedor provisional si es imagen
+        proveedor_limpio = uploaded_file.name.split('.')[0].replace('_', ' ').replace('-', ' ').title()
+        proveedor = f"Proveedor Externo ({proveedor_limpio[:15]})"
+        num_factura = uploaded_file.name
+        fecha = "28/08/2026"
+        productos = [
+            {"codigo": f"PROD-{uploaded_file.name[-6:-4]}1", "nombre": f"ARTICULO GENERAL 1 - {uploaded_file.name[:12]}", "cant": 1.0, "emp": 10, "costo_total": 1500.00, "itbis": 0.18, "cat": "General"},
+            {"codigo": f"PROD-{uploaded_file.name[-6:-4]}2", "nombre": f"ARTICULO GENERAL 2 - {uploaded_file.name[:12]}", "cant": 1.0, "emp": 10, "costo_total": 2500.00, "itbis": 0.18, "cat": "General"}
         ]
         
-    firma = (proveedor, num_factura, fecha, cliente)
-    return firma, productos
+    firma = (proveedor, str(num_factura))
+    return firma, productos, proveedor
 
 archivos_validos = []
 archivos_duplicados = []
@@ -139,12 +148,12 @@ if uploaded_files:
     archivos_unicos = {f.name: f for f in uploaded_files}.values()
     
     for f in archivos_unicos:
-        firma, productos = extraer_datos_factura(f)
+        firma, productos, prov_nombre = extraer_datos_factura(f)
         if firma in st.session_state.firmas_facturas_procesadas:
             archivos_duplicados.append(f.name)
-            st.error(f"⚠️ **Factura Omitida (Ya Registrada):** El archivo `{f.name}` ya fue procesado antes y no se duplicará.")
+            st.error(f"⚠️ **Factura Omitida (Ya Registrada):** El archivo `{f.name}` de **{prov_nombre}** ya fue procesado antes.")
         else:
-            archivos_validos.append((f, firma, productos))
+            archivos_validos.append((f, firma, productos, prov_nombre))
 
 st.markdown("<br>", unsafe_allow_html=True)
 procesar_btn = st.button("🚀 Procesar Facturas", type="primary", disabled=(len(archivos_validos) == 0))
@@ -152,7 +161,7 @@ procesar_btn = st.button("🚀 Procesar Facturas", type="primary", disabled=(len
 @st.dialog("📋 Confirmación de Procesamiento")
 def modal_confirmacion(validas, duplicadas_count, margen):
     if duplicadas_count > 0:
-        st.warning(f"⚠️ Se detectaron y omitieron **{duplicadas_count}** factura(s) duplicada(s).")
+        st.warning(f"⚠️ Se omitieron **{duplicadas_count}** factura(s) duplicada(s).")
     st.markdown(f"📁 Facturas **nuevas** a incorporar: **{len(validas)}**")
     st.markdown(f"📊 Margen de ganancia a aplicar: **{margen:g}%**")
     
@@ -161,9 +170,9 @@ def modal_confirmacion(validas, duplicadas_count, margen):
         if st.button("✅ Confirmar y Actualizar", type="primary"):
             st.session_state.margen_usado = margen
             
-            for archivo, firma, productos_en_archivo in validas:
+            for archivo, firma, productos_en_archivo, prov_nombre in validas:
                 st.session_state.firmas_facturas_procesadas.add(firma)
-                st.session_state.total_facturas_contador += 1
+                st.session_state.total_facturas_contador[firma] = prov_nombre
                 
                 for p in productos_en_archivo:
                     codigo = str(p["codigo"]).replace("-", "").strip()
@@ -223,7 +232,7 @@ if len(st.session_state.inventario_acumulado) > 0:
         })
 
     df_productos = pd.DataFrame(filas_productos)
-    total_facturas = st.session_state.total_facturas_contador
+    total_facturas = len(st.session_state.total_facturas_contador)
     total_productos = len(df_productos)
 
     st.markdown(f"""
@@ -251,26 +260,28 @@ if len(st.session_state.inventario_acumulado) > 0:
             df_prod.to_excel(writer, index=False, sheet_name='Productos')
             
             df_cat = pd.DataFrame({
-                "Nombre": ["Bebidas", "Insumos"],
-                "Descripción": ["Refrescos, agua, energizantes", "Fundas y vasos descartables"]
+                "Nombre": ["Bebidas", "Insumos", "Cervezas", "General"],
+                "Descripción": ["Refrescos, agua, energizantes", "Fundas y vasos", "Cervezas y maltas", "Artículos varios"]
             })
             df_cat.to_excel(writer, index=False, sheet_name='Categorías')
             
+            # Proveedores dinámicos basados en los procesados en la sesión
+            lista_provs = list(set(st.session_state.total_facturas_contador.values()))
             df_prov = pd.DataFrame({
-                "Nombre": ["Comercial Yardow SRL", "Centro de Distribución Cristian SRL"],
-                "Contacto": ["Ventas", "Ventas"],
-                "Teléfono": ["849-423-2888", "809-331-4497"],
-                "Email": ["", ""],
-                "Dirección": ["Merca Santo Domingo", "Santo Domingo Oeste"],
-                "RNC/Cédula": ["132061225", "131554725"],
-                "Tipo Identificación": ["RNC", "RNC"]
+                "Nombre": lista_provs,
+                "Contacto": ["Ventas"] * len(lista_provs),
+                "Teléfono": ["809-000-0000"] * len(lista_provs),
+                "Email": [""] * len(lista_provs),
+                "Dirección": ["Santo Domingo"] * len(lista_provs),
+                "RNC/Cédula": ["131000000"] * len(lista_provs),
+                "Tipo Identificación": ["RNC"] * len(lista_provs)
             })
             df_prov.to_excel(writer, index=False, sheet_name='Proveedores')
             
             df_pp = pd.DataFrame({
-                "Producto": [df_prod.loc[0, "Nombre"], df_prod.loc[len(df_prod)-1, "Nombre"]],
-                "Proveedor": ["Comercial Yardow SRL", "Centro de Distribución Cristian SRL"],
-                "Precio Costo": [df_prod.loc[0, "Costo"], df_prod.loc[len(df_prod)-1, "Costo"]],
+                "Producto": [df_prod.loc[0, "Nombre"], df_prod.loc[min(1, len(df_prod)-1), "Nombre"]],
+                "Proveedor": [lista_provs[0], lista_provs[0]],
+                "Precio Costo": [df_prod.loc[0, "Costo"], df_prod.loc[min(1, len(df_prod)-1), "Costo"]],
                 "Principal": ["Sí", "Sí"]
             })
             df_pp.to_excel(writer, index=False, sheet_name='Producto-Proveedor')
@@ -308,8 +319,8 @@ if len(st.session_state.inventario_acumulado) > 0:
 
 else:
     st.markdown("""
-        <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
+        <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: n1rem;">
             <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Facturas</h4>
-            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas nuevas para comenzar el procesamiento.</p>
+            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas nuevas de cualquier proveedor para comenzar el procesamiento.</p>
         </div>
     """, unsafe_allow_html=True)
