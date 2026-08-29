@@ -59,7 +59,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Inicializar estados de la sesión de forma segura (Margen default cambiado a 35.0%)
+# Inicializar estados de la sesión de forma segura
 if "inventario_acumulado" not in st.session_state:
     st.session_state.inventario_acumulado = {}
 if "firmas_facturas_procesadas" not in st.session_state:
@@ -80,7 +80,7 @@ with col_head1:
     st.markdown("""
         <div class="main-header" style="margin-bottom: 0rem;">
             <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-            <p>Control automático, validación de duplicados y notificación de artículos repetidos entre facturas.</p>
+            <p>Control automático y validación estricta de facturas y artículos.</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -114,7 +114,7 @@ with col1:
 
 with col2:
     uploaded_files = st.file_uploader(
-        "📂 Selecciona o arrastra tus facturas (PDF, imágenes de cualquier proveedor)", 
+        "📂 Selecciona o arrastra tus facturas (PDF, imágenes de tus proveedores)", 
         type=["pdf", "png", "jpg", "jpeg"], 
         accept_multiple_files=True,
         key=f"uploader_{st.session_state.uploader_key}"
@@ -146,6 +146,11 @@ def extraer_datos_factura(uploaded_file):
     
     text_lower = extracted_text.lower()
     full_search = text_lower + " " + file_name
+
+    productos = []
+    proveedor = ""
+    num_factura = ""
+    fecha = "28/08/2026"
 
     # 1. Álvarez & Sánchez
     if "alvarez" in full_search or "sanchez" in full_search or "álvarez" in full_search or "576999" in full_search or "7501035013483" in full_search or "cristalino" in full_search or "whatsapp image 2026-08-29" in file_name:
@@ -213,29 +218,16 @@ def extraer_datos_factura(uploaded_file):
             {"codigo": "746023416", "nombre": "VASO FOAM TERMO ENVASE #16 20/25", "cant": 1.0, "emp": 500, "costo_total": 1864.41, "itbis": 0.18, "cat": "Insumos"},
             {"codigo": "7460234PL7", "nombre": "VASO PLASTICO #7 TERMO ENVASE Y CIELO 50", "cant": 1.0, "emp": 500, "costo_total": 1779.66, "itbis": 0.18, "cat": "Insumos"}
         ]
-    else:
-        # Proveedor Universal
-        lineas = [l.strip() for l in extracted_text.split('\n') if l.strip()]
-        proveedor = "Proveedor General SRL"
-        num_factura = f"FAC-{abs(hash(uploaded_file.name)) % 100000}"
-        fecha = "28/08/2026"
-        
-        for l in lineas:
-            if "ncf" in l.lower() or "factura" in l.lower():
-                nums = re.findall(r'\b\d{6,}\b', l)
-                if nums:
-                    num_factura = nums[0]
-                    break
-        
-        productos = [
-            {"codigo": f"GEN-{abs(hash(uploaded_file.name)) % 9000 + 1000}", "nombre": f"PRODUCTO FACTURA {num_factura}", "cant": 1.0, "emp": 1, "costo_total": 1000.00, "itbis": 0.18, "cat": "General"}
-        ]
+    
+    if not productos:
+        return None, None, None, None, []
         
     firma = (proveedor, str(num_factura))
     return firma, proveedor, num_factura, fecha, productos
 
 archivos_validos = []
 archivos_duplicados = []
+archivos_invalidos = []
 
 if uploaded_files:
     archivos_unicos = {f.name: f for f in uploaded_files}.values()
@@ -243,11 +235,17 @@ if uploaded_files:
     for f in archivos_unicos:
         firma, proveedor, num_fac, fecha_fac, productos = extraer_datos_factura(f)
         
-        if firma in st.session_state.firmas_facturas_procesadas:
+        if not productos:
+            archivos_invalidos.append(f.name)
+        elif firma in st.session_state.firmas_facturas_procesadas:
             archivos_duplicados.append(f.name)
             st.error(f"⚠️ **Factura Omitida (Ya Registrada):** El archivo `{f.name}` (Proveedor: **{proveedor}**, Factura No. **{num_fac}**) ya fue procesado antes.")
         else:
             archivos_validos.append((f, firma, proveedor, num_fac, fecha_fac, productos))
+
+if archivos_invalidos:
+    for inv in archivos_invalidos:
+        st.warning(f"⚠️ **Archivo Omitido:** `{inv}` no pudo ser reconocido automáticamente como una factura válida de inventario.")
 
 st.markdown("<br>", unsafe_allow_html=True)
 procesar_btn = st.button("🚀 Procesar Facturas", type="primary", disabled=(len(archivos_validos) == 0))
@@ -445,6 +443,6 @@ else:
     st.markdown("""
         <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
             <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Facturas</h4>
-            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas nuevas de cualquier proveedor para comenzar el procesamiento.</p>
+            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas válidas para comenzar el procesamiento.</p>
         </div>
     """, unsafe_allow_html=True)
