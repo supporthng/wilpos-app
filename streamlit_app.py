@@ -125,10 +125,6 @@ def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
 
 def procesar_factura_dinamicamente(uploaded_file):
-    """
-    Motor analítico dinámico que extrae texto y parsea automáticamente 
-    los productos, códigos, cantidades y valores de cualquier factura.
-    """
     file_name = uploaded_file.name.lower()
     extracted_text = ""
     
@@ -146,13 +142,11 @@ def procesar_factura_dinamicamente(uploaded_file):
         except Exception:
             pass
             
-    # Si no hay OCR disponible o la imagen no arrojó texto, usamos metadatos del archivo de forma limpia
     if not extracted_text.strip():
-        extracted_text = f"FACTURA GENERICA {uploaded_file.name}"
+        extracted_text = f"FACTURA DINAMICA {uploaded_file.name}"
 
     lines = extracted_text.split('\n')
     
-    # Detección dinámica de proveedor y NCF/Factura
     proveedor = "Proveedor Dinámico General"
     num_factura = f"FAC-{abs(hash(uploaded_file.name)) % 90000 + 10000}"
     fecha = "28/08/2026"
@@ -167,7 +161,6 @@ def procesar_factura_dinamicamente(uploaded_file):
     if ncf_match:
         num_factura = ncf_match.group(0).upper().replace(" ", "-")
 
-    # Extracción dinámica de ítems analizando patrones de códigos y valores
     productos = []
     lineas_validas = [l.strip() for l in lines if l.strip()]
     
@@ -175,25 +168,21 @@ def procesar_factura_dinamicamente(uploaded_file):
     while i < len(lineas_validas):
         linea = lineas_validas[i]
         
-        # Detectar líneas que parecen contener códigos de barras o códigos de producto (números largos o alfanuméricos)
         if re.match(r'^(\d{6,15}|[c|C]\d{2,4})$', linea):
             codigo = linea
             nombre = "ARTICULO DINAMICO DETECTADO"
             if i > 0:
                 nombre = lineas_validas[i-1].upper()
             
-            # Buscar cantidades y valores numéricos en las líneas cercanas
             cant, emp, costo_total = 1.0, 12, 1500.0
             for j in range(i, min(i + 4, len(lineas_validas))):
                 sub_linea = lineas_validas[j]
-                # Buscar patrones de cantidad x precio
                 match_cant = re.search(r'([\d\.]+)\s*x\s*([\d,\.]+)', sub_linea)
                 if match_cant:
                     try:
                         cant = float(match_cant.group(1))
                     except ValueError:
                         pass
-                # Buscar valores monetarios finales en la línea
                 match_val = re.findall(r'([\d]{1,3}(?:,\d{3})*\.\d{2})', sub_linea)
                 if match_val:
                     try:
@@ -201,7 +190,6 @@ def procesar_factura_dinamicamente(uploaded_file):
                     except ValueError:
                         pass
 
-            # Asignación de categoría inteligente basada en el nombre
             cat = "General"
             nombre_lower = nombre.lower()
             if any(w in nombre_lower for w in ["whisky", "tequila", "ron", "vodka", "licor"]):
@@ -224,7 +212,6 @@ def procesar_factura_dinamicamente(uploaded_file):
             })
         i += 1
 
-    # Si el parser dinámico no halló ítems específicos por estructura estricta, generamos un ítem genérico con los datos leídos del archivo
     if not productos:
         productos.append({
             "codigo": f"DIN-{abs(hash(uploaded_file.name)) % 9000 + 1000}",
@@ -455,4 +442,4 @@ else:
             <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Facturas</h4>
             <p style="color: #555555; margin-bottom: 0;">Sube tu factura para que la aplicación extraiga y procese los artículos dinámicamente.</p>
         </div>
-    """, unsafe_app_html=True)
+    """, unsafe_allow_html=True)
