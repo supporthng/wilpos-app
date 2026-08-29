@@ -75,7 +75,7 @@ with col_head1:
     st.markdown("""
         <div class="main-header" style="margin-bottom: 0rem;">
             <h1>📦 Procesador Dinámico de Facturas WilPOS</h1>
-            <p>Análisis OCR con filtrado estricto de metadatos y detección total de artículos (Margen 35%).</p>
+            <p>Análisis OCR con anclaje estricto por código de producto (Margen 35%).</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -117,7 +117,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
 
-def procesar_factura_estricta(file):
+def procesar_factura_por_codigo(file):
     file_name = file.name.lower()
     extracted_text = ""
     
@@ -170,69 +170,62 @@ def procesar_factura_estricta(file):
 
     productos = {}
     
-    for i, line in enumerate(lines):
-        match_cant_precio = re.search(r'([\d\.]+)\s*[xX]\s*([\d,\.]+)', line)
-        if match_cant_precio:
-            try:
-                cant = float(match_cant_precio.group(1))
-            except ValueError:
-                cant = 1.0
-                
+    # Motor de análisis anclado por Código de Producto (ej: P1016, 7501035010192, etc.)
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        # Detectar si la línea es un código válido (alfanumérico de 4 a 15 caracteres sin espacios)
+        if re.match(r'^([A-Z0-9]{4,15})$', line) and not any(b in line.upper() for b in black_list) and not re.search(r'[\d]\s*[xX]\s*[\d]', line):
+            codigo = line
+            nombre_partes = []
+            cant = 1.0
+            emp = 12
             costo_total = 1000.00
-            match_vals = re.findall(r'([\d]{1,3}(?:,\d{3})*\.\d{2})', line)
-            if match_vals:
-                try:
-                    costo_total = float(match_vals[-1].replace(',', ''))
-                except ValueError:
-                    pass
-            else:
-                if i + 1 < len(lines):
-                    match_next_vals = re.findall(r'([\d]{1,3}(?:,\d{3})*\.\d{2})', lines[i+1])
-                    if match_next_vals:
+            
+            # Recorrer hacia adelante desde el código para extraer nombre, empaque y cantidad x precio
+            j = i + 1
+            while j < len(lines) and j < i + 6:
+                sig_line = lines[j]
+                sig_upper = sig_line.upper()
+                
+                # Si encontramos la línea de cantidad x precio, extraemos los valores y paramos el bloque
+                match_cant_precio = re.search(r'([\d\.]+)\s*[xX]\s*([\d,\.]+)', sig_line)
+                if match_cant_precio:
+                    try:
+                        cant = float(match_cant_precio.group(1))
+                    except ValueError:
+                        pass
+                    match_vals = re.findall(r'([\d]{1,3}(?:,\d{3})*\.\d{2})', sig_line)
+                    if match_vals:
                         try:
-                            costo_total = float(match_next_vals[-1].replace(',', ''))
+                            costo_total = float(match_vals[-1].replace(',', ''))
                         except ValueError:
                             pass
-
-            nombre_partes = []
-            codigo = f"PROD-{i}"
-            emp = 12
-            
-            for j in range(i - 1, max(-1, i - 6), -1):
-                l_up = lines[j]
-                l_up_upper = l_up.upper()
-                
-                if re.search(r'[\d]\s*[xX]\s*[\d]', l_up):
                     break
                 
-                if any(b in l_up_upper for b in ["VALIDO", "HASTA", "RNC", "NCF", "ID", "FECHA"]):
-                    continue
-                
-                if "PAQUETE" in l_up_upper or "CAJA" in l_up_upper or "DISPLAY" in l_up_upper:
-                    nums_emp = re.findall(r'\d+', l_up)
+                # Detectar empaques
+                if "PAQUETE" in sig_upper or "CAJA" in sig_upper or "DISPLAY" in sig_upper:
+                    nums_emp = re.findall(r'\d+', sig_line)
                     if nums_emp:
                         emp = int(nums_emp[-1])
+                    j += 1
                     continue
-                elif "UNIDAD" in l_up_upper:
+                elif "UNIDAD" in sig_upper:
                     emp = 1
+                    j += 1
                     continue
                 
-                if re.match(r'^([A-Z0-9]{4,15})$', l_up) and not any(b in l_up_upper for b in black_list):
-                    if len(l_up) >= 4 and codigo.startswith("PROD"):
-                        codigo = l_up
-                    continue
-                
-                if not any(b in l_up_upper for b in black_list):
-                    clean_l = re.sub(r'\d{1,3}(?:,\d{3})*\.\d{2}|[;\\:]', '', l_up).strip()
+                # Acumular texto descriptivo limpio
+                if not any(b in sig_upper for b in black_list):
+                    clean_l = re.sub(r'\d{1,3}(?:,\d{3})*\.\d{2}|[;\\:]', '', sig_line).strip()
                     if len(clean_l) > 2 and not clean_l.isdigit():
-                        nombre_partes.insert(0, clean_l.upper())
-
-            if codigo.startswith("PROD") and nombre_partes and len(nombre_partes[0]) <= 15 and not " " in nombre_partes[0]:
-                codigo = nombre_partes.pop(0)
-
+                        nombre_partes.append(clean_l.upper())
+                
+                j += 1
+            
             nombre = " ".join(nombre_partes).strip()
-            if not nombre or len(nombre) < 3:
-                nombre = f"ARTICULO {codigo}"
+            if not nombre:
+                nombre = f"PRODUCTO {codigo}"
 
             cat = "General"
             n_lower = nombre.lower()
@@ -254,11 +247,14 @@ def procesar_factura_estricta(file):
                     "emp": emp,
                     "itbis": 0.18
                 }
+            i = j # Saltar las líneas ya procesadas de este producto
+        else:
+            i += 1
 
     return proveedor, num_factura, fecha, productos
 
 if uploaded_file:
-    prov, num_fac, fecha_fac, prods_extraidos = procesar_factura_estricta(uploaded_file)
+    prov, num_fac, fecha_fac, prods_extraidos = procesar_factura_por_codigo(uploaded_file)
     
     st.session_state.inventario_activo = prods_extraidos
     st.session_state.detalle_factura_activa = {
