@@ -50,8 +50,8 @@ col_head1, col_head2 = st.columns([3, 1], gap="medium")
 with col_head1:
     st.markdown("""
         <div class="main-header" style="margin-bottom: 0rem;">
-            <h1>📦 Procesador WilPOS Definitivo</h1>
-            <p>Extracción limpia con conversor universal de montos (Margen 35%).</p>
+            <h1>📦 Procesador WilPOS con Filtro Anti-Cliente</h1>
+            <p>Extracción precisa de productos sin confundir datos de cabecera (Margen 35%).</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -98,7 +98,6 @@ def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
 
 def limpiar_monto(texto_monto):
-    """Convierte cadenas de precios con comas o puntos a float de forma segura"""
     try:
         limpio = re.sub(r'[^\d,\.]', '', texto_monto)
         if ',' in limpio and '.' in limpio:
@@ -112,7 +111,7 @@ def limpiar_monto(texto_monto):
     except Exception:
         return 0.0
 
-def procesar_factura_robusta(file):
+def procesar_factura_filtrada(file):
     file_name = file.name.lower()
     extracted_text = ""
     
@@ -145,22 +144,27 @@ def procesar_factura_robusta(file):
             num_factura = ncf_m.group(0).upper()
             break
 
-    ignorar = ["RNC", "NCF", "SUBTOTAL", "ITBIS", "TOTAL", "VALIDO", "HASTA", "ATENDIDO", "BANR", "TRANSFERENCIA", "POPULAR", "BANRESERVAS", "BANESCO", "BHD", "FIRMA", "DIGITAL", "DIRECCION", "TELEFONO", "CLIENTE", "CENTRO", "DISTRIBUCION", "CRISTIAN", "SRL", "CALLE", "SANTO", "DOMINGO", "REPUBLICA", "DOMINICANA", "DESCRIPCION", "VALOR", "FACTURA", "CREDITO", "FISCAL", "ELECTRONICA"]
+    # Lista negra estricta para evitar clientes, empresas y metadatos fiscales
+    ignorar = [
+        "DUSP", "ROYAL", "CLUB", "SRL", "RNC", "NCF", "SUBTOTAL", "ITBIS", "TOTAL", 
+        "VALIDO", "HASTA", "ATENDIDO", "BANR", "TRANSFERENCIA", "POPULAR", "BANRESERVAS", 
+        "BANESCO", "BHD", "FIRMA", "DIGITAL", "DIRECCION", "TELEFONO", "CLIENTE",
+        "CENTRO", "DISTRIBUCION", "CRISTIAN", "CALLE", "SANTO", "DOMINGO", "REPUBLICA", 
+        "DOMINICANA", "DESCRIPCION", "VALOR", "FACTURA", "CREDITO", "FISCAL", "ELECTRONICA"
+    ]
 
     productos = {}
     i = 0
     while i < len(lines):
         line = lines[i]
-        # Detectar patrones de cantidad x precio (ej: 5 x 800.00, 2 X 1,500)
         match_cant_precio = re.search(r'([\d\.]+)\s*[xX]\s*([\d,\.]+)', line)
         if match_cant_precio:
             try:
-                cant = float(match_cant_precio.group(1).replace('.', '')) if '.' in match_cant_precio.group(1) and len(match_cant_precio.group(1))>3 else float(match_cant_precio.group(1))
+                cant = float(match_cant_precio.group(1))
             except ValueError:
                 cant = 1.0
                 
             costo_total = 1000.00
-            # Buscar el valor monetario al final de la línea de precio
             partes_linea = re.findall(r'[\d][\d,\.]+', line)
             if partes_linea:
                 costo_total = limpiar_monto(partes_linea[-1])
@@ -177,6 +181,8 @@ def procesar_factura_robusta(file):
                 
                 if re.search(r'[\d]\s*[xX]\s*[\d]', l_up):
                     break
+                
+                # Omitir cualquier línea que contenga palabras prohibidas de clientes o encabezados
                 if any(w in l_up_upper for w in ignorar):
                     continue
                 
@@ -198,7 +204,7 @@ def procesar_factura_robusta(file):
                     nombre_partes.append(clean_l.upper())
 
             nombre = " ".join(nombre_partes).strip()
-            if not nombre:
+            if not nombre or any(w in nombre.upper() for w in ignorar):
                 nombre = f"PRODUCTO {codigo}"
 
             cat = "General"
@@ -226,7 +232,7 @@ def procesar_factura_robusta(file):
     return proveedor, num_factura, fecha, productos
 
 if uploaded_file:
-    prov, num_fac, fecha_fac, prods_extraidos = procesar_factura_robusta(uploaded_file)
+    prov, num_fac, fecha_fac, prods_extraidos = procesar_factura_filtrada(uploaded_file)
     st.session_state.inventario_activo = prods_extraidos
     st.session_state.detalle_factura_activa = {
         "proveedor": prov, "num_factura": num_fac, "fecha": fecha_fac, "cantidad_articulos": len(prods_extraidos)
