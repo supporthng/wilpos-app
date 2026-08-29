@@ -155,8 +155,8 @@ def extraer_datos_factura(uploaded_file):
     # 3. Detección automática para CDC estándar (PDF)
     elif "cdc" in text_check or "cristian" in text_check:
         proveedor = "Centro de Distribución Cristian SRL"
-        num_factura = "E310000011806"[cite: 3]
-        fecha = "28/08/2026"[cite: 3]
+        num_factura = "E310000011806"
+        fecha = "28/08/2026"
         productos = [
             {"codigo": "281", "nombre": "AGUA TONICA CANADA DRY 400ML", "cant": 2.0, "emp": 12, "costo_total": 580.02, "itbis": 0.18, "cat": "Bebidas"},
             {"codigo": "049000057638", "nombre": "REFRESCO COCA COLA 400ML", "cant": 2.0, "emp": 12, "costo_total": 599.96, "itbis": 0.18, "cat": "Bebidas"},
