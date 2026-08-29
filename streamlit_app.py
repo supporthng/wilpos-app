@@ -8,7 +8,7 @@ uploaded_file = st.file_uploader("Sube la foto de tu factura", type=["png", "jpg
 
 if uploaded_file is not None:
     image = Image.open(uploaded_file)
-    st.image(image, caption="Foto cargada", use_column_width=True)
+    st.image(image, caption="Foto cargada", use_container_width=True)
     
     # Extraer texto crudo sin filtros para ver qué lee el celular
     texto_crudo = pytesseract.image_to_string(image)
