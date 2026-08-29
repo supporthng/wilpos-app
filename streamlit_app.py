@@ -50,8 +50,8 @@ col_head1, col_head2 = st.columns([3, 1], gap="medium")
 with col_head1:
     st.markdown("""
         <div class="main-header" style="margin-bottom: 0rem;">
-            <h1>📦 Procesador WilPOS con Vista Previa</h1>
-            <p>Sube tu factura, visualiza la imagen y genera tu Excel (Margen 35%).</p>
+            <h1>📦 Procesador WilPOS Definitivo</h1>
+            <p>Extracción limpia con conversor universal de montos (Margen 35%).</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -85,7 +85,6 @@ with col2:
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# MOSTRAR VISTA PREVIA DE LA IMAGEN O ARCHIVO CARGADO
 if uploaded_file is not None:
     file_name_lower = uploaded_file.name.lower()
     if file_name_lower.endswith(('.png', '.jpg', '.jpeg')):
@@ -98,7 +97,22 @@ if uploaded_file is not None:
 def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
 
-def procesar_factura_con_preview(file):
+def limpiar_monto(texto_monto):
+    """Convierte cadenas de precios con comas o puntos a float de forma segura"""
+    try:
+        limpio = re.sub(r'[^\d,\.]', '', texto_monto)
+        if ',' in limpio and '.' in limpio:
+            if limpio.rfind(',') > limpio.rfind('.'):
+                limpio = limpio.replace('.', '').replace(',', '.')
+            else:
+                limpio = limpio.replace(',', '')
+        elif ',' in limpio:
+            limpio = limpio.replace(',', '.')
+        return float(limpio)
+    except Exception:
+        return 0.0
+
+def procesar_factura_robusta(file):
     file_name = file.name.lower()
     extracted_text = ""
     
@@ -137,20 +151,21 @@ def procesar_factura_con_preview(file):
     i = 0
     while i < len(lines):
         line = lines[i]
+        # Detectar patrones de cantidad x precio (ej: 5 x 800.00, 2 X 1,500)
         match_cant_precio = re.search(r'([\d\.]+)\s*[xX]\s*([\d,\.]+)', line)
         if match_cant_precio:
             try:
-                cant = float(match_cant_precio.group(1))
+                cant = float(match_cant_precio.group(1).replace('.', '')) if '.' in match_cant_precio.group(1) and len(match_cant_precio.group(1))>3 else float(match_cant_precio.group(1))
             except ValueError:
                 cant = 1.0
                 
             costo_total = 1000.00
-            match_vals = re.findall(r'([\d]{1,3}(?:,\d{3})*\.\d{2})', line)
-            if match_vals:
-                try:
-                    costo_total = float(match_vals[-1].replace(',', ''))
-                except ValueError:
-                    pass
+            # Buscar el valor monetario al final de la línea de precio
+            partes_linea = re.findall(r'[\d][\d,\.]+', line)
+            if partes_linea:
+                costo_total = limpiar_monto(partes_linea[-1])
+                if costo_total == 0:
+                    costo_total = 1000.00
 
             nombre_partes = []
             codigo = f"PROD-{i}"
@@ -178,7 +193,7 @@ def procesar_factura_con_preview(file):
                     codigo = l_up
                     continue
                 
-                clean_l = re.sub(r'\d{1,3}(?:,\d{3})*\.\d{2}|[;\\:]', '', l_up).strip()
+                clean_l = re.sub(r'\d{1,3}(?:[,\.]\d{3})*(?:[,\.]\d{2})?|[;\\:]', '', l_up).strip()
                 if len(clean_l) > 2 and not clean_l.isdigit():
                     nombre_partes.append(clean_l.upper())
 
@@ -211,7 +226,7 @@ def procesar_factura_con_preview(file):
     return proveedor, num_factura, fecha, productos
 
 if uploaded_file:
-    prov, num_fac, fecha_fac, prods_extraidos = procesar_factura_con_preview(uploaded_file)
+    prov, num_fac, fecha_fac, prods_extraidos = procesar_factura_robusta(uploaded_file)
     st.session_state.inventario_activo = prods_extraidos
     st.session_state.detalle_factura_activa = {
         "proveedor": prov, "num_factura": num_fac, "fecha": fecha_fac, "cantidad_articulos": len(prods_extraidos)
