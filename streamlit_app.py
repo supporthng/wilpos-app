@@ -59,13 +59,13 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Inicializar estados de la sesión de forma segura
+# Inicializar estados de la sesión de forma segura (Margen default cambiado a 35.0%)
 if "inventario_acumulado" not in st.session_state:
     st.session_state.inventario_acumulado = {}
 if "firmas_facturas_procesadas" not in st.session_state:
     st.session_state.firmas_facturas_procesadas = set()
 if "margen_usado" not in st.session_state:
-    st.session_state.margen_usado = 25.0
+    st.session_state.margen_usado = 35.0
 if "detalle_facturas_procesadas" not in st.session_state:
     st.session_state.detalle_facturas_procesadas = {}
 if "uploader_key" not in st.session_state:
@@ -90,7 +90,7 @@ with col_head2:
         st.session_state.inventario_acumulado = {}
         st.session_state.firmas_facturas_procesadas = set()
         st.session_state.detalle_facturas_procesadas = {}
-        st.session_state.margen_usado = 25.0
+        st.session_state.margen_usado = 35.0
         st.session_state.articulos_repetidos_notif = []
         st.session_state.uploader_key += 1
         st.success("¡Memoria y archivos limpiados correctamente!")
@@ -107,7 +107,7 @@ with col1:
         "💡 Digite el margen de ganancia (%)", 
         min_value=0.0, 
         max_value=500.0, 
-        value=st.session_state.get("margen_usado", 25.0), 
+        value=st.session_state.get("margen_usado", 35.0), 
         step=1.0,
         help="Debe ser mayor al 15% para procesar el inventario."
     )
@@ -263,7 +263,7 @@ def modal_confirmacion(validas, duplicadas_count, margen):
     with col_btn1:
         if st.button("✅ Confirmar y Actualizar", type="primary"):
             st.session_state.margen_usado = margen
-            st.session_state.articulos_repetidos_notif = [] # Limpiar notificación anterior
+            st.session_state.articulos_repetidos_notif = []
             
             for archivo, firma, proveedor, num_fac, fecha_fac, productos_en_archivo in validas:
                 st.session_state.firmas_facturas_procesadas.add(firma)
@@ -279,7 +279,6 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                     codigo = str(p["codigo"]).replace("-", "").strip()
                     cantidad_comprada_unidades = p["cant"] * p["emp"]
                     
-                    # Notificar si el artículo ya existía previamente en otra factura
                     if codigo in st.session_state.inventario_acumulado:
                         nombre_art = p["nombre"]
                         st.session_state.articulos_repetidos_notif.append(
@@ -309,7 +308,6 @@ if procesar_btn:
         modal_confirmacion(archivos_validos, len(archivos_duplicados), margen_porcentaje)
 
 if len(st.session_state.inventario_acumulado) > 0:
-    # Mostrar notificaciones visuales si se detectaron artículos repetidos en diferentes facturas
     if st.session_state.articulos_repetidos_notif:
         with st.expander("🔔 **Notificación de Artículos Coincidentes en Facturas Diferentes**", expanded=True):
             for notif in st.session_state.articulos_repetidos_notif:
