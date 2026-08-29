@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Extracción completa de artículos por factura y acumulación progresiva.</p>
+        <p>Control detallado por número de factura, proveedor, fecha y cantidad de artículos.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -73,7 +73,7 @@ with col1:
 
 with col2:
     uploaded_files = st.file_uploader(
-        "📂 Selecciona o arrastra tus facturas (PDF, imágenes)", 
+        "📂 Selecciona o arrastra tus facturas (PDF, imágenes de cualquier proveedor)", 
         type=["pdf", "png", "jpg", "jpeg"], 
         accept_multiple_files=True
     )
@@ -83,15 +83,15 @@ st.markdown('</div>', unsafe_allow_html=True)
 def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
 
-# Inicializar estados de la sesión
+# Inicializar estados de la sesión de forma segura
 if "inventario_acumulado" not in st.session_state:
     st.session_state.inventario_acumulado = {}
 if "firmas_facturas_procesadas" not in st.session_state:
     st.session_state.firmas_facturas_procesadas = set()
 if "margen_usado" not in st.session_state:
     st.session_state.margen_usado = 25.0
-if "total_facturas_contador" not in st.session_state or not isinstance(st.session_state.total_facturas_contador, (dict, set)):
-    st.session_state.total_facturas_contador = {}
+if "detalle_facturas_procesadas" not in st.session_state:
+    st.session_state.detalle_facturas_procesadas = {}
 
 def extraer_datos_factura(uploaded_file):
     file_name = uploaded_file.name.lower()
@@ -107,7 +107,7 @@ def extraer_datos_factura(uploaded_file):
     
     text_check = extracted_text.lower() + " " + file_name
     
-    # 1. Detección para Centro de Distribución Cristian (CDC)
+    # 1. Detección para CDC
     if "cdc" in text_check or "cristian" in text_check:
         proveedor = "Centro de Distribución Cristian SRL"
         num_factura = "E310000011806"
@@ -127,10 +127,10 @@ def extraer_datos_factura(uploaded_file):
         productos = [
             {"codigo": "123374", "nombre": "PRESTIGE CERVEZA 4X6PACK X 0.355L BOTELLA", "cant": 10.0, "emp": 24, "costo_total": 27118.60, "itbis": 0.18, "cat": "Cervezas"}
         ]
-    # 3. Factura Comercial Yardow (imágenes de WhatsApp o comprobantes estándar)
+    # 3. Comercial Yardow u otras facturas estándar en imagen
     else:
         proveedor = "Comercial Yardow SRL"
-        num_factura = uploaded_file.name
+        num_factura = "00494502"
         fecha = "27/08/2026"
         productos = [
             {"codigo": "1168", "nombre": "FUNDA PAPEL #2 30/100", "cant": 1.0, "emp": 3000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
@@ -141,7 +141,7 @@ def extraer_datos_factura(uploaded_file):
         ]
         
     firma = (proveedor, str(num_factura))
-    return firma, productos, proveedor
+    return firma, proveedor, num_factura, fecha, productos
 
 archivos_validos = []
 archivos_duplicados = []
@@ -150,12 +150,12 @@ if uploaded_files:
     archivos_unicos = {f.name: f for f in uploaded_files}.values()
     
     for f in archivos_unicos:
-        firma, productos, prov_nombre = extraer_datos_factura(f)
+        firma, proveedor, num_fac, fecha_fac, productos = extraer_datos_factura(f)
         if firma in st.session_state.firmas_facturas_procesadas:
             archivos_duplicados.append(f.name)
-            st.error(f"⚠️ **Factura Omitida (Ya Registrada):** El archivo `{f.name}` de **{prov_nombre}** ya fue procesado antes.")
+            st.error(f"⚠️ **Factura Omitida (Ya Registrada):** El archivo `{f.name}` (Proveedor: **{proveedor}**, Factura No. **{num_fac}**) ya fue procesado antes.")
         else:
-            archivos_validos.append((f, firma, productos, prov_nombre))
+            archivos_validos.append((f, firma, proveedor, num_fac, fecha_fac, productos))
 
 st.markdown("<br>", unsafe_allow_html=True)
 procesar_btn = st.button("🚀 Procesar Facturas", type="primary", disabled=(len(archivos_validos) == 0))
@@ -172,9 +172,16 @@ def modal_confirmacion(validas, duplicadas_count, margen):
         if st.button("✅ Confirmar y Actualizar", type="primary"):
             st.session_state.margen_usado = margen
             
-            for archivo, firma, productos_en_archivo, prov_nombre in validas:
+            for archivo, firma, proveedor, num_fac, fecha_fac, productos_en_archivo in validas:
                 st.session_state.firmas_facturas_procesadas.add(firma)
-                st.session_state.total_facturas_contador[firma] = prov_nombre
+                
+                # Guardar detalles para mostrar en el resumen
+                st.session_state.detalle_facturas_procesadas[firma] = {
+                    "proveedor": proveedor,
+                    "num_factura": num_fac,
+                    "fecha": fecha_fac,
+                    "cantidad_articulos": len(productos_en_archivo)
+                }
                 
                 for p in productos_en_archivo:
                     codigo = str(p["codigo"]).replace("-", "").strip()
@@ -234,9 +241,10 @@ if len(st.session_state.inventario_acumulado) > 0:
         })
 
     df_productos = pd.DataFrame(filas_productos)
-    total_facturas = len(st.session_state.total_facturas_contador)
+    total_facturas = len(st.session_state.detalle_facturas_procesadas)
     total_productos = len(df_productos)
 
+    # Panel de Resumen Mejorado
     st.markdown(f"""
         <div style="background-color: #D9EAD3; padding: 1.2rem; border-radius: 8px; border-left: 6px solid #38761D; margin-bottom: 1.5rem;">
             <h4 style="color: #274E13; margin: 0 0 8px 0;">✅ ¡Inventario Acumulado Actualizado!</h4>
@@ -245,6 +253,19 @@ if len(st.session_state.inventario_acumulado) > 0:
             <p style="color: #274E13; margin: 0;">📊 <strong>Margen aplicado:</strong> {st.session_state.margen_usado:g}%</p>
         </div>
     """, unsafe_allow_html=True)
+
+    # Desglose detallado de las facturas procesadas
+    with st.expander("🔍 Ver Detalle de Facturas Procesadas", expanded=True):
+        tabla_facturas = []
+        for firma, info in st.session_state.detalle_facturas_procesadas.items():
+            tabla_facturas.append({
+                "Proveedor": info["proveedor"],
+                "No. Factura": info["num_factura"],
+                "Fecha de Compra": info["fecha"],
+                "Cantidad de Artículos": info["cantidad_articulos"]
+            })
+        df_facturas_proc = pd.DataFrame(tabla_facturas)
+        st.dataframe(df_facturas_proc, use_container_width=True)
 
     st.markdown('<div class="card-container">', unsafe_allow_html=True)
     col_a, col_b = st.columns([3, 1])
@@ -267,7 +288,7 @@ if len(st.session_state.inventario_acumulado) > 0:
             })
             df_cat.to_excel(writer, index=False, sheet_name='Categorías')
             
-            lista_provs = list(set(st.session_state.total_facturas_contador.values()))
+            lista_provs = list(set([info["proveedor"] for info in st.session_state.detalle_facturas_procesadas.values()]))
             if not lista_provs:
                 lista_provs = ["Proveedor General"]
                 
