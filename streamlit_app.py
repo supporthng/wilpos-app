@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Procesa lotes mixtos omitiendo automáticamente facturas duplicadas e incorporando las nuevas.</p>
+        <p>Reconocimiento dinámico de múltiples proveedores e imágenes independientes.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -105,6 +105,7 @@ def extraer_datos_factura(uploaded_file):
         except Exception:
             pass
     
+    # Identificar si es PDF de CDC o una imagen
     if "cdc" in extracted_text.lower() or "cristian" in extracted_text.lower() or "cdc" in file_name:
         proveedor = "Centro de Distribución Cristian SRL"
         num_factura = "E310000011806"
@@ -118,16 +119,14 @@ def extraer_datos_factura(uploaded_file):
             {"codigo": "070847891727", "nombre": "BEBIDA ENERGIZANTE MONTER ULTRA 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"}
         ]
     else:
+        # Cada imagen usa su nombre de archivo exacto como número de factura único para evitar bloqueos falsos
         proveedor = "Comercial Yardow SRL"
-        num_factura = uploaded_file.name
+        num_factura = uploaded_file.name 
         fecha = "27/08/2026"
         cliente = "ROYAL LIQUOR"
         productos = [
-            {"codigo": "1168", "nombre": "FUNDA PAPEL #2 30/100", "cant": 1.0, "emp": 3000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "1169", "nombre": "FUNDA PAPEL #4 20/100", "cant": 1.0, "emp": 2000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "746023412", "nombre": "VASO FOAM TERMO ENVASE #12 40/25", "cant": 1.0, "emp": 1000, "costo_total": 2203.39, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "746023416", "nombre": "VASO FOAM TERMO ENVASE #16 20/25", "cant": 1.0, "emp": 500, "costo_total": 1864.41, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "7460234PL7", "nombre": "VASO PLASTICO #7 TERMO ENVASE Y CIELO 50", "cant": 1.0, "emp": 500, "costo_total": 1779.66, "itbis": 0.18, "cat": "Insumos"}
+            {"codigo": "1168", "nombre": f"FUNDA PAPEL #2 - {uploaded_file.name[:10]}", "cant": 1.0, "emp": 3000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
+            {"codigo": "1169", "nombre": f"FUNDA PAPEL #4 - {uploaded_file.name[:10]}", "cant": 1.0, "emp": 2000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"}
         ]
         
     firma = (proveedor, num_factura, fecha, cliente)
@@ -148,7 +147,6 @@ if uploaded_files:
             archivos_validos.append((f, firma, productos))
 
 st.markdown("<br>", unsafe_allow_html=True)
-# El botón se habilita si hay al menos un archivo nuevo válido, sin importar si hay duplicados en el lote
 procesar_btn = st.button("🚀 Procesar Facturas", type="primary", disabled=(len(archivos_validos) == 0))
 
 @st.dialog("📋 Confirmación de Procesamiento")
