@@ -62,7 +62,7 @@ with st.sidebar:
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Detección automática de proveedores, facturas y artículos sin selecciones manuales.</p>
+        <p>Control automático de proveedores, validación de facturas duplicadas y artículos consolidados sin repetición.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -125,7 +125,7 @@ def extraer_datos_factura(uploaded_file):
             {"codigo": "123374", "nombre": "PRESTIGE CERVEZA 4X6PACK X 0.355L BOTELLA", "cant": 10.0, "emp": 24, "costo_total": 27118.60, "itbis": 0.18, "cat": "Cervezas"}
         ]
         
-    # 2. Detección automática para tickets de CDC (26 de agosto - Ciclón, Coco, Whisky, Tequila, etc.)
+    # 2. Detección automática para tickets de CDC (26 de agosto - Ciclón, Coco, Whisky, etc.)
     elif "2026-08-26" in file_name and ("16.52.41" in file_name or "14.30.10" in file_name):
         proveedor = "Centro de Distribución Cristian SRL"
         num_factura = "E31000011783"
@@ -221,6 +221,7 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                     "cantidad_articulos": len(productos_en_archivo)
                 }
                 
+                # Validación de duplicados de artículos: Agrupa y acumula por código de barra único
                 for p in productos_en_archivo:
                     codigo = str(p["codigo"]).replace("-", "").strip()
                     cantidad_comprada_unidades = p["cant"] * p["emp"]
