@@ -25,12 +25,6 @@ st.markdown("""
             color: #555555;
             margin-bottom: 2rem;
         }
-        .upload-box {
-            background-color: #F8F9FA;
-            padding: 20px;
-            border-radius: 10px;
-            border: 1px dashed #D0D7DE;
-        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -205,7 +199,7 @@ if uploaded_files:
     df_productos = pd.DataFrame(filas_productos)
 
     st.markdown("### 📊 2. Vista Previa del Inventario Procesado")
-    st.info(Se aplicó un margen de ganancia del **{margen_porcentaje:g}%** sobre los costos unitarios con redondeo a múltiplos de 5.)
+    st.info(f"Se aplicó un margen de ganancia del **{margen_porcentaje:g}%** sobre los costos unitarios con redondeo a múltiplos de 5.")
     st.dataframe(df_productos, use_container_width=True)
 
     def generar_excel_wilpos(df_prod):
