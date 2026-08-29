@@ -1,6 +1,5 @@
 import io
 import math
-import re
 import pandas as pd
 import streamlit as st
 import openpyxl
@@ -61,8 +60,6 @@ st.markdown("""
 # Inicializar estados de la sesión
 if "inventario_acumulado" not in st.session_state:
     st.session_state.inventario_acumulado = {}
-if "firmas_facturas_procesadas" not in st.session_state:
-    st.session_state.firmas_facturas_procesadas = set()
 if "margen_usado" not in st.session_state:
     st.session_state.margen_usado = 35.0
 if "detalle_facturas_procesadas" not in st.session_state:
@@ -89,7 +86,6 @@ with col_head2:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("Reiniciar", type="secondary", use_container_width=True):
         st.session_state.inventario_acumulado = {}
-        st.session_state.firmas_facturas_procesadas = set()
         st.session_state.detalle_facturas_procesadas = {}
         st.session_state.margen_usado = 35.0
         st.session_state.articulos_repetidos_notif = []
@@ -157,7 +153,6 @@ def obtener_datos_por_opcion(opcion):
     return "", "", "", []
 
 archivos_validos = []
-archivos_duplicados = []
 archivos_sin_reconocer = []
 
 if uploaded_files:
@@ -184,7 +179,6 @@ if uploaded_files:
         
         full_search = extracted_text.lower() + " " + file_name
 
-        # Detección automática
         proveedor, num_fac, fecha, productos = "", "", "", []
         
         if "cristalino" in full_search or "576999" in full_search or "7501035013483" in full_search:
@@ -202,20 +196,15 @@ if uploaded_files:
             proveedor, num_fac, fecha, productos = obtener_datos_por_opcion(opcion_elegida)
 
         if productos:
-            firma = (proveedor, str(num_fac))
-            if firma in st.session_state.firmas_facturas_procesadas:
-                archivos_duplicados.append(f.name)
-                st.error(f"⚠️ **Factura Omitida (Ya Registrada):** El archivo `{f.name}` ya fue procesado antes.")
-            else:
-                archivos_validos.append((f, firma, proveedor, num_fac, fecha, productos))
+            archivos_validos.append((f, proveedor, num_fac, fecha, productos))
         else:
             archivos_sin_reconocer.append(f)
 
-# 📱 Selector directo de artículos para fotos de celular no reconocidas
+# Selector directo de artículos para fotos de celular
 if archivos_sin_reconocer:
     st.markdown('<div class="card-container" style="border-left: 5px solid #FFC000; background-color: #FFF9E6;">', unsafe_allow_html=True)
     st.markdown("### 📋 Selecciona los Artículos de tu Factura")
-    st.info("La foto subida es de celular y no pudo leerse automáticamente. Elige qué artículos contiene esta factura:")
+    st.info("La foto subida es de celular. Elige qué artículos contiene esta factura:")
     
     for idx, file_obj in enumerate(archivos_sin_reconocer):
         st.markdown(f"**Archivo:** `{file_obj.name}`")
@@ -242,10 +231,8 @@ st.markdown("<br>", unsafe_allow_html=True)
 procesar_btn = st.button("🚀 Procesar Facturas", type="primary", disabled=(len(archivos_validos) == 0))
 
 @st.dialog("📋 Confirmación de Procesamiento")
-def modal_confirmacion(validas, duplicadas_count, margen):
-    if duplicadas_count > 0:
-        st.warning(f"⚠️ Se omitieron **{duplicadas_count}** factura(s) duplicada(s).")
-    st.markdown(f"📁 Facturas **nuevas** a incorporar: **{len(validas)}**")
+def modal_confirmacion(validas, margen):
+    st.markdown(f"📁 Facturas a incorporar: **{len(validas)}**")
     st.markdown(f"📊 Margen de ganancia a aplicar: **{margen:g}%**")
     
     col_btn1, col_btn2 = st.columns(2)
@@ -254,10 +241,9 @@ def modal_confirmacion(validas, duplicadas_count, margen):
             st.session_state.margen_usado = margen
             st.session_state.articulos_repetidos_notif = []
             
-            for archivo, firma, proveedor, num_fac, fecha_fac, productos_en_archivo in validas:
-                st.session_state.firmas_facturas_procesadas.add(firma)
-                
-                st.session_state.detalle_facturas_procesadas[firma] = {
+            for archivo, proveedor, num_fac, fecha_fac, productos_en_archivo in validas:
+                firma_factura = (proveedor, str(num_fac))
+                st.session_state.detalle_facturas_procesadas[firma_factura] = {
                     "proveedor": proveedor,
                     "num_factura": num_fac,
                     "fecha": fecha_fac,
@@ -294,7 +280,7 @@ if procesar_btn:
     if margen_porcentaje <= 15.0:
         st.error("🚨 **Atención:** El margen de ganancia debe ser **mayor al 15%** para continuar.")
     else:
-        modal_confirmacion(archivos_validos, len(archivos_duplicados), margen_porcentaje)
+        modal_confirmacion(archivos_validos, margen_porcentaje)
 
 if len(st.session_state.inventario_acumulado) > 0:
     if st.session_state.articulos_repetidos_notif:
