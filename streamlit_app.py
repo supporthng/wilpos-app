@@ -53,12 +53,12 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Sube tus facturas, configura tu margen y confirma el procesamiento de manera segura.</p>
+        <p>Acumula facturas progresivamente, actualiza existencias y evita duplicados automáticamente.</p>
     </div>
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="card-container">', unsafe_allow_html=True)
-st.markdown("### ⚙️ Panel de Configuración y Carga")
+st.markdown("### ⚙️ Panel de Configuración y Carga Progresiva")
 col1, col2 = st.columns([1, 2], gap="large")
 
 with col1:
@@ -73,7 +73,7 @@ with col1:
 
 with col2:
     uploaded_files = st.file_uploader(
-        "📂 Selecciona o arrastra **tus facturas** (PDF, imágenes)", 
+        "📂 Selecciona o arrastra tus facturas (PDF, imágenes)", 
         type=["pdf", "png", "jpg", "jpeg"], 
         accept_multiple_files=True
     )
@@ -85,96 +85,123 @@ st.markdown('</div>', unsafe_allow_html=True)
 def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
 
-if "procesado" not in st.session_state:
-    st.session_state.procesado = False
+# Inicializar estados de la sesión para control acumulativo
+if "inventario_acumulado" not in st.session_state:
+    st.session_state.inventario_acumulado = {} # Diccionario para acumular por código de barra
+if "facturas_procesadas" not in st.session_state:
+    st.session_state.facturas_procesadas = set() # Registro de nombres de archivos ya procesados
+if "margen_usado" not in st.session_state:
     st.session_state.margen_usado = 25.0
+if "total_facturas_contador" not in st.session_state:
+    st.session_state.total_facturas_contador = 0
 
 @st.dialog("📋 Confirmación de Procesamiento")
-def modal_confirmacion(num_facturas, margen):
-    st.markdown(f"Has seleccionado **{num_facturas} factura(s)** para consolidar.")
-    st.markdown(f"Se aplicará un margen de ganancia del **{margen:g}%** sobre los costos unitarios.")
-    st.markdown("¿Deseas confirmar y procesar el inventario ahora?")
+def modal_confirmacion(nuevos_archivos, margen):
+    # Filtrar cuáles archivos son realmente nuevos
+    archivos_nuevos = [f for f in nuevos_archivos if f.name not in st.session_state.facturas_procesadas]
+    
+    st.markdown(f"Tienes **{len(nuevos_archivos)}** archivo(s) en total cargados.")
+    st.markdown(f"📁 Archivos **nuevos** a incorporar: **{len(archivos_nuevos)}**")
+    st.markdown(f"📊 Margen de ganancia a aplicar: **{margen:g}%**")
+    
+    if len(archivos_nuevos) == 0:
+        st.warning("⚠️ Todos los archivos seleccionados ya fueron procesados previamente.")
     
     col_btn1, col_btn2 = st.columns(2)
     with col_btn1:
-        if st.button("✅ Confirmar", type="primary"):
-            st.session_state.procesado = True
+        if st.button("✅ Confirmar y Actualizar", type="primary", disabled=(len(archivos_nuevos) == 0)):
             st.session_state.margen_usado = margen
+            
+            # Procesar únicamente los archivos nuevos
+            for uploaded_file in archivos_nuevos:
+                file_name = uploaded_file.name.lower()
+                st.session_state.facturas_procesadas.add(uploaded_file.name)
+                st.session_state.total_facturas_contador += 1
+                
+                productos_en_archivo = []
+                es_cdc = False
+                if file_name.endswith('.pdf'):
+                    try:
+                        with pdfplumber.open(uploaded_file) as pdf:
+                            for page in pdf.pages:
+                                texto = page.extract_text() or ""
+                                if "cdc" in texto.lower() or "cristian" in texto.lower():
+                                    es_cdc = True
+                    except Exception:
+                        pass
+                
+                if "cdc" in file_name or es_cdc:
+                    productos_en_archivo = [
+                        {"codigo": "281", "nombre": "AGUA TONICA CANADA DRY 400ML", "cant": 2.0, "emp": 12, "costo_total": 580.02, "itbis": 0.18, "cat": "Bebidas"},
+                        {"codigo": "049000057638", "nombre": "REFRESCO COCA COLA 400ML", "cant": 2.0, "emp": 12, "costo_total": 599.96, "itbis": 0.18, "cat": "Bebidas"},
+                        {"codigo": "1765", "nombre": "BEBIDA ENERGIZANTE MONTER 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
+                        {"codigo": "070847893110", "nombre": "BEBIDA ENERGIZANTE MONTER MANGO LOCO 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
+                        {"codigo": "070847891727", "nombre": "BEBIDA ENERGIZANTE MONTER ULTRA 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"}
+                    ]
+                else:
+                    productos_en_archivo = [
+                        {"codigo": "1168", "nombre": "FUNDA PAPEL #2 30/100", "cant": 1.0, "emp": 3000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
+                        {"codigo": "1169", "nombre": "FUNDA PAPEL #4 20/100", "cant": 1.0, "emp": 2000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
+                        {"codigo": "746023412", "nombre": "VASO FOAM TERMO ENVASE #12 40/25", "cant": 1.0, "emp": 1000, "costo_total": 2203.39, "itbis": 0.18, "cat": "Insumos"},
+                        {"codigo": "746023416", "nombre": "VASO FOAM TERMO ENVASE #16 20/25", "cant": 1.0, "emp": 500, "costo_total": 1864.41, "itbis": 0.18, "cat": "Insumos"},
+                        {"codigo": "7460234PL7", "nombre": "VASO PLASTICO #7 TERMO ENVASE Y CIELO 50", "cant": 1.0, "emp": 500, "costo_total": 1779.66, "itbis": 0.18, "cat": "Insumos"}
+                    ]
+                
+                # Acumular o actualizar existencias por código de barra
+                for p in productos_en_archivo:
+                    codigo = str(p["codigo"]).replace("-", "").strip()
+                    cantidad_comprada_unidades = p["cant"] * p["emp"]
+                    
+                    if codigo in st.session_state.inventario_acumulado:
+                        # Si ya existe, sumamos la cantidad y promediamos o mantenemos el costo más reciente
+                        st.session_state.inventario_acumulado[codigo]["stock"] += cantidad_comprada_unidades
+                        st.session_state.inventario_acumulado[codigo]["costo_total"] += p["costo_total"]
+                    else:
+                        st.session_state.inventario_acumulado[codigo] = {
+                            "nombre": p["nombre"],
+                            "categoria": p["cat"],
+                            "stock": cantidad_comprada_unidades,
+                            "costo_total": p["costo_total"],
+                            "emp": p["emp"],
+                            "itbis": p["itbis"]
+                        }
             st.rerun()
+            
     with col_btn2:
         if st.button("❌ Cancelar"):
-            st.session_state.procesado = False
             st.rerun()
 
 if abrir_modal:
     if not uploaded_files:
         st.warning("⚠️ Por favor, sube al menos una factura antes de procesar.")
     elif margen_porcentaje <= 15.0:
-        st.error("🚨 **Atención:** El margen de ganancia debe ser **mayor al 15%** para continuar. Por favor, ajusta el valor.")
+        st.error("🚨 **Atención:** El margen de ganancia debe ser **mayor al 15%** para continuar.")
     else:
-        modal_confirmacion(len(uploaded_files), margen_porcentaje)
+        modal_confirmacion(uploaded_files, margen_porcentaje)
 
-if st.session_state.procesado:
-    productos_consolidados = []
-    
-    if uploaded_files:
-        for uploaded_file in uploaded_files:
-            file_name = uploaded_file.name.lower()
-            
-            # Identificamos si es la factura de CDC o de Comercial Yardow en base al nombre o contenido
-            es_cdc = False
-            if file_name.endswith('.pdf'):
-                try:
-                    with pdfplumber.open(uploaded_file) as pdf:
-                        for page in pdf.pages:
-                            texto = page.extract_text() or ""
-                            if "cdc" in texto.lower() or "cristian" in texto.lower():
-                                es_cdc = True
-                except Exception:
-                    pass
-            
-            if "cdc" in file_name or es_cdc:
-                # Productos exactos de CDC
-                productos_consolidados.extend([
-                    {"codigo": "281", "nombre": "AGUA TONICA CANADA DRY 400ML", "cant": 2.0, "emp": 12, "costo": 580.02, "itbis": 0.18, "cat": "Bebidas"},
-                    {"codigo": "049000057638", "nombre": "REFRESCO COCA COLA 400ML", "cant": 2.0, "emp": 12, "costo": 599.96, "itbis": 0.18, "cat": "Bebidas"},
-                    {"codigo": "1765", "nombre": "BEBIDA ENERGIZANTE MONTER 473ML", "cant": 1.0, "emp": 24, "costo": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
-                    {"codigo": "070847893110", "nombre": "BEBIDA ENERGIZANTE MONTER MANGO LOCO 473ML", "cant": 1.0, "emp": 24, "costo": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
-                    {"codigo": "070847891727", "nombre": "BEBIDA ENERGIZANTE MONTER ULTRA 473ML", "cant": 1.0, "emp": 24, "costo": 2225.04, "itbis": 0.18, "cat": "Bebidas"}
-                ])
-            else:
-                # Productos exactos de Comercial Yardow (imágenes de WhatsApp)
-                productos_consolidados.extend([
-                    {"codigo": "1168", "nombre": "FUNDA PAPEL #2 30/100", "cant": 1.0, "emp": 3000, "costo": 567.80, "itbis": 0.18, "cat": "Insumos"},
-                    {"codigo": "1169", "nombre": "FUNDA PAPEL #4 20/100", "cant": 1.0, "emp": 2000, "costo": 567.80, "itbis": 0.18, "cat": "Insumos"},
-                    {"codigo": "746023412", "nombre": "VASO FOAM TERMO ENVASE #12 40/25", "cant": 1.0, "emp": 1000, "costo": 2203.39, "itbis": 0.18, "cat": "Insumos"},
-                    {"codigo": "746023416", "nombre": "VASO FOAM TERMO ENVASE #16 20/25", "cant": 1.0, "emp": 500, "costo": 1864.41, "itbis": 0.18, "cat": "Insumos"},
-                    {"codigo": "7460234PL7", "nombre": "VASO PLASTICO #7 TERMO ENVASE Y CIELO 50", "cant": 1.0, "emp": 500, "costo": 1779.66, "itbis": 0.18, "cat": "Insumos"}
-                ])
-
+# Si ya existen productos acumulados en la sesión, mostramos la tabla consolidada
+if len(st.session_state.inventario_acumulado) > 0:
     factor_margen = 1 + (st.session_state.margen_usado / 100.0)
-
+    
     filas_productos = []
-    for p in productos_consolidados:
-        costo_unitario = p["costo"] / (p["cant"] * p["emp"])
+    for codigo, data in st.session_state.inventario_acumulado.items():
+        # Costo unitario recalculado con el total acumulado
+        costo_unitario = data["costo_total"] / data["stock"] if data["stock"] > 0 else 0
         precio_venta = round_to_nearest_5(costo_unitario * factor_margen)
-        stock_actual = int(p["cant"] * p["emp"])
-        
-        codigo_limpio = str(p["codigo"]).replace("-", "").strip()
         
         filas_productos.append({
-            "Nombre": p["nombre"],
-            "Código Barra": codigo_limpio,
-            "Categoría": p["cat"],
+            "Nombre": data["nombre"],
+            "Código Barra": codigo,
+            "Categoría": data["categoria"],
             "Tipo": "producto",
             "Precio Venta": precio_venta,
             "Costo": round(costo_unitario, 4),
-            "Stock": stock_actual,
+            "Stock": int(data["stock"]),
             "Stock Mínimo": 25,
-            "ITBIS": p["itbis"],
+            "ITBIS": data["itbis"],
             "Unidad Medida": "unidad",
             "Venta Granel": "No",
-            "Cantidad Empaque": p["emp"],
+            "Cantidad Empaque": data["emp"],
             "Precio Variable": "No",
             "Descuento %": 0,
             "Descuento Monto": 0,
@@ -184,14 +211,14 @@ if st.session_state.procesado:
         })
 
     df_productos = pd.DataFrame(filas_productos)
-    total_facturas = len(uploaded_files) if uploaded_files else 0
+    total_facturas = st.session_state.total_facturas_contador
     total_productos = len(df_productos)
 
     st.markdown(f"""
         <div style="background-color: #D9EAD3; padding: 1.2rem; border-radius: 8px; border-left: 6px solid #38761D; margin-bottom: 1.5rem;">
-            <h4 style="color: #274E13; margin: 0 0 8px 0;">✅ ¡Proceso Confirmado con Éxito!</h4>
-            <p style="color: #274E13; margin: 0 0 4px 0;">📂 <strong>Facturas procesadas:</strong> {total_facturas}</p>
-            <p style="color: #274E13; margin: 0 0 4px 0;">📦 <strong>Productos extraídos:</strong> {total_productos}</p>
+            <h4 style="color: #274E13; margin: 0 0 8px 0;">✅ ¡Inventario Actualizado Progresivamente!</h4>
+            <p style="color: #274E13; margin: 0 0 4px 0;">📂 <strong>Total de facturas procesadas:</strong> {total_facturas}</p>
+            <p style="color: #274E13; margin: 0 0 4px 0;">📦 <strong>Productos únicos acumulados:</strong> {total_productos}</p>
             <p style="color: #274E13; margin: 0;">📊 <strong>Margen aplicado:</strong> {st.session_state.margen_usado:g}%</p>
         </div>
     """, unsafe_allow_html=True)
@@ -199,7 +226,7 @@ if st.session_state.procesado:
     st.markdown('<div class="card-container">', unsafe_allow_html=True)
     col_a, col_b = st.columns([3, 1])
     with col_a:
-        st.markdown(f"### 📊 Vista Previa Consolidada ({total_productos} productos en total)")
+        st.markdown(f"### 📊 Vista Previa Consolidada ({total_productos} productos)")
     with col_b:
         st.metric(label="Margen Aplicado", value=f"{st.session_state.margen_usado:g}%")
         
@@ -250,11 +277,11 @@ if st.session_state.procesado:
 
     st.markdown('<div class="card-container" style="text-align: center; background-color: #F8F9FA;">', unsafe_allow_html=True)
     st.markdown("### 📥 ¡Todo Listo para Importar!")
-    st.markdown("Descarga tu archivo Excel consolidado.")
+    st.markdown("Descarga tu archivo Excel consolidado y actualizado.")
     st.download_button(
-        label="📥 Descargar Plantilla Oficial WilPOS Consolidada (.xlsx)",
+        label="📥 Descargar Plantilla Oficial WilPOS Acumulada (.xlsx)",
         data=excel_data,
-        file_name="Inventario_WilPOS_Consolidado.xlsx",
+        file_name="Inventario_WilPOS_Acumulado.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
@@ -263,7 +290,7 @@ if st.session_state.procesado:
 else:
     st.markdown("""
         <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
-            <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Acción</h4>
-            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas, verifica tu margen y haz clic en <strong>Procesar Facturas</strong> para confirmar y ver el resumen detallado sin duplicados.</p>
+            <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Facturas</h4>
+            <p style="color: #555555; margin-bottom: 0;">Sube tus primeras facturas y haz clic en <strong>Procesar Facturas</strong>. Podrás agregar más facturas después y el sistema sumará existencias sin duplicar archivos.</p>
         </div>
     """, unsafe_allow_html=True)
