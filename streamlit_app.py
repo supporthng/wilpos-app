@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Validación inmediata de duplicados y control estricto de carga de archivos.</p>
+        <p>Filtro automático de facturas duplicadas y acumulación progresiva.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -134,29 +134,25 @@ def extraer_datos_factura(uploaded_file):
     return firma, productos
 
 archivos_validos = []
-archivos_duplicados = []
 
 if uploaded_files:
-    # Evitar procesar dos veces el mismo archivo exacto si el usuario lo subió repetido en la misma selección
     archivos_unicos = {f.name: f for f in uploaded_files}.values()
     
     for f in archivos_unicos:
         firma, productos = extraer_datos_factura(f)
+        # Si la factura ya fue procesada, la ignoramos automáticamente (no se agrega a válidos)
         if firma in st.session_state.firmas_facturas_procesadas:
-            archivos_duplicados.append((f.name, firma))
+            st.warning(f"⚠️ La factura de **{firma[0]}** (No. **{firma[1]}**) ya fue agregada anteriormente. Ha sido omitida automáticamente.")
         else:
             archivos_validos.append((f, firma, productos))
-            
-    if len(archivos_duplicados) > 0:
-        for nom, sig in archivos_duplicados:
-            st.error(f"🚨 **Factura Duplicada Detectada:** El archivo `{nom}` corresponde a una factura ya registrada previamente (**Proveedor:** {sig[0]} | **Factura:** {sig[1]} | **Fecha:** {sig[2]} | **Cliente:** {sig[3]}).")
 
 st.markdown("<br>", unsafe_allow_html=True)
-procesar_btn = st.button("🚀 Procesar Facturas Validadas", type="primary", disabled=(len(uploaded_files) == 0 or len(archivos_duplicados) > 0))
+# Si no hay archivos nuevos válidos (o solo hay duplicados), el botón se bloquea automáticamente
+procesar_btn = st.button("🚀 Procesar Facturas Nuevas", type="primary", disabled=(len(archivos_validos) == 0))
 
 @st.dialog("📋 Confirmación de Procesamiento")
 def modal_confirmacion(validas, margen):
-    st.markdown(f"📁 Archivos **nuevos válidos** listos para incorporar: **{len(validas)}**")
+    st.markdown(f"📁 Facturas **nuevas** listas para incorporar: **{len(validas)}**")
     st.markdown(f"📊 Margen de ganancia a aplicar: **{margen:g}%**")
     
     col_btn1, col_btn2 = st.columns(2)
@@ -306,6 +302,6 @@ else:
     st.markdown("""
         <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
             <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Facturas</h4>
-            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas para validarlas de inmediato. El sistema filtrará archivos repetidos y validará las facturas ya registradas.</p>
+            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas. Las facturas que ya estén registradas se omitirán automáticamente de manera silenciosa.</p>
         </div>
     """, unsafe_allow_html=True)
