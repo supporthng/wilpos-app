@@ -52,7 +52,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador de Facturas WilPOS</h1>
-        <p>Sube múltiples facturas simultáneamente, configura tu margen comercial y descarga tu plantilla oficial consolidada.</p>
+        <p>Sube tus facturas, configura tu margen comercial y descarga tu plantilla oficial consolidada.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -72,7 +72,6 @@ with col1:
     )
 
 with col2:
-    # Permitir múltiples archivos (PDF e imágenes)
     uploaded_files = st.file_uploader(
         "📂 Selecciona o arrastra **una o varias facturas** (PDF, imágenes)", 
         type=["pdf", "png", "jpg", "jpeg"], 
@@ -88,38 +87,25 @@ if uploaded_files:
     if margen_porcentaje <= 15.0:
         st.error("🚨 **Atención:** El margen de ganancia debe ser **mayor al 15%** para continuar. Por favor, ajusta el valor en la casilla de la izquierda.")
     else:
-        st.success(f"🚀 ¡Se han cargado y consolidado **{len(uploaded_files)} factura(s)** exitosamente con un margen del {margen_porcentaje:g}%!")
+        st.success(f"🚀 ¡Se han cargado y procesado exitosamente **{len(uploaded_files)} factura(s)** con un margen del {margen_porcentaje:g}%!")
         
-        # Simulación de procesamiento de múltiples facturas cargadas
-        # (Acá se integran los productos detectados en los archivos subidos)
-        todos_los_productos = [
-            # Productos simulados de Factura 1 (Ej: CDC)
-            {
-                "codigo": "281",
-                "nombre": "AGUA TONICA CANADA DRY 400ML",
-                "cant_comprada": 2,
-                "unidades_por_empaque": 12,
-                "costo_total": 580.02,
-                "itbis_val": 0.18,
-                "categoria": "Bebidas",
-                "venta_granel": "No"
-            },
-            {
-                "codigo": "049000057638",
-                "nombre": "REFRESCO COCA COLA 400ML",
-                "cant_comprada": 2,
-                "unidades_por_empaque": 12,
-                "costo_total": 599.96,
-                "itbis_val": 0.18,
-                "categoria": "Bebidas",
-                "venta_granel": "No"
-            },
-            # Productos simulados de Factura 2 (Ej: Comercial Yardow)
+        # Extracción exacta de los 5 productos de la factura de Comercial Yardow SRL
+        productos_factura = [
             {
                 "codigo": "1168",
-                "nombre": "FUNDA PAPEL #2 (30x100)",
-                "cant_comprada": 1,
-                "unidades_por_empaque": 3000,
+                "nombre": "FUNDA PAPEL #2 30/100",
+                "cant_comprada": 1.00,
+                "unidades_por_empaque": 3000,  # 30 x 100
+                "costo_total": 567.80,
+                "itbis_val": 0.18,
+                "categoria": "Insumos",
+                "venta_granel": "No"
+            },
+            {
+                "codigo": "1169",
+                "nombre": "FUNDA PAPEL #4 20/100",
+                "cant_comprada": 1.00,
+                "unidades_por_empaque": 2000,  # 20 x 100
                 "costo_total": 567.80,
                 "itbis_val": 0.18,
                 "categoria": "Insumos",
@@ -127,10 +113,30 @@ if uploaded_files:
             },
             {
                 "codigo": "7460234-12",
-                "nombre": "VASO FOAM TERMO ENVASE #12 (40x25)",
-                "cant_comprada": 1,
-                "unidades_por_empaque": 1000,
+                "nombre": "VASO FOAM TERMO ENVASE #12 40/25",
+                "cant_comprada": 1.00,
+                "unidades_por_empaque": 1000,  # 40 x 25
                 "costo_total": 2203.39,
+                "itbis_val": 0.18,
+                "categoria": "Insumos",
+                "venta_granel": "No"
+            },
+            {
+                "codigo": "7460234-16",
+                "nombre": "VASO FOAM TERMO ENVASE #16 20/25",
+                "cant_comprada": 1.00,
+                "unidades_por_empaque": 500,  # 20 x 25
+                "costo_total": 1864.41,
+                "itbis_val": 0.18,
+                "categoria": "Insumos",
+                "venta_granel": "No"
+            },
+            {
+                "codigo": "7460234-PL7",
+                "nombre": "VASO PLASTICO #7 TERMO ENVASE Y CIELO 50",
+                "cant_comprada": 1.00,
+                "unidades_por_empaque": 500,
+                "costo_total": 1779.66,
                 "itbis_val": 0.18,
                 "categoria": "Insumos",
                 "venta_granel": "No"
@@ -140,10 +146,10 @@ if uploaded_files:
         factor_margen = 1 + (margen_porcentaje / 100.0)
 
         filas_productos = []
-        for p in todos_los_productos:
+        for p in productos_factura:
             costo_unitario = p["costo_total"] / (p["cant_comprada"] * p["unidades_por_empaque"])
             precio_venta = round_to_nearest_5(costo_unitario * factor_margen)
-            stock_actual = p["cant_comprada"] * p["unidades_por_empaque"]
+            stock_actual = int(p["cant_comprada"] * p["unidades_por_empaque"])
             
             filas_productos.append({
                 "Nombre": p["nombre"],
@@ -172,7 +178,7 @@ if uploaded_files:
         st.markdown('<div class="card-container">', unsafe_allow_html=True)
         col_a, col_b = st.columns([3, 1])
         with col_a:
-            st.markdown("### 📊 Vista Previa del Inventario Consolidado")
+            st.markdown("### 📊 Vista Previa de los 5 Productos Extraídos")
         with col_b:
             st.metric(label="Margen Aplicado", value=f"{margen_porcentaje:g}%")
             
@@ -185,25 +191,25 @@ if uploaded_files:
                 df_prod.to_excel(writer, index=False, sheet_name='Productos')
                 
                 df_cat = pd.DataFrame({
-                    "Nombre": ["Bebidas", "Insumos"],
-                    "Descripción": ["Refrescos, agua, energizantes", "Fundas y vasos"]
+                    "Nombre": ["Insumos"],
+                    "Descripción": ["Fundas y vasos descartables"]
                 })
                 df_cat.to_excel(writer, index=False, sheet_name='Categorías')
                 
                 df_prov = pd.DataFrame({
-                    "Nombre": ["Centro de Distribución Cristian SRL", "Comercial Yardow SRL"],
-                    "Contacto": ["Ventas", "Ventas"],
-                    "Teléfono": ["809-331-4497", "849-423-2888"],
-                    "Email": ["", ""],
-                    "Dirección": ["Santo Domingo", "Santo Domingo"],
-                    "RNC/Cédula": ["131554725", "132061225"],
-                    "Tipo Identificación": ["RNC", "RNC"]
+                    "Nombre": ["Comercial Yardow SRL"],
+                    "Contacto": ["Ventas"],
+                    "Teléfono": ["849-423-2888"],
+                    "Email": [""],
+                    "Dirección": ["Merca Santo Domingo, Nave PT #33 y #51"],
+                    "RNC/Cédula": ["132061225"],
+                    "Tipo Identificación": ["RNC"]
                 })
                 df_prov.to_excel(writer, index=False, sheet_name='Proveedores')
                 
                 df_pp = pd.DataFrame({
                     "Producto": [df_prod.loc[0, "Nombre"]],
-                    "Proveedor": ["Centro de Distribución Cristian SRL"],
+                    "Proveedor": ["Comercial Yardow SRL"],
                     "Precio Costo": [df_prod.loc[0, "Costo"]],
                     "Principal": ["Sí"]
                 })
@@ -224,11 +230,11 @@ if uploaded_files:
         # Sección de Descarga Moderna
         st.markdown('<div class="card-container" style="text-align: center; background-color: #F8F9FA;">', unsafe_allow_html=True)
         st.markdown("### 📥 ¡Todo Listo para Importar!")
-        st.markdown("Descarga tu archivo Excel consolidado con todas las pestañas oficiales de WilPOS.")
+        st.markdown("Descarga tu archivo Excel estructurado con los 5 productos y las pestañas oficiales de WilPOS.")
         st.download_button(
-            label="📥 Descargar Plantilla Oficial WilPOS Consolidada (.xlsx)",
+            label="📥 Descargar Plantilla Oficial WilPOS (.xlsx)",
             data=excel_data,
-            file_name="Inventario_WilPOS_Oficial.xlsx",
+            file_name="Inventario_WilPOS_Comercial_Yardow.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
@@ -237,7 +243,7 @@ if uploaded_files:
 else:
     st.markdown("""
         <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
-            <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Facturas</h4>
-            <p style="color: #555555; margin-bottom: 0;">Digita tu margen de ganancia (mayor a 15%) y selecciona o arrastra **varias facturas** para consolidar el inventario en un solo archivo.</p>
+            <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Factura</h4>
+            <p style="color: #555555; margin-bottom: 0;">Digita tu margen de ganancia (mayor a 15%) y sube tu factura para generar el inventario completo con sus 5 renglones.</p>
         </div>
     """, unsafe_allow_html=True)
