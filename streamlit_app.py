@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Control estricto de archivos duplicados con alerta flotante y bloqueo de carga.</p>
+        <p>Control estricto de duplicados y acumulación progresiva segura.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -134,20 +134,22 @@ def extraer_datos_factura(uploaded_file):
     return firma, productos
 
 archivos_validos = []
+tiene_duplicados = False
 
 if uploaded_files:
     archivos_unicos = {f.name: f for f in uploaded_files}.values()
     
     for f in archivos_unicos:
         firma, productos = extraer_datos_factura(f)
-        # Si la factura ya fue procesada, lanzamos una alerta flotante (toast) exactamente igual a la captura
         if firma in st.session_state.firmas_facturas_procesadas:
-            st.toast(f"Ya has subido un archivo con el nombre {f.name} (Factura No. {firma[1]})", icon="⚠️")
+            tiene_duplicados = True
+            st.error(f"🚨 **Factura Ya Registrada:** El archivo `{f.name}` (Proveedor: **{firma[0]}**, Factura No. **{firma[1]}**) ya fue procesado anteriormente. Por favor, elimínalo del recuadro superior haciendo clic en la **'X'** para poder continuar.")
         else:
             archivos_validos.append((f, firma, productos))
 
 st.markdown("<br>", unsafe_allow_html=True)
-procesar_btn = st.button("🚀 Procesar Facturas Nuevas", type="primary", disabled=(len(archivos_validos) == 0))
+# Si hay duplicados en el selector, el botón se bloquea por completo
+procesar_btn = st.button("🚀 Procesar Facturas", type="primary", disabled=(len(uploaded_files) == 0 or tiene_duplicados))
 
 @st.dialog("📋 Confirmación de Procesamiento")
 def modal_confirmacion(validas, margen):
@@ -301,6 +303,6 @@ else:
     st.markdown("""
         <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
             <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Facturas</h4>
-            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas. Si intentas subir una ya procesada, aparecerá una alerta flotante y se bloqueará su procesamiento.</p>
+            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas nuevas para comenzar el procesamiento.</p>
         </div>
     """, unsafe_allow_html=True)
