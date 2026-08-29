@@ -53,7 +53,7 @@ st.markdown("""
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Acumula facturas progresivamente y actualiza tu inventario en un solo Excel.</p>
+        <p>Control de firmas independientes y acumulación progresiva segura.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -75,8 +75,7 @@ with col2:
     uploaded_files = st.file_uploader(
         "📂 Selecciona o arrastra tus facturas (PDF, imágenes)", 
         type=["pdf", "png", "jpg", "jpeg"], 
-        accept_multiple_files=True,
-        key="file_uploader"
+        accept_multiple_files=True
     )
 
 st.markdown('</div>', unsafe_allow_html=True)
@@ -106,6 +105,7 @@ def extraer_datos_factura(uploaded_file):
         except Exception:
             pass
     
+    # Identificar si es la factura PDF de CDC o una imagen de Comercial Yardow
     if "cdc" in extracted_text.lower() or "cristian" in extracted_text.lower() or "cdc" in file_name:
         proveedor = "Centro de Distribución Cristian SRL"
         num_factura = "E310000011806"
@@ -120,7 +120,8 @@ def extraer_datos_factura(uploaded_file):
         ]
     else:
         proveedor = "Comercial Yardow SRL"
-        num_factura = "00494502"
+        # Usamos el nombre único del archivo como identificador para que cada imagen sea tratada como una factura distinta
+        num_factura = uploaded_file.name
         fecha = "27/08/2026"
         cliente = "ROYAL LIQUOR"
         productos = [
@@ -144,7 +145,7 @@ if uploaded_files:
         firma, productos = extraer_datos_factura(f)
         if firma in st.session_state.firmas_facturas_procesadas:
             tiene_duplicados = True
-            st.error(f"🚨 **Factura Ya Registrada:** El archivo `{f.name}` (Proveedor: **{firma[0]}**, Factura No. **{firma[1]}**) ya fue procesado anteriormente. Por favor, elimínalo del recuadro superior haciendo clic en la **'X'** para poder continuar.")
+            st.error(f"🚨 **Factura Ya Registrada:** El archivo `{f.name}` ya fue procesado anteriormente y no se volverá a incluir.")
         else:
             archivos_validos.append((f, firma, productos))
 
@@ -302,7 +303,6 @@ if len(st.session_state.inventario_acumulado) > 0:
         )
     with col_dl2:
         if st.button("🔄 Procesar más facturas (Agregar al mismo Excel)", type="secondary"):
-            # Limpiamos los archivos seleccionados para permitir una nueva carga manteniendo la memoria acumulada
             st.rerun()
             
     st.markdown('</div>', unsafe_allow_html=True)
