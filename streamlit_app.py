@@ -50,10 +50,19 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# Botón para limpiar memoria en la barra lateral
+with st.sidebar:
+    st.markdown("### ⚙️ Opciones de Sistema")
+    if st.button("🗑️ Limpiar Memoria y Reiniciar", type="secondary"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.success("¡Memoria limpiada correctamente!")
+        st.rerun()
+
 st.markdown("""
     <div class="main-header">
         <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-        <p>Control exacto de artículos completos por factura y acumulación progresiva.</p>
+        <p>Control exacto de artículos acumulados con opción de reinicio de memoria.</p>
     </div>
 """, unsafe_allow_html=True)
 
@@ -127,10 +136,10 @@ def extraer_datos_factura(uploaded_file):
         productos = [
             {"codigo": "123374", "nombre": "PRESTIGE CERVEZA 4X6PACK X 0.355L BOTELLA", "cant": 10.0, "emp": 24, "costo_total": 27118.60, "itbis": 0.18, "cat": "Cervezas"}
         ]
-    # 3. Comercial Yardow (con los 5 artículos completos)
+    # 3. Comercial Yardow
     else:
         proveedor = "Comercial Yardow SRL"
-        num_factura = uploaded_file.name  # Número de factura único basado en el nombre del archivo
+        num_factura = uploaded_file.name
         fecha = "27/08/2026"
         productos = [
             {"codigo": "1168", "nombre": "FUNDA PAPEL #2 30/100", "cant": 1.0, "emp": 3000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
