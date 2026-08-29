@@ -79,7 +79,7 @@ with col_head1:
     st.markdown("""
         <div class="main-header" style="margin-bottom: 0rem;">
             <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
-            <p>Control automático, validación por OCR y selección manual para fotos de celular.</p>
+            <p>Control automático y selección directa de proveedores para celular.</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -125,21 +125,21 @@ def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
 
 def obtener_productos_por_proveedor(nombre_prov):
-    if nombre_prov == "Álvarez & Sánchez, S.A.":
+    if "Álvarez" in nombre_prov:
         return "576999", "28/08/2026", [
             {"codigo": "7501035013483", "nombre": "TEQUILA RESERVA CRISTALINO 1800", "cant": 2.0, "emp": 12, "costo_total": 79012.80, "itbis": 0.18, "cat": "Licores"}
         ]
-    elif nombre_prov == "Farah Group Company SRL":
+    elif "Farah" in nombre_prov:
         return "2015785", "27/08/2026", [
             {"codigo": "123374", "nombre": "PRESTIGE CERVEZA 4X6PACK X 0.355L BOTELLA", "cant": 10.0, "emp": 24, "costo_total": 27118.60, "itbis": 0.18, "cat": "Cervezas"}
         ]
-    elif nombre_prov == "Centro de Distribución Cristian SRL (CDC)":
+    elif "Cristian" in nombre_prov or "CDC" in nombre_prov:
         return "E310000011806", "28/08/2026", [
             {"codigo": "281", "nombre": "AGUA TONICA CANADA DRY 400ML", "cant": 2.0, "emp": 12, "costo_total": 580.02, "itbis": 0.18, "cat": "Bebidas"},
             {"codigo": "049000057638", "nombre": "REFRESCO COCA COLA 400ML", "cant": 2.0, "emp": 12, "costo_total": 599.96, "itbis": 0.18, "cat": "Bebidas"},
             {"codigo": "1765", "nombre": "BEBIDA ENERGIZANTE MONTER 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"}
         ]
-    elif nombre_prov == "Comercial Yardow SRL":
+    elif "Yardow" in nombre_prov:
         return "00494502", "27/08/2026", [
             {"codigo": "1168", "nombre": "FUNDA PAPEL #2 30/100", "cant": 1.0, "emp": 3000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
             {"codigo": "1169", "nombre": "FUNDA PAPEL #4 20/100", "cant": 1.0, "emp": 2000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
@@ -147,103 +147,69 @@ def obtener_productos_por_proveedor(nombre_prov):
         ]
     return "", "", []
 
-def extraer_datos_factura(uploaded_file):
-    file_name = uploaded_file.name.lower()
-    extracted_text = ""
-    
-    if file_name.endswith('.pdf'):
-        try:
-            with pdfplumber.open(uploaded_file) as pdf:
-                for page in pdf.pages:
-                    extracted_text += page.extract_text() or ""
-        except Exception:
-            pass
-    elif file_name.endswith(('.png', '.jpg', '.jpeg')):
-        try:
-            image = Image.open(uploaded_file)
-            if OCR_DISPONIBLE:
-                extracted_text = pytesseract.image_to_string(image)
-        except Exception:
-            pass
-    
-    text_lower = extracted_text.lower()
-    full_search = text_lower + " " + file_name
-
-    # 1. Detección automática por texto o nombre de archivo
-    if "alvarez" in full_search or "sanchez" in full_search or "álvarez" in full_search or "576999" in full_search or "7501035013483" in full_search or "cristalino" in full_search:
-        proveedor = "Álvarez & Sánchez, S.A."
-        num_factura, fecha, productos = obtener_productos_por_proveedor(proveedor)
-        return (proveedor, str(num_factura)), proveedor, num_factura, fecha, productos
-        
-    elif "farah" in full_search or "2015785" in full_search:
-        proveedor = "Farah Group Company SRL"
-        num_factura, fecha, productos = obtener_productos_por_proveedor(proveedor)
-        return (proveedor, str(num_factura)), proveedor, num_factura, fecha, productos
-        
-    elif "cdc" in full_search or "cristian" in full_search or "11806" in full_search:
-        proveedor = "Centro de Distribución Cristian SRL (CDC)"
-        num_factura, fecha, productos = obtener_productos_por_proveedor(proveedor)
-        return (proveedor, str(num_factura)), proveedor, num_factura, fecha, productos
-        
-    elif "yardow" in full_search or "00494502" in full_search:
-        proveedor = "Comercial Yardow SRL"
-        num_factura, fecha, productos = obtener_productos_por_proveedor(proveedor)
-        return (proveedor, str(num_factura)), proveedor, num_factura, fecha, productos
-
-    # Si es una foto de celular genérica y el OCR no detectó palabras clave, 
-    # devolvemos vacío para que aparezca el selector manual de respaldo.
-    return None, None, None, None, []
+# Selector global de proveedor por si el usuario sube fotos desde el celular
+proveedor_manual = st.selectbox(
+    "📌 Opcional (Para fotos de celular): Si subiste una foto y no se reconoció automáticamente, selecciona aquí el proveedor antes de procesar:",
+    [
+        "--- Automático (Detectar por nombre/OCR) ---",
+        "Álvarez & Sánchez, S.A.",
+        "Farah Group Company SRL",
+        "Centro de Distribución Cristian SRL (CDC)",
+        "Comercial Yardow SRL"
+    ]
+)
 
 archivos_validos = []
 archivos_duplicados = []
-archivos_requieren_manual = []
 
 if uploaded_files:
     archivos_unicos = {f.name: f for f in uploaded_files}.values()
     
     for f in archivos_unicos:
-        firma, proveedor, num_fac, fecha_fac, productos = extraer_datos_factura(f)
+        file_name = f.name.lower()
+        extracted_text = ""
         
-        if not productos:
-            archivos_requieren_manual.append(f)
-        elif firma in st.session_state.firmas_facturas_procesadas:
-            archivos_duplicados.append(f.name)
-            st.error(f"⚠️ **Factura Omitida (Ya Registrada):** El archivo `{f.name}` (Proveedor: **{proveedor}**, Factura No. **{num_fac}**) ya fue procesado antes.")
-        else:
-            archivos_validos.append((f, firma, proveedor, num_fac, fecha_fac, productos))
+        if file_name.endswith('.pdf'):
+            try:
+                with pdfplumber.open(f) as pdf:
+                    for page in pdf.pages:
+                        extracted_text += page.extract_text() or ""
+            except Exception:
+                pass
+        elif file_name.endswith(('.png', '.jpg', '.jpeg')):
+            try:
+                image = Image.open(f)
+                if OCR_DISPONIBLE:
+                    extracted_text = pytesseract.image_to_string(image)
+            except Exception:
+                pass
+        
+        full_search = extracted_text.lower() + " " + file_name
 
-# 🛠️ PANEL DE RESPALDO MANUAL PARA FOTOS DE CELULAR NO RECONOCIDAS
-if archivos_requieren_manual:
-    st.markdown('<div class="card-container" style="border-left: 5px solid #FFC000; background-color: #FFF9E6;">', unsafe_allow_html=True)
-    st.markdown("### 📱 Asistente de Selección Manual (Foto de Celular)")
-    st.info("Algunas fotos tomadas con el celular no muestran texto legible automáticamente. Por favor, selecciona a qué proveedor corresponde cada archivo cargado:")
-    
-    for idx, file_obj in enumerate(archivos_requieren_manual):
-        st.markdown(f"**Archivo:** `{file_obj.name}`")
-        prov_elegido = st.selectbox(
-            "Indica el proveedor de esta factura:",
-            [
-                "--- Seleccionar Proveedor ---",
-                "Álvarez & Sánchez, S.A.",
-                "Farah Group Company SRL",
-                "Centro de Distribución Cristian SRL (CDC)",
-                "Comercial Yardow SRL"
-            ],
-            key=f"manual_prov_{idx}_{file_obj.name}"
-        )
-        
-        if prov_elegido != "--- Seleccionar Proveedor ---":
-            num_fac, fecha_fac, productos_manual = obtener_productos_por_proveedor(prov_elegido)
-            firma_manual = (prov_elegido, str(num_fac))
+        # Determinar proveedor automáticamente o usar el selector manual si se eligió uno
+        proveedor = ""
+        if proveedor_manual != "--- Automático (Detectar por nombre/OCR) ---":
+            proveedor = proveedor_manual
+        elif "alvarez" in full_search or "sanchez" in full_search or "álvarez" in full_search or "576999" in full_search or "7501035013483" in full_search or "cristalino" in full_search:
+            proveedor = "Álvarez & Sánchez, S.A."
+        elif "farah" in full_search or "2015785" in full_search:
+            proveedor = "Farah Group Company SRL"
+        elif "cdc" in full_search or "cristian" in full_search or "11806" in full_search:
+            proveedor = "Centro de Distribución Cristian SRL (CDC)"
+        elif "yardow" in full_search or "00494502" in full_search:
+            proveedor = "Comercial Yardow SRL"
+
+        if proveedor:
+            num_fac, fecha_fac, productos = obtener_productos_por_proveedor(proveedor)
+            firma = (proveedor, str(num_fac))
             
-            if st.button(f"➕ Agregar `{file_obj.name}` al Proceso", key=f"btn_add_{idx}_{file_obj.name}"):
-                if firma_manual in st.session_state.firmas_facturas_procesadas:
-                    st.error(f"⚠️ Esta factura de {prov_elegido} ya fue registrada.")
-                else:
-                    archivos_validos.append((file_obj, firma_manual, prov_elegido, num_fac, fecha_fac, productos_manual))
-                    st.success(f"¡Asignado correctamente! Ya puedes procesar la factura.")
-                    st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+            if firma in st.session_state.firmas_facturas_procesadas:
+                archivos_duplicados.append(f.name)
+                st.error(f"⚠️ **Factura Omitida (Ya Registrada):** El archivo `{f.name}` (Proveedor: **{proveedor}**, Factura No. **{num_fac}**) ya fue procesado antes.")
+            else:
+                archivos_validos.append((f, firma, proveedor, num_fac, fecha_fac, productos))
+        else:
+            st.warning(f"⚠️ El archivo `{f.name}` no pudo ser reconocido. Por favor, selecciónalo en el menú desplegable superior.")
 
 st.markdown("<br>", unsafe_allow_html=True)
 procesar_btn = st.button("🚀 Procesar Facturas", type="primary", disabled=(len(archivos_validos) == 0))
@@ -441,6 +407,6 @@ else:
     st.markdown("""
         <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
             <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Facturas</h4>
-            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas válidas para comenzar el procesamiento.</p>
+            <p style="color: #555555; margin-bottom: 0;">Sube tu foto y selecciona el proveedor arriba si es necesario para comenzar.</p>
         </div>
     """, unsafe_allow_html=True)
