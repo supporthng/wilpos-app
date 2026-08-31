@@ -387,6 +387,20 @@ div[data-testid="stFileUploader"] section:hover {
     .section-card { padding:.95rem; }
     .file-card { align-items:flex-start; flex-direction:column; gap:.45rem; }
 }
+
+      .welcome-card {
+        background: linear-gradient(135deg, #FFFFFF 0%, #F4F8FF 100%);
+        border: 1px solid #DCE6F5;
+        border-radius: 16px;
+        padding: 1.4rem 1.5rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 6px 20px rgba(31, 78, 120, 0.08);
+      }
+      .welcome-eyebrow {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #2563EB;
+      }
 </style>
 """, unsafe_allow_html=True)
 
@@ -874,6 +888,24 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
+st.markdown(
+    """
+    <div class="welcome-card">
+        <div class="welcome-eyebrow">👋 ¡Bienvenido a WilPOS Móvil!</div>
+        <h2 style="margin:0.35rem 0 0.55rem 0;">Gestiona tus facturas e inventario de forma rápida y sencilla.</h2>
+        <p style="margin:0; font-size:1.02rem; line-height:1.65; color:#5B6472;">
+            Carga tus facturas y deja que WilPOS haga el resto. Consulta tu inventario actualizado,
+            revisa tus productos y genera tu archivo de importación cuando lo necesites.
+        </p>
+        <div style="margin-top:0.8rem; font-weight:600; color:#1F4E78;">
+            Todo tu proceso de inventario, en un solo lugar.
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+
     pagina = st.radio(
         "Navegación",
         [
@@ -938,7 +970,7 @@ if pagina == "🏠 Inicio":
     <div class="hero">
       <div class="hero-badge">✨ WilPOS Móvil · Automatización de inventario</div>
       <h1>¡Bienvenido! 👋</h1>
-      <p>Procesa facturas desde tu computadora, teléfono o tablet sin cambiar la lógica que ya funciona. El sistema identifica automáticamente tus facturas configuradas, acumula el inventario y genera el Excel listo para WilPOS.</p>
+      <p></p>
       <p><b>Flujo:</b> cargar factura → reconocimiento automático → confirmar → inventario acumulado → exportar Excel.</p>
     </div>
     """, unsafe_allow_html=True)
