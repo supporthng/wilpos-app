@@ -1164,940 +1164,169 @@ textarea{
 }
 
 
+/* ===== NUEVO SELECTOR DE CARGA: BOTONES REALES ===== */
 
-/* ===== CONTROLES REALES DE CARGA CON APARIENCIA DE TARJETAS ===== */
-
-/* Contenedor del selector Archivo / Cámara */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
-    display:grid !important;
-    grid-template-columns:1fr 1fr !important;
-    gap:.65rem !important;
-    width:100% !important;
+.load-title{
+    font-size:1.02rem;
+    font-weight:850;
+    color:#0f172a;
+    margin:0 0 .65rem 0;
 }
 
-/* Cada opción se convierte en tarjeta */
-[data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
-    position:relative !important;
-    display:flex !important;
-    align-items:center !important;
-    justify-content:center !important;
-    min-height:78px !important;
-    padding:.8rem 1rem !important;
+.mode-icon{
+    height:54px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    margin:0;
+    border:1px solid #dbe5f0;
+    border-bottom:none;
+    border-radius:12px 12px 0 0;
+    background:linear-gradient(180deg,#fbfdff 0%,#f4f8ff 100%);
+    font-size:1.7rem;
+}
+
+.mode-caption{
+    min-height:34px;
+    display:flex;
+    align-items:flex-start;
+    justify-content:center;
+    text-align:center;
+    padding:.35rem .35rem .2rem;
+    color:#64748b;
+    font-size:.72rem;
+    line-height:1.25;
+    border-left:1px solid #dbe5f0;
+    border-right:1px solid #dbe5f0;
+    border-bottom:1px solid #dbe5f0;
+    border-radius:0 0 12px 12px;
+    background:#fff;
+    margin-top:-.05rem;
+}
+
+/* Botones del selector principal */
+[data-testid="stMain"] .stButton > button{
+    border-radius:0 !important;
+    min-height:43px !important;
     margin:0 !important;
-    border:1px solid #d7e0ec !important;
-    border-radius:10px !important;
-    background:#ffffff !important;
-    cursor:pointer !important;
-    transition:all .16s ease !important;
-    box-shadow:0 2px 8px rgba(15,23,42,.025) !important;
+    font-size:.88rem !important;
+    font-weight:800 !important;
 }
 
-/* Oculta el círculo nativo */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child{
-    display:none !important;
+/* El botón seleccionado forma parte visual de la tarjeta */
+[data-testid="stMain"] button[data-testid="stBaseButton-primary"]{
+    background:#2563eb !important;
+    border-color:#2563eb !important;
+    color:#fff !important;
+}
+[data-testid="stMain"] button[data-testid="stBaseButton-primary"] *{
+    color:#fff !important;
 }
 
-/* Texto del botón */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
-    margin:0 !important;
-    font-size:.9rem !important;
-    font-weight:750 !important;
-    color:#2563eb !important;
-    text-align:center !important;
-}
-
-/* Hover */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:hover{
-    border-color:#93c5fd !important;
-    background:#f8fbff !important;
-    transform:translateY(-1px);
-}
-
-/* Estado seleccionado */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){
-    border:1.5px solid #60a5fa !important;
-    background:#eff6ff !important;
-    box-shadow:0 0 0 2px rgba(96,165,250,.10) !important;
-}
-
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) p{
+/* Botones no seleccionados */
+[data-testid="stMain"] button[data-testid="stBaseButton-secondary"]{
+    background:#fff !important;
+    border-color:#dbe5f0 !important;
     color:#1d4ed8 !important;
+}
+[data-testid="stMain"] button[data-testid="stBaseButton-secondary"] *{
+    color:#1d4ed8 !important;
+}
+
+.load-supported{
+    margin:.5rem 0 .5rem 0;
+    color:#94a3b8;
+    font-size:.68rem;
 }
 
 /* Uploader real */
-div[data-testid="stFileUploader"]{
-    margin-top:.55rem !important;
-    border:none !important;
-    background:transparent !important;
-    padding:0 !important;
+[data-testid="stMain"] div[data-testid="stFileUploader"]{
+    width:100% !important;
+    max-width:none !important;
+    margin-top:.35rem !important;
 }
-
-div[data-testid="stFileUploader"] section{
-    min-height:76px !important;
-    border:1px dashed #cbd5e1 !important;
-    border-radius:10px !important;
+[data-testid="stMain"] div[data-testid="stFileUploader"] section{
+    width:100% !important;
+    min-height:94px !important;
+    display:flex !important;
+    align-items:center !important;
+    border:1.5px dashed #cbd5e1 !important;
+    border-radius:12px !important;
     background:#fbfdff !important;
-    padding:.7rem !important;
-}
-
-/* Botón Browse/Upload del uploader */
-div[data-testid="stFileUploader"] button{
-    border-radius:8px !important;
-    min-height:38px !important;
-    padding:.4rem .9rem !important;
-    border:1px solid #cbd5e1 !important;
-    background:#ffffff !important;
-    color:#0f172a !important;
-    font-weight:700 !important;
-}
-
-div[data-testid="stFileUploader"] button *{
-    color:#0f172a !important;
+    box-sizing:border-box !important;
 }
 
 /* Cámara real */
-div[data-testid="stCameraInput"]{
-    margin-top:.55rem !important;
-}
-
-div[data-testid="stCameraInput"] button{
-    border-radius:9px !important;
-    min-height:44px !important;
-    font-weight:750 !important;
-}
-
-/* Margen alineado visualmente con las tarjetas */
-div[data-testid="stNumberInput"]{
-    margin-top:.1rem !important;
-}
-
-/* Móvil */
-@media (max-width:640px){
-    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
-        grid-template-columns:1fr 1fr !important;
-        gap:.45rem !important;
-    }
-
-    [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
-        min-height:68px !important;
-        padding:.6rem .45rem !important;
-    }
-
-    [data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
-        font-size:.82rem !important;
-    }
-}
-
-
-/* ===== TRES BOTONES DE CARGA CENTRADOS ===== */
-
-/* Tres opciones iguales */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
-    display:grid !important;
-    grid-template-columns:repeat(3, minmax(0,1fr)) !important;
-    gap:.75rem !important;
-    width:100% !important;
-    max-width:900px !important;
-    margin-left:auto !important;
-    margin-right:auto !important;
-}
-
-/* Tarjeta */
-[data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
-    position:relative !important;
-    display:flex !important;
-    flex-direction:column !important;
-    align-items:center !important;
-    justify-content:center !important;
-    min-height:104px !important;
-    padding:2.7rem .8rem .8rem .8rem !important;
-    margin:0 !important;
-    border:1px solid #d7e0ec !important;
-    border-radius:12px !important;
-    background:#ffffff !important;
-    cursor:pointer !important;
-    transition:all .16s ease !important;
-    box-shadow:0 3px 10px rgba(15,23,42,.035) !important;
-    text-align:center !important;
-}
-
-/* Oculta radio nativo */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child{
-    display:none !important;
-}
-
-/* Iconos grandes por posición */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
-    position:absolute !important;
-    top:.8rem !important;
-    left:50% !important;
-    transform:translateX(-50%) !important;
-    width:38px !important;
-    height:38px !important;
-    display:flex !important;
-    align-items:center !important;
-    justify-content:center !important;
-    border-radius:10px !important;
-    background:#eef4ff !important;
-    color:#2563eb !important;
-    font-size:1.15rem !important;
-    line-height:1 !important;
-}
-
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(1)::before{
-    content:"📁";
-}
-
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(2)::before{
-    content:"📷";
-}
-
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(3)::before{
-    content:"☁️";
-}
-
-/* Texto */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
-    margin:0 !important;
-    color:#2563eb !important;
-    font-size:.9rem !important;
-    font-weight:800 !important;
-    text-align:center !important;
-    width:100% !important;
-}
-
-/* Hover */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:hover{
-    background:#f8fbff !important;
-    border-color:#93c5fd !important;
-    transform:translateY(-2px) !important;
-}
-
-/* Seleccionado */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){
-    background:#eff6ff !important;
-    border:1.5px solid #60a5fa !important;
-    box-shadow:0 0 0 3px rgba(96,165,250,.10) !important;
-}
-
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked)::before{
-    background:#2563eb !important;
-    color:#ffffff !important;
-}
-
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) p{
-    color:#1d4ed8 !important;
-}
-
-/* El uploader/drag-drop real también centrado */
-div[data-testid="stFileUploader"]{
-    max-width:900px !important;
-    margin:.7rem auto 0 auto !important;
-}
-
-div[data-testid="stFileUploader"] section{
-    min-height:92px !important;
-    display:flex !important;
-    align-items:center !important;
-    justify-content:center !important;
-    text-align:center !important;
-    border:1.5px dashed #bfcee2 !important;
-    border-radius:12px !important;
-    background:#fbfdff !important;
-}
-
-/* Cámara centrada */
-div[data-testid="stCameraInput"]{
-    max-width:900px !important;
-    margin:.7rem auto 0 auto !important;
-}
-
-/* Móvil */
-@media (max-width:720px){
-    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
-        grid-template-columns:1fr !important;
-        max-width:100% !important;
-        gap:.5rem !important;
-    }
-
-    [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
-        min-height:78px !important;
-        padding:1rem .75rem 1rem 3.5rem !important;
-        flex-direction:row !important;
-        justify-content:flex-start !important;
-        text-align:left !important;
-    }
-
-    [data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
-        top:50% !important;
-        left:1rem !important;
-        transform:translateY(-50%) !important;
-    }
-
-    [data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
-        text-align:left !important;
-    }
-}
-
-
-/* ===== AJUSTE DE BOTONES A TODO EL ANCHO ===== */
-
-/* El radio ocupa todo el ancho de su columna */
-[data-testid="stMain"] div[data-testid="stRadio"]{
-    width:100% !important;
-}
-
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
-    display:grid !important;
-    grid-template-columns:repeat(3, minmax(0, 1fr)) !important;
-    gap:.8rem !important;
+[data-testid="stMain"] div[data-testid="stCameraInput"]{
     width:100% !important;
     max-width:none !important;
-    margin:0 !important;
+    margin-top:.35rem !important;
 }
 
-/* Tarjetas más anchas y proporcionadas */
-[data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
-    width:100% !important;
-    min-width:0 !important;
-    min-height:112px !important;
-    padding:3rem 1rem .95rem 1rem !important;
-    border-radius:12px !important;
-    box-sizing:border-box !important;
-}
-
-/* Texto centrado y más visible */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
-    width:100% !important;
-    text-align:center !important;
-    font-size:.95rem !important;
-}
-
-/* Iconos un poco más grandes */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
-    width:42px !important;
-    height:42px !important;
-    font-size:1.25rem !important;
-}
-
-/* Uploader real: ocupar todo el ancho */
-div[data-testid="stFileUploader"]{
-    width:100% !important;
-    max-width:none !important;
-    margin:.75rem 0 0 0 !important;
-}
-
-div[data-testid="stFileUploader"] section{
-    width:100% !important;
-    min-height:92px !important;
-    box-sizing:border-box !important;
-}
-
-/* Cámara real: ocupar todo el ancho */
-div[data-testid="stCameraInput"]{
-    width:100% !important;
-    max-width:none !important;
-    margin:.75rem 0 0 0 !important;
-}
-
-/* Ajustar mejor la relación entre carga y margen */
-[data-testid="stHorizontalBlock"]{
-    align-items:flex-start !important;
-}
-
-/* Reducir altura del estado vacío para no desperdiciar espacio */
-.empty-state{
-    padding:1.35rem 1rem !important;
-    min-height:120px !important;
-    display:flex !important;
-    flex-direction:column !important;
-    align-items:center !important;
-    justify-content:center !important;
-}
-
-/* Pantallas medianas */
-@media (max-width:1100px){
-    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
-        gap:.55rem !important;
-    }
-
-    [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
-        min-height:100px !important;
-        padding:2.8rem .65rem .8rem .65rem !important;
-    }
-}
-
-/* Móvil */
-@media (max-width:720px){
-    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
-        grid-template-columns:1fr !important;
-        gap:.5rem !important;
-    }
-
-    [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
-        min-height:72px !important;
-        padding:.8rem .8rem .8rem 3.8rem !important;
-        justify-content:flex-start !important;
-        text-align:left !important;
-    }
-
-    [data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
-        left:1rem !important;
-        top:50% !important;
-        transform:translateY(-50%) !important;
-    }
-
-    [data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
-        text-align:left !important;
-    }
-}
-
-
-/* ===== FIX SIDEBAR: navegación compacta y sin distorsión ===== */
-
-[data-testid="stSidebar"] div[data-testid="stRadio"]{
-    width:100% !important;
-}
-
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"]{
-    display:flex !important;
-    flex-direction:column !important;
-    grid-template-columns:none !important;
-    gap:.18rem !important;
-    width:100% !important;
-    max-width:none !important;
-    margin:0 !important;
-}
-
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label{
-    position:relative !important;
-    display:flex !important;
-    flex-direction:row !important;
-    align-items:center !important;
-    justify-content:flex-start !important;
-
-    width:100% !important;
-    min-width:0 !important;
-    min-height:0 !important;
-
-    padding:.5rem .6rem !important;
-    margin:.05rem 0 !important;
-
-    border:1px solid transparent !important;
-    border-radius:8px !important;
-    background:transparent !important;
-    box-shadow:none !important;
-    transform:none !important;
-
-    text-align:left !important;
-}
-
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
-    display:none !important;
-    content:none !important;
-}
-
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child{
-    display:none !important;
-}
-
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label p{
-    margin:0 !important;
-    width:auto !important;
-    text-align:left !important;
-    color:#e5eefb !important;
-    font-size:.9rem !important;
-    font-weight:650 !important;
-}
-
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:hover{
-    background:rgba(255,255,255,.07) !important;
-    border-color:transparent !important;
-    transform:none !important;
-}
-
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){
-    background:#1d4ed8 !important;
-    border-color:#2563eb !important;
-    box-shadow:none !important;
-    transform:none !important;
-}
-
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) p{
-    color:#ffffff !important;
-}
-
-
-/* ===== ICONOS DE CARGA - FIX CONSERVADOR ===== */
-/* Solo área principal; no afecta el sidebar */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child{
-    display:none !important;
-}
-
-/* Mantener tres opciones distribuidas uniformemente */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
-    display:grid !important;
-    grid-template-columns:repeat(3, minmax(0,1fr)) !important;
-    gap:.7rem !important;
-    width:100% !important;
-    max-width:none !important;
-}
-
-/* Texto centrado; el emoji forma parte del label real */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
-    width:100% !important;
-    min-height:88px !important;
-    display:flex !important;
-    align-items:center !important;
-    justify-content:center !important;
-    padding:.8rem !important;
-    border:1px solid #d7e0ec !important;
-    border-radius:11px !important;
-    background:#fff !important;
-    box-sizing:border-box !important;
-}
-
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
-    width:100% !important;
-    margin:0 !important;
-    text-align:center !important;
-    font-size:.95rem !important;
-    font-weight:750 !important;
-    color:#2563eb !important;
-}
-
-/* Seleccionado */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){
-    background:#eff6ff !important;
-    border-color:#60a5fa !important;
-}
-
-/* Móvil */
-@media (max-width:720px){
-    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
-        grid-template-columns:1fr !important;
-    }
-    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
-        min-height:58px !important;
-    }
-}
-
-
-/* ===== ICONOS GRANDES, CENTRADOS SOBRE EL LABEL ===== */
-
-/* Tarjetas de carga del área principal */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
-    min-height:118px !important;
-    padding:1rem .75rem !important;
-    display:flex !important;
-    align-items:center !important;
-    justify-content:center !important;
-}
-
-/* El contenedor del texto ocupa toda la tarjeta */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label [data-testid="stMarkdownContainer"]{
-    width:100% !important;
-}
-
-/* Label en dos líneas: icono arriba + texto abajo */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
-    white-space:pre-line !important;
-    text-align:center !important;
-    line-height:1.35 !important;
-    font-size:.95rem !important;
-    font-weight:800 !important;
-}
-
-/* Icono visual grande encima usando el label seleccionado por posición */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
-    position:relative !important;
-    padding-top:3.8rem !important;
-}
-
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
-    display:flex !important;
-    position:absolute !important;
-    top:.75rem !important;
-    left:50% !important;
-    transform:translateX(-50%) !important;
-    width:46px !important;
-    height:46px !important;
-    align-items:center !important;
-    justify-content:center !important;
-    border-radius:12px !important;
-    background:#eef4ff !important;
-    font-size:1.65rem !important;
-    line-height:1 !important;
-    content:"" !important;
-}
-
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(1)::before{
-    content:"📁" !important;
-}
-
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(2)::before{
-    content:"📷" !important;
-}
-
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(3)::before{
-    content:"☁️" !important;
-}
-
-/* Como el icono ya está arriba, ocultamos solo el emoji del texto
-   reemplazando visualmente los labels con texto limpio mediante indentación.
-   Se conserva el valor real del radio para no alterar la lógica. */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
-    font-size:0 !important;
-}
-
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(1) p::after{
-    content:"Seleccionar archivos";
-    font-size:.95rem !important;
-}
-
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(2) p::after{
-    content:"Tomar foto";
-    font-size:.95rem !important;
-}
-
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(3) p::after{
-    content:"Arrastrar y soltar";
-    font-size:.95rem !important;
-}
-
-/* Seleccionado: icono más marcado */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked)::before{
-    background:#2563eb !important;
-}
-
-/* Móvil: conserva icono arriba y centrado */
-@media (max-width:720px){
-    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
-        min-height:105px !important;
-        padding:3.6rem .65rem .75rem !important;
-    }
-
-    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
-        width:42px !important;
-        height:42px !important;
-        font-size:1.45rem !important;
-    }
-}
-
-
-/* ===== BLOQUE CARGA - REFERENCIA FINAL ===== */
-
-.load-section-title{
-    font-size:1rem;
-    font-weight:850;
-    color:#0f172a;
-    margin:0 0 .55rem 0;
-}
-
-.margin-title{
-    font-size:.82rem;
+/* Margen */
+.margin-heading{
+    font-size:.84rem;
     font-weight:800;
     color:#0f172a;
-    margin:.2rem 0 .5rem 0;
-}
-
-/* Solo el radio de carga en el MAIN */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
-    display:grid !important;
-    grid-template-columns:repeat(3, minmax(0,1fr)) !important;
-    gap:0 !important;
-    width:100% !important;
-    border:1px dashed #cbd5e1 !important;
-    border-radius:10px !important;
-    overflow:hidden !important;
-    background:#fbfdff !important;
-}
-
-/* Cada opción = una tarjeta */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
-    position:relative !important;
-    width:100% !important;
-    min-height:112px !important;
-    margin:0 !important;
-    padding:3.35rem .7rem 1.75rem .7rem !important;
-
-    display:flex !important;
-    align-items:center !important;
-    justify-content:center !important;
-
-    border:none !important;
-    border-right:1px solid #e7edf5 !important;
-    border-radius:0 !important;
-    background:#ffffff !important;
-    box-shadow:none !important;
-    transform:none !important;
-    box-sizing:border-box !important;
-}
-
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:last-child{
-    border-right:none !important;
-}
-
-/* Ocultar círculo real SOLO en main */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child{
-    display:none !important;
-}
-
-/* Icono arriba, grande y centrado */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
-    position:absolute !important;
-    top:.85rem !important;
-    left:50% !important;
-    transform:translateX(-50%) !important;
-
-    width:38px !important;
-    height:38px !important;
-    border-radius:9px !important;
-
-    display:flex !important;
-    align-items:center !important;
-    justify-content:center !important;
-
-    background:#eef4ff !important;
-    font-size:1.22rem !important;
-    line-height:1 !important;
-    content:"" !important;
-}
-
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(1)::before{
-    content:"📁" !important;
-}
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(2)::before{
-    content:"📷" !important;
-}
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(3)::before{
-    content:"☁️" !important;
-}
-
-/* Ocultar emoji del texto original y pintar label limpio */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
-    margin:0 !important;
-    width:100% !important;
-    text-align:center !important;
-    font-size:0 !important;
-    color:#2563eb !important;
-    font-weight:800 !important;
-}
-
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(1) p::after{
-    content:"Seleccionar archivos";
-    font-size:.82rem !important;
-}
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(2) p::after{
-    content:"Tomar foto";
-    font-size:.82rem !important;
-}
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(3) p::after{
-    content:"Arrastrar y soltar";
-    font-size:.82rem !important;
-}
-
-/* Seleccionado */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){
-    background:#f3f7ff !important;
-    outline:1px solid #93c5fd !important;
-    outline-offset:-1px !important;
-}
-
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked)::before{
-    background:#dbeafe !important;
-}
-
-/* Subtítulos bajo cada botón */
-.load-card-subtitles{
-    display:grid;
-    grid-template-columns:repeat(3, minmax(0,1fr));
-    margin-top:-1.55rem;
-    position:relative;
-    z-index:2;
-    pointer-events:none;
-}
-
-.load-card-subtitles > div{
-    text-align:center;
-    color:#64748b;
-    font-size:.66rem;
-    line-height:1.25;
-    padding:0 .4rem .55rem .4rem;
-}
-
-.load-formats{
-    color:#94a3b8;
-    font-size:.65rem;
-    margin-top:.35rem;
-}
-
-/* Number input como en la referencia */
-[data-testid="stMain"] div[data-testid="stNumberInput"]{
-    width:100% !important;
-}
-
-[data-testid="stMain"] div[data-testid="stNumberInput"] > div{
-    width:100% !important;
+    margin:.1rem 0 .55rem 0;
 }
 
 [data-testid="stMain"] div[data-testid="stNumberInput"] input{
-    min-height:48px !important;
-    font-size:.9rem !important;
+    min-height:44px !important;
+    font-size:.92rem !important;
     background:#fff !important;
-    border-color:#d7e0ec !important;
 }
 
-.margin-ok,
-.margin-bad{
-    margin-top:.55rem;
-    padding:.7rem .75rem;
-    border-radius:8px;
-    font-size:.7rem;
-    line-height:1.4;
+.margin-status{
+    min-height:44px;
+    margin-top:.65rem;
+    padding:.65rem .75rem;
+    border-radius:9px;
+    display:flex;
+    align-items:center;
+    font-size:.75rem;
+    font-weight:650;
 }
-
-.margin-ok{
+.ok-status{
     background:#f0fdf4;
     border:1px solid #bbf7d0;
     color:#15803d;
 }
-
-.margin-bad{
+.warn-status{
     background:#fff7ed;
     border:1px solid #fed7aa;
     color:#c2410c;
 }
 
-/* Uploader/cámara REAL debajo, limpio */
-[data-testid="stMain"] div[data-testid="stFileUploader"],
-[data-testid="stMain"] div[data-testid="stCameraInput"]{
-    width:100% !important;
-    max-width:none !important;
-    margin:.6rem 0 0 0 !important;
-}
-
-[data-testid="stMain"] div[data-testid="stFileUploader"] section{
-    min-height:74px !important;
-    border:1px dashed #cbd5e1 !important;
-    border-radius:9px !important;
-    background:#fbfdff !important;
+/* No afectar botones del sidebar */
+[data-testid="stSidebar"] .stButton > button{
+    border-radius:8px !important;
 }
 
 /* Móvil */
-@media (max-width:720px){
-    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
-        grid-template-columns:1fr !important;
+@media (max-width:800px){
+    .mode-icon{
+        height:48px;
+        font-size:1.5rem;
     }
-
-    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
-        min-height:92px !important;
-        border-right:none !important;
-        border-bottom:1px solid #e7edf5 !important;
-    }
-
-    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:last-child{
-        border-bottom:none !important;
-    }
-
-    .load-card-subtitles{
-        display:none !important;
+    .mode-caption{
+        min-height:36px;
+        font-size:.68rem;
     }
 }
 
-
-/* ===== AJUSTE FINAL BLOQUE CARGA ===== */
-
-/* Ocultar definitivamente el control circular nativo */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label
-div[data-testid="stMarkdownContainer"] ~ div,
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child{
-    display:none !important;
-}
-
-/* Tres tarjetas ocupan TODO el ancho izquierdo */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
-    width:100% !important;
-    max-width:none !important;
-    display:grid !important;
-    grid-template-columns:repeat(3,minmax(0,1fr)) !important;
-    gap:0 !important;
-}
-
-/* Tarjeta proporcional */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
-    min-width:0 !important;
-    width:100% !important;
-    min-height:128px !important;
-    padding:3.5rem .65rem 2.35rem !important;
-}
-
-/* Los subtítulos se colocan visualmente dentro del borde de las tarjetas */
-.load-card-subtitles{
-    display:grid !important;
-    grid-template-columns:repeat(3,minmax(0,1fr)) !important;
-    width:100% !important;
-    margin-top:-2.25rem !important;
-    margin-bottom:.25rem !important;
-    position:relative !important;
-    z-index:10 !important;
-    pointer-events:none !important;
-}
-
-.load-card-subtitles > div{
-    min-width:0 !important;
-    padding:0 .45rem .65rem !important;
-    text-align:center !important;
-    color:#64748b !important;
-    font-size:.67rem !important;
-    line-height:1.25 !important;
-    white-space:normal !important;
-}
-
-/* Iconos */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
-    width:40px !important;
-    height:40px !important;
-    top:.8rem !important;
-    font-size:1.3rem !important;
-}
-
-/* Título de cada tarjeta */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p::after{
-    font-size:.82rem !important;
-    font-weight:800 !important;
-}
-
-/* Formatos inmediatamente debajo del bloque */
-.load-formats{
-    margin-top:.15rem !important;
-    font-size:.65rem !important;
-}
-
-/* Margen: alineado arriba con las tarjetas */
-.margin-title{
-    margin-top:.05rem !important;
-    margin-bottom:.55rem !important;
-}
-
-[data-testid="stMain"] div[data-testid="stNumberInput"] input{
-    min-height:42px !important;
-}
-
-.margin-ok,.margin-bad{
-    margin-top:.55rem !important;
-    min-height:42px !important;
-    display:flex !important;
-    align-items:center !important;
-}
-
-/* En móvil, subtítulos ocultos porque las tarjetas se apilan */
-@media (max-width:720px){
-    .load-card-subtitles{
-        display:none !important;
+@media (max-width:640px){
+    .mode-icon{
+        height:44px;
+        font-size:1.35rem;
     }
-    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
-        grid-template-columns:1fr !important;
+    [data-testid="stMain"] .stButton > button{
+        font-size:.78rem !important;
+        min-height:40px !important;
+    }
+    .mode-caption{
+        font-size:.64rem;
+        min-height:40px;
     }
 }
 
@@ -2116,6 +1345,7 @@ DEFAULTS = {
     "camera_key": 0,
     "articulos_repetidos_notif": [],
     "errores_ocr": [],
+    "modo_carga_ui": "archivos",
 }
 
 for key, value in DEFAULTS.items():
@@ -2586,85 +1816,119 @@ def modal_confirmacion(validas, duplicadas_count, margen):
 
 
 def render_carga_facturas(titulo=True):
-    """Carga y procesa facturas con controles reales y layout tipo dashboard."""
+    """Carga y procesa facturas con un selector visual robusto basado en botones reales."""
 
-    # Título superior
-    st.markdown('<div class="load-section-title">1. Cargar facturas</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="load-title">1. Cargar facturas</div>',
+        unsafe_allow_html=True,
+    )
 
-    carga_col, margen_col = st.columns([3.15, 1], gap="medium")
+    carga_col, margen_col = st.columns([3.2, 1], gap="medium")
 
-    # -------------------------------------------------------------
-    # IZQUIERDA: tres opciones reales
-    # -------------------------------------------------------------
+    # =========================================================
+    # IZQUIERDA: selector real de modo de carga
+    # =========================================================
     with carga_col:
-        modo_carga = st.radio(
-            "Origen",
-            [
-                "📁 Seleccionar archivos",
-                "📷 Tomar foto",
-                "☁️ Arrastrar y soltar",
-            ],
-            horizontal=True,
-            label_visibility="collapsed",
-            key=f"modo_carga_{st.session_state.uploader_key}_{st.session_state.camera_key}",
-        )
+        b1, b2, b3 = st.columns(3, gap="small")
 
-        # Subtexto visual, alineado con las tres tarjetas.
-        st.markdown(
-            """
-            <div class="load-card-subtitles">
-              <div>PDF, JPG, JPEG o PNG</div>
-              <div>Usar cámara del teléfono</div>
-              <div>tus archivos aquí</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        with b1:
+            st.markdown(
+                """
+                <div class="mode-icon">📁</div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                "Seleccionar archivos",
+                use_container_width=True,
+                type="primary" if st.session_state.modo_carga_ui == "archivos" else "secondary",
+                key="modo_archivos_btn",
+            ):
+                st.session_state.modo_carga_ui = "archivos"
+                st.rerun()
+            st.markdown(
+                '<div class="mode-caption">PDF, JPG, JPEG o PNG</div>',
+                unsafe_allow_html=True,
+            )
+
+        with b2:
+            st.markdown(
+                """
+                <div class="mode-icon">📷</div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                "Tomar foto",
+                use_container_width=True,
+                type="primary" if st.session_state.modo_carga_ui == "camara" else "secondary",
+                key="modo_camara_btn",
+            ):
+                st.session_state.modo_carga_ui = "camara"
+                st.rerun()
+            st.markdown(
+                '<div class="mode-caption">Usar cámara del teléfono</div>',
+                unsafe_allow_html=True,
+            )
+
+        with b3:
+            st.markdown(
+                """
+                <div class="mode-icon">☁️</div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                "Arrastrar y soltar",
+                use_container_width=True,
+                type="primary" if st.session_state.modo_carga_ui == "arrastrar" else "secondary",
+                key="modo_arrastrar_btn",
+            ):
+                st.session_state.modo_carga_ui = "arrastrar"
+                st.rerun()
+            st.markdown(
+                '<div class="mode-caption">Suelta tus archivos aquí</div>',
+                unsafe_allow_html=True,
+            )
 
         st.markdown(
-            """
-            <div class="load-formats">
-              Formatos soportados: PDF, JPG, JPEG, PNG · Puedes seleccionar múltiples archivos
-            </div>
-            """,
+            '<div class="load-supported">Formatos soportados: PDF, JPG, JPEG, PNG · Puedes seleccionar múltiples archivos</div>',
             unsafe_allow_html=True,
         )
 
         uploaded_files = []
 
-        if modo_carga == "📁 Seleccionar archivos":
+        if st.session_state.modo_carga_ui == "archivos":
             uploaded_files = st.file_uploader(
                 "Selecciona tus facturas",
                 type=["pdf", "png", "jpg", "jpeg"],
                 accept_multiple_files=True,
                 key=f"uploader_{st.session_state.uploader_key}",
-                label_visibility="collapsed",
             ) or []
 
-        elif modo_carga == "📷 Tomar foto":
+        elif st.session_state.modo_carga_ui == "camara":
             foto = st.camera_input(
-                "Toma la foto completa de la factura",
+                "Toma una foto completa de la factura",
                 key=f"camera_{st.session_state.camera_key}",
-                label_visibility="collapsed",
             )
             if foto is not None:
                 uploaded_files = [foto]
 
         else:
             uploaded_files = st.file_uploader(
-                "Arrastra y suelta tus facturas aquí",
+                "Arrastra y suelta tus facturas",
                 type=["pdf", "png", "jpg", "jpeg"],
                 accept_multiple_files=True,
                 key=f"drag_uploader_{st.session_state.uploader_key}",
-                label_visibility="collapsed",
+                help="Arrastra uno o varios archivos dentro del área punteada.",
             ) or []
 
-    # -------------------------------------------------------------
-    # DERECHA: margen REAL, igual al diseño de referencia
-    # -------------------------------------------------------------
+    # =========================================================
+    # DERECHA: margen real
+    # =========================================================
     with margen_col:
         st.markdown(
-            '<div class="margin-title">Margen de ganancia (%)</div>',
+            '<div class="margin-heading">Margen de ganancia (%)</div>',
             unsafe_allow_html=True,
         )
 
@@ -2682,8 +1946,8 @@ def render_carga_facturas(titulo=True):
         if margen_porcentaje > 15:
             st.markdown(
                 """
-                <div class="margin-ok">
-                  ⓘ Margen válido para procesar el inventario.
+                <div class="margin-status ok-status">
+                    ✓ Margen válido para procesar
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -2691,8 +1955,8 @@ def render_carga_facturas(titulo=True):
         else:
             st.markdown(
                 """
-                <div class="margin-bad">
-                  ⓘ El margen debe ser mayor al 15% para procesar el inventario.
+                <div class="margin-status warn-status">
+                    El margen debe ser mayor al 15%
                 </div>
                 """,
                 unsafe_allow_html=True,
