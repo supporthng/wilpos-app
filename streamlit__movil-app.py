@@ -1627,6 +1627,103 @@ div[data-testid="stCameraInput"]{
     color:#ffffff !important;
 }
 
+
+/* ===== ICONOS REALES + TARJETAS DE CARGA ===== */
+
+/* Solo afecta radios del área principal */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
+    display:grid !important;
+    grid-template-columns:repeat(3, minmax(0, 1fr)) !important;
+    gap:.75rem !important;
+    width:100% !important;
+    max-width:none !important;
+}
+
+/* Oculta el círculo nativo SOLO en el main */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child{
+    display:none !important;
+}
+
+/* Tarjetas */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
+    width:100% !important;
+    min-height:92px !important;
+    padding:1rem .85rem !important;
+
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+
+    border:1px solid #d7e0ec !important;
+    border-radius:12px !important;
+    background:#ffffff !important;
+    box-shadow:0 3px 10px rgba(15,23,42,.035) !important;
+
+    cursor:pointer !important;
+    transition:all .15s ease !important;
+}
+
+/* Texto con emoji incluido */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
+    margin:0 !important;
+    width:100% !important;
+    text-align:center !important;
+    color:#2563eb !important;
+    font-size:1rem !important;
+    font-weight:800 !important;
+    line-height:1.35 !important;
+}
+
+/* Hover */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:hover{
+    background:#f8fbff !important;
+    border-color:#93c5fd !important;
+    transform:translateY(-1px) !important;
+}
+
+/* Seleccionado */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){
+    background:#eff6ff !important;
+    border:1.5px solid #60a5fa !important;
+    box-shadow:0 0 0 3px rgba(96,165,250,.10) !important;
+}
+
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) p{
+    color:#1d4ed8 !important;
+}
+
+/* Evitar pseudo-iconos viejos duplicados */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
+    content:none !important;
+    display:none !important;
+}
+
+/* Mantener uploader al ancho completo */
+[data-testid="stMain"] div[data-testid="stFileUploader"],
+[data-testid="stMain"] div[data-testid="stCameraInput"]{
+    width:100% !important;
+    max-width:none !important;
+    margin-top:.7rem !important;
+}
+
+/* Móvil */
+@media (max-width:720px){
+    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
+        grid-template-columns:1fr !important;
+        gap:.5rem !important;
+    }
+
+    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
+        min-height:64px !important;
+        padding:.8rem 1rem !important;
+    }
+
+    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
+        text-align:left !important;
+        font-size:.92rem !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -2130,14 +2227,14 @@ def render_carga_facturas(titulo=True):
     with carga_col:
         modo_carga = st.radio(
             "Origen",
-            ["Seleccionar archivos", "Tomar foto", "Arrastrar y soltar"],
+            ["📁 Seleccionar archivos", "📷 Tomar foto", "☁️ Arrastrar y soltar"],
             horizontal=True,
             label_visibility="collapsed",
         )
 
         uploaded_files = []
 
-        if modo_carga == "Seleccionar archivos":
+        if modo_carga == "📁 Seleccionar archivos":
             uploaded_files = st.file_uploader(
                 "Selecciona tus facturas",
                 type=["pdf", "png", "jpg", "jpeg"],
@@ -2146,7 +2243,7 @@ def render_carga_facturas(titulo=True):
                 help="Puedes seleccionar varios archivos a la vez.",
             ) or []
 
-        elif modo_carga == "Tomar foto":
+        elif modo_carga == "📷 Tomar foto":
             foto = st.camera_input(
                 "Toma la foto completa de la factura",
                 key=f"camera_{st.session_state.camera_key}",
