@@ -1773,6 +1773,109 @@ div[data-testid="stDialog"] img{
     object-fit:contain !important;
 }
 
+
+/* ===== ARCHIVOS CARGADOS: OJO JUNTO A X ===== */
+
+/* Oculta las fichas nativas de archivos del uploader.
+   La selección sigue existiendo y se procesa normalmente. */
+[data-testid="stFileUploaderFile"]{
+    display:none !important;
+}
+
+.uploaded-preview-title{
+    margin:.62rem 0 .42rem;
+    font-size:.9rem;
+    font-weight:850;
+    color:#0f172a;
+}
+
+.file-action-card{
+    min-height:64px;
+    display:flex;
+    align-items:center;
+    gap:.6rem;
+    padding:.62rem .68rem;
+    border:1px solid #dbe5f0;
+    border-radius:11px 11px 0 0;
+    background:#fff;
+}
+
+.file-action-icon{
+    width:38px;
+    height:38px;
+    flex:0 0 38px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:8px;
+    background:#f1f5f9;
+    font-size:1.2rem;
+}
+
+.file-action-info{
+    min-width:0;
+    flex:1;
+}
+
+.file-action-name{
+    color:#0f172a;
+    font-size:.73rem;
+    font-weight:780;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+
+.file-action-meta{
+    margin-top:.12rem;
+    color:#64748b;
+    font-size:.64rem;
+}
+
+/* Los dos botones de acción forman el pie de la tarjeta */
+[data-testid="stMain"] .file-action-card + div{
+    gap:0 !important;
+}
+
+[data-testid="stMain"] .file-action-card + div button{
+    min-height:34px !important;
+    border-radius:0 !important;
+    border-color:#dbe5f0 !important;
+    background:#fff !important;
+    font-size:.9rem !important;
+    padding:.2rem !important;
+}
+
+[data-testid="stMain"] .file-action-card + div > div:first-child button{
+    border-radius:0 0 0 11px !important;
+    color:#2563eb !important;
+}
+
+[data-testid="stMain"] .file-action-card + div > div:last-child button{
+    border-radius:0 0 11px 0 !important;
+    color:#ef4444 !important;
+}
+
+[data-testid="stMain"] .file-action-card + div > div:first-child button:hover{
+    background:#eff6ff !important;
+    border-color:#93c5fd !important;
+}
+
+[data-testid="stMain"] .file-action-card + div > div:last-child button:hover{
+    background:#fff1f2 !important;
+    border-color:#fca5a5 !important;
+}
+
+/* En móvil: dos tarjetas por fila se adaptan por las columnas de Streamlit */
+@media (max-width:640px){
+    .file-action-card{
+        min-height:60px;
+    }
+    .file-action-name{
+        font-size:.69rem;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -1789,6 +1892,7 @@ DEFAULTS = {
     "articulos_repetidos_notif": [],
     "errores_ocr": [],
     "modo_carga_ui": "archivos",
+    "archivos_ocultos_ui": set(),
 }
 
 for key, value in DEFAULTS.items():
@@ -2197,6 +2301,7 @@ def resetear_todo():
     st.session_state.articulos_repetidos_notif = []
     st.session_state.errores_ocr = []
     st.session_state.uploader_key += 1
+    st.session_state.archivos_ocultos_ui = set()
     st.session_state.camera_key += 1
 
 
@@ -2450,15 +2555,28 @@ def render_carga_facturas(titulo=True):
             )
 
     # =========================================================
-    # ARCHIVOS SELECCIONADOS — vista previa SOLO al hacer clic
+    # ARCHIVOS SELECCIONADOS — ojo al lado de X
     # =========================================================
+    def _huella_archivo_ui(archivo):
+        try:
+            datos = archivo.getvalue()
+            return f"{archivo.name}|{len(datos)}"
+        except Exception:
+            return f"{archivo.name}|0"
+
+    # La X personalizada elimina el archivo de esta carga aunque el
+    # file_uploader de Streamlit conserve internamente su selección.
+    uploaded_files = [
+        f for f in uploaded_files
+        if _huella_archivo_ui(f) not in st.session_state.archivos_ocultos_ui
+    ]
+
     if uploaded_files:
         st.markdown(
             f'<div class="uploaded-preview-title">Archivos cargados ({len(uploaded_files)})</div>',
             unsafe_allow_html=True,
         )
 
-        # Hasta 4 tarjetas por fila.
         max_cols = 4
         for fila_inicio in range(0, len(uploaded_files), max_cols):
             grupo = uploaded_files[fila_inicio:fila_inicio + max_cols]
@@ -2494,21 +2612,21 @@ def render_carga_facturas(titulo=True):
 
                 nombre_corto = (
                     nombre_preview
-                    if len(nombre_preview) <= 32
-                    else nombre_preview[:29] + "…"
+                    if len(nombre_preview) <= 27
+                    else nombre_preview[:24] + "…"
                 )
 
                 with columna:
                     st.markdown(
                         f"""
-                        <div class="file-click-card-head">
-                            <div class="file-click-icon">{icono_archivo}</div>
-                            <div class="file-click-info">
-                                <div class="file-click-name" title="{nombre_preview}">
+                        <div class="file-action-card">
+                            <div class="file-action-icon">{icono_archivo}</div>
+                            <div class="file-action-info">
+                                <div class="file-action-name" title="{nombre_preview}">
                                     {nombre_corto}
                                 </div>
-                                <div class="file-click-meta">
-                                    {tipo_archivo} · {len(datos_preview)/1024:.1f} KB
+                                <div class="file-action-meta">
+                                    {len(datos_preview)/1024:.1f} KB · {tipo_archivo}
                                 </div>
                             </div>
                         </div>
@@ -2516,18 +2634,33 @@ def render_carga_facturas(titulo=True):
                         unsafe_allow_html=True,
                     )
 
-                    if st.button(
-                        "👁 Ver archivo",
-                        key=f"preview_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
-                        use_container_width=True,
-                    ):
-                        mostrar_vista_previa_archivo(
-                            nombre_preview,
-                            mime_preview,
-                            datos_preview,
-                        )
+                    ojo_col, x_col = st.columns([1, 1], gap="small")
 
-        st.caption("Haz clic en **Ver archivo** para abrir la vista previa.")
+                    with ojo_col:
+                        if st.button(
+                            "👁",
+                            key=f"preview_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+                            help=f"Vista previa de {nombre_preview}",
+                            use_container_width=True,
+                        ):
+                            mostrar_vista_previa_archivo(
+                                nombre_preview,
+                                mime_preview,
+                                datos_preview,
+                            )
+
+                    with x_col:
+                        if st.button(
+                            "✕",
+                            key=f"remove_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+                            help=f"Quitar {nombre_preview}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.archivos_ocultos_ui.add(
+                                _huella_archivo_ui(archivo_preview)
+                            )
+                            st.rerun()
+
         st.markdown("<div style='height:.25rem'></div>", unsafe_allow_html=True)
 
     archivos_validos = []
