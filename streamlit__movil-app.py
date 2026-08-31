@@ -2220,6 +2220,126 @@ div[data-testid="stDialog"] img{
     white-space:nowrap;
 }
 
+
+/* =========================================================
+   PRODUCTOS CONSOLIDADOS — SCROLL VERTICAL REAL
+   ========================================================= */
+.products-count-line{
+    width:100%;
+    box-sizing:border-box;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:1rem;
+    margin:.45rem 0 .55rem 0;
+    padding:.55rem .72rem;
+    border:1px solid #dbe5f0;
+    border-radius:9px;
+    background:#f8fbff;
+    color:#64748b;
+    font-size:.76rem;
+}
+
+.products-scroll-hint{
+    color:#2563eb;
+    font-weight:800;
+    white-space:nowrap;
+}
+
+.wilpos-scroll-container{
+    width:100% !important;
+    height:430px !important;
+    max-height:430px !important;
+    overflow-y:scroll !important;
+    overflow-x:auto !important;
+    scrollbar-gutter:stable !important;
+    border:1px solid #dbe5f0 !important;
+    border-radius:10px !important;
+    background:#ffffff !important;
+    box-sizing:border-box !important;
+}
+
+.wilpos-scroll-table{
+    width:100% !important;
+    min-width:980px !important;
+    margin:0 !important;
+    border-collapse:collapse !important;
+    table-layout:auto !important;
+    font-size:.76rem !important;
+}
+
+.wilpos-scroll-table thead th{
+    position:sticky !important;
+    top:0 !important;
+    z-index:2 !important;
+    padding:.58rem .62rem !important;
+    background:#f8fafc !important;
+    color:#64748b !important;
+    text-align:left !important;
+    white-space:nowrap !important;
+    border-bottom:1px solid #dbe5f0 !important;
+    border-right:1px solid #e5e7eb !important;
+}
+
+.wilpos-scroll-table tbody td{
+    padding:.55rem .62rem !important;
+    color:#0f172a !important;
+    background:#fff !important;
+    white-space:nowrap !important;
+    vertical-align:middle !important;
+    border-bottom:1px solid #e5e7eb !important;
+    border-right:1px solid #e5e7eb !important;
+}
+
+.wilpos-scroll-table tbody tr:hover td{
+    background:#f8fbff !important;
+}
+
+.wilpos-scroll-table th:last-child,
+.wilpos-scroll-table td:last-child{
+    border-right:none !important;
+}
+
+/* Barra de scroll claramente visible */
+.wilpos-scroll-container::-webkit-scrollbar{
+    width:14px !important;
+    height:12px !important;
+}
+
+.wilpos-scroll-container::-webkit-scrollbar-track{
+    background:#eef2f7 !important;
+    border-left:1px solid #e2e8f0 !important;
+}
+
+.wilpos-scroll-container::-webkit-scrollbar-thumb{
+    background:#94a3b8 !important;
+    border-radius:999px !important;
+    border:3px solid #eef2f7 !important;
+}
+
+.wilpos-scroll-container::-webkit-scrollbar-thumb:hover{
+    background:#64748b !important;
+}
+
+/* Firefox */
+.wilpos-scroll-container{
+    scrollbar-width:auto !important;
+    scrollbar-color:#94a3b8 #eef2f7 !important;
+}
+
+@media (max-width:720px){
+    .products-count-line{
+        flex-direction:column;
+        align-items:flex-start;
+        gap:.25rem;
+    }
+
+    .wilpos-scroll-container{
+        height:380px !important;
+        max-height:380px !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -3074,6 +3194,46 @@ def construir_productos_repetidos_historicos():
     return pd.DataFrame(resumen), pd.DataFrame(detalle)
 
 
+
+@st.dialog("👁 Vista previa de productos consolidados", width="large")
+def mostrar_vista_previa_productos(df_productos):
+    if df_productos is None or df_productos.empty:
+        st.info("No hay productos consolidados para mostrar.")
+        return
+
+    columnas = [
+        "Código Barra",
+        "Nombre",
+        "Cantidad Empaque",
+        "Stock",
+        "Costo",
+        "Precio Venta",
+        "Categoría",
+    ]
+
+    df_preview = df_productos[columnas].copy()
+
+    st.caption(
+        f"{len(df_preview)} producto(s) consolidados · "
+        "Los productos repetidos entre facturas aparecen en una sola fila."
+    )
+
+    st.dataframe(
+        df_preview,
+        use_container_width=True,
+        hide_index=True,
+        height=650,
+        column_config={
+            "Código Barra": st.column_config.TextColumn("Código Barra", width="medium"),
+            "Nombre": st.column_config.TextColumn("Nombre", width="large"),
+            "Cantidad Empaque": st.column_config.NumberColumn("Cantidad Empaque", format="%d"),
+            "Stock": st.column_config.NumberColumn("Stock", format="%d"),
+            "Costo": st.column_config.NumberColumn("Costo", format="%.4f"),
+            "Precio Venta": st.column_config.NumberColumn("Precio Venta", format="%.2f"),
+            "Categoría": st.column_config.TextColumn("Categoría", width="medium"),
+        },
+    )
+
 def render_carga_facturas(titulo=True):
     """Carga y procesa facturas con un selector visual robusto basado en botones reales."""
 
@@ -3718,8 +3878,17 @@ elif pagina == "📦 Productos consolidados":
     if df_productos.empty:
         st.info("Todavía no hay productos consolidados.")
     else:
-        top_inv1, top_inv2 = st.columns([4, 1])
-        with top_inv2:
+        top_inv1, top_inv_preview, top_inv_download = st.columns([3.2, 1, 1.25])
+
+        with top_inv_preview:
+            if st.button(
+                "👁 Vista previa",
+                use_container_width=True,
+                key="preview_productos_consolidados",
+            ):
+                mostrar_vista_previa_productos(df_productos)
+
+        with top_inv_download:
             excel_inventario = generar_excel_wilpos(df_productos)
             st.download_button(
                 "📥 Descargar Excel",
@@ -3732,7 +3901,7 @@ elif pagina == "📦 Productos consolidados":
             )
 
         # =====================================================
-        # PRODUCTOS CONSOLIDADOS — TABLA CON SCROLL VERTICAL
+        # PRODUCTOS CONSOLIDADOS — SCROLL VERTICAL REAL
         # =====================================================
         columnas_resumen = [
             "Código Barra",
@@ -3746,32 +3915,40 @@ elif pagina == "📦 Productos consolidados":
 
         df_productos_vista = df_productos[columnas_resumen].copy()
 
+        # Formato únicamente visual.
+        df_productos_vista["Costo"] = df_productos_vista["Costo"].map(
+            lambda x: f"{float(x):,.4f}"
+        )
+        df_productos_vista["Precio Venta"] = df_productos_vista["Precio Venta"].map(
+            lambda x: f"{float(x):,.2f}"
+        )
+
         st.markdown(
             f"""
             <div class="products-count-line">
                 <span><b>{len(df_productos_vista)}</b> productos consolidados</span>
-                <span class="products-scroll-hint">↕ Usa el scroll para ver todos</span>
+                <span class="products-scroll-hint">↕ Desplázate para ver todos</span>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        # Altura fija = scroll vertical interno garantizado cuando hay más filas.
-        st.dataframe(
-            df_productos_vista,
-            use_container_width=True,
-            hide_index=True,
-            height=520,
-            column_config={
-                "Código Barra": st.column_config.TextColumn("Código Barra", width="medium"),
-                "Nombre": st.column_config.TextColumn("Nombre", width="large"),
-                "Cantidad Empaque": st.column_config.NumberColumn("Cantidad Empaque", format="%d"),
-                "Stock": st.column_config.NumberColumn("Stock", format="%d"),
-                "Costo": st.column_config.NumberColumn("Costo", format="%.4f"),
-                "Precio Venta": st.column_config.NumberColumn("Precio Venta", format="%.2f"),
-                "Categoría": st.column_config.TextColumn("Categoría", width="medium"),
-            },
+        tabla_html = df_productos_vista.to_html(
+            index=False,
+            escape=True,
+            classes="wilpos-scroll-table",
+            border=0,
         )
+
+        st.markdown(
+            f"""
+            <div class="wilpos-scroll-container">
+                {tabla_html}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
         c1, c2, c3 = st.columns(3)
         c1.metric("Productos consolidados", len(df_productos))
         c2.metric("Unidades consolidadas", int(df_productos["Stock"].sum()))
