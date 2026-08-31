@@ -579,151 +579,6 @@ footer{visibility:hidden;}
     .file-strip{grid-template-columns:1fr;}
     .hero-card h1{font-size:1.65rem;}
 }
-
-/* ===== Ajuste final de pantalla ===== */
-.block-container{
-    width:100% !important;
-    max-width:1460px !important;
-    padding-top:.65rem !important;
-    padding-left:1rem !important;
-    padding-right:1rem !important;
-    padding-bottom:1.5rem !important;
-}
-
-.hero-grid{
-    grid-template-columns:minmax(0,1.7fr) minmax(330px,.95fr) !important;
-    gap:.85rem !important;
-    margin-bottom:.85rem !important;
-}
-
-.hero-card{
-    min-height:165px !important;
-    padding:1.15rem 1.25rem !important;
-}
-
-.hero-card h1{
-    font-size:1.85rem !important;
-    margin-bottom:.3rem !important;
-}
-
-.hero-card .subtitle{
-    font-size:.93rem !important;
-    margin-bottom:.55rem !important;
-}
-
-.hero-card p{
-    font-size:.82rem !important;
-    line-height:1.45 !important;
-}
-
-.hero-visual{
-    transform:scale(.88);
-    transform-origin:right top;
-    right:.65rem !important;
-    top:.7rem !important;
-}
-
-.stats-card{
-    padding:.8rem !important;
-}
-
-.stats-grid{
-    gap:.42rem !important;
-}
-
-.stat{
-    min-height:63px !important;
-    padding:.55rem .62rem !important;
-}
-
-.stat .value{
-    font-size:1rem !important;
-}
-
-.main-card{
-    margin-bottom:.75rem !important;
-}
-
-.main-card-header{
-    padding:.7rem .85rem .45rem .85rem !important;
-}
-
-.upload-zone,
-.margin-zone{
-    padding:.72rem .82rem !important;
-}
-
-.fake-upload{
-    min-height:102px !important;
-}
-
-.fake-upload-item{
-    padding:.55rem !important;
-}
-
-.fake-upload-icon{
-    width:31px !important;
-    height:31px !important;
-}
-
-.inventory-card{
-    margin-top:.55rem !important;
-}
-
-[data-testid="stSidebar"]{
-    min-width:220px !important;
-    max-width:220px !important;
-}
-
-@media (min-width: 1500px){
-    .block-container{
-        max-width:1580px !important;
-    }
-}
-
-@media (max-width: 1180px){
-    .block-container{
-        padding-left:.75rem !important;
-        padding-right:.75rem !important;
-    }
-    .hero-grid{
-        grid-template-columns:minmax(0,1.45fr) minmax(300px,1fr) !important;
-    }
-    .hero-visual{
-        opacity:.72;
-        transform:scale(.72);
-    }
-}
-
-@media (max-width: 900px){
-    .hero-grid{
-        grid-template-columns:1fr !important;
-    }
-    .hero-visual{
-        display:none !important;
-    }
-    .upload-grid{
-        grid-template-columns:1fr !important;
-    }
-    .upload-zone{
-        border-right:none !important;
-        border-bottom:1px solid #e5e7eb !important;
-    }
-}
-
-@media (max-width: 640px){
-    .block-container{
-        padding:.5rem !important;
-    }
-    .hero-card{
-        min-height:0 !important;
-        padding:1rem !important;
-    }
-    .stats-grid{
-        grid-template-columns:1fr 1fr !important;
-    }
-}
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -1244,6 +1099,20 @@ with st.sidebar:
 
 
 # =========================================================
+# CABECERA
+# =========================================================
+top_c1, top_c2 = st.columns([1, 5])
+with top_c2:
+    ta1, ta2, ta3 = st.columns([8, .5, 1.25])
+    with ta2:
+        st.markdown('<div class="top-icon">◐</div>', unsafe_allow_html=True)
+    with ta3:
+        if st.button("🔄 Reiniciar todo", type="secondary", use_container_width=True):
+            resetear_todo()
+            st.rerun()
+
+
+# =========================================================
 # INICIO
 # =========================================================
 if pagina == "🏠 Inicio":
@@ -1289,7 +1158,7 @@ if pagina == "🏠 Inicio":
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown(f"""
+    st.markdown("""
     <div class="main-card">
       <div class="main-card-header">1. Cargar facturas</div>
       <div class="upload-grid">
@@ -1326,7 +1195,7 @@ if pagina == "🏠 Inicio":
     </div>
     """, unsafe_allow_html=True)
 
-    st.caption("💡 Para cargar facturas, selecciona **Procesar facturas** en el menú lateral.")
+    st.info("Usa **Procesar facturas** en el menú lateral para cargar archivos o tomar una foto.")
 
     if st.session_state.detalle_facturas_procesadas:
         st.markdown('<div class="inventory-card">', unsafe_allow_html=True)
