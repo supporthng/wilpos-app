@@ -769,6 +769,92 @@ footer{visibility:hidden;}
     }
 }
 
+
+/* ===== FIX DEFINITIVO: contenido debajo de la barra de Streamlit ===== */
+
+/* Streamlit puede usar cualquiera de estos dos contenedores según versión */
+.block-container,
+[data-testid="stMainBlockContainer"]{
+    width:100% !important;
+    max-width:1280px !important;
+    margin:0 auto !important;
+
+    /* IMPORTANTE: evita que el header flotante tape el dashboard */
+    padding-top:4.25rem !important;
+    padding-left:1rem !important;
+    padding-right:1rem !important;
+    padding-bottom:1.5rem !important;
+
+    box-sizing:border-box !important;
+}
+
+/* Mantiene visible la barra de Streamlit sin superponer el contenido */
+[data-testid="stHeader"]{
+    height:3.25rem !important;
+    background:rgba(248,250,252,.96) !important;
+    backdrop-filter:blur(10px);
+}
+
+/* El área principal no debe recortar las tarjetas */
+[data-testid="stAppViewContainer"],
+[data-testid="stMain"]{
+    overflow-x:hidden !important;
+}
+
+/* Sidebar alineado con el inicio visual */
+[data-testid="stSidebar"] > div:first-child{
+    padding-top:1rem !important;
+}
+
+/* Desktop grande */
+@media (min-width:1500px){
+    .block-container,
+    [data-testid="stMainBlockContainer"]{
+        max-width:1360px !important;
+        padding-top:4.1rem !important;
+    }
+}
+
+/* Laptop / desktop mediano */
+@media (max-width:1100px){
+    .block-container,
+    [data-testid="stMainBlockContainer"]{
+        max-width:100% !important;
+        padding-top:4rem !important;
+        padding-left:.8rem !important;
+        padding-right:.8rem !important;
+    }
+
+    .hero-grid{
+        grid-template-columns:1fr !important;
+    }
+
+    .hero-visual{
+        display:none !important;
+    }
+}
+
+/* Móvil */
+@media (max-width:720px){
+    .block-container,
+    [data-testid="stMainBlockContainer"]{
+        width:100% !important;
+        max-width:100% !important;
+        padding-top:3.75rem !important;
+        padding-left:.55rem !important;
+        padding-right:.55rem !important;
+        padding-bottom:1rem !important;
+    }
+
+    .stats-grid{
+        grid-template-columns:1fr 1fr !important;
+    }
+
+    .hero-card{
+        min-height:0 !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
