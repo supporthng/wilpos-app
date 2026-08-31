@@ -20,7 +20,7 @@ except ImportError:
     OCR_DISPONIBLE = False
 
 st.set_page_config(
-    page_title="WilPOS Móvil | Facturas e Inventario",
+    page_title="WilPOS Móvil | Procesador de Facturas",
     page_icon="📦",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -1980,54 +1980,22 @@ div[data-testid="stDialog"] img{
 }
 
 
-/* ===== PRODUCTOS REPETIDOS ENTRE FACTURAS ===== */
-.duplicados-productos-banner{
-    margin:.65rem 0 .6rem 0;
-    padding:.78rem .85rem;
-    border:1px solid #facc15;
-    border-radius:10px;
-    background:#fffbeb;
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:1rem;
+/* ===== AJUSTES PRODUCTOS REPETIDOS / ARCHIVOS ===== */
+
+/* Las fichas nativas se ocultan porque usamos una única fila compacta propia. */
+[data-testid="stFileUploaderFile"]{
+    display:none !important;
 }
 
-.dup-title{
-    color:#92400e;
-    font-size:.9rem;
-    font-weight:850;
+/* Tarjetas nativas creadas con st.container */
+[data-testid="stVerticalBlockBorderWrapper"]{
+    border-radius:10px !important;
 }
 
-.dup-sub{
-    margin-top:.15rem;
-    color:#a16207;
-    font-size:.74rem;
-}
-
-.dup-badge{
-    min-width:34px;
-    height:34px;
-    padding:0 .55rem;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    border-radius:999px;
-    background:#f59e0b;
-    color:#fff;
-    font-weight:850;
-    font-size:.85rem;
-}
-
-.sin-duplicados-productos{
-    margin:.65rem 0;
-    padding:.7rem .8rem;
-    border:1px solid #bbf7d0;
-    border-radius:9px;
-    background:#f0fdf4;
-    color:#15803d;
-    font-size:.78rem;
-    font-weight:700;
+/* Tablas de repetidos */
+[data-testid="stDataFrame"]{
+    margin-top:.35rem;
+    margin-bottom:.45rem;
 }
 
 </style>
@@ -2342,7 +2310,7 @@ def extraer_datos_factura(uploaded_file):
     return firma, proveedor, num_factura, fecha, productos
 
 # =========================================================
-# HELPERS DE INVENTARIO / EXCEL
+# HELPERS DE CONSOLIDACIÓN / EXCEL
 # =========================================================
 def construir_df_productos():
     factor_margen = 1 + (st.session_state.margen_usado / 100.0)
@@ -2421,7 +2389,7 @@ def generar_excel_wilpos(df_prod):
             df_pp.to_excel(writer, index=False, sheet_name="Producto-Proveedor")
 
         pd.DataFrame({
-            "Instrucciones para cargar tu inventario": [
+            "Instrucciones para importar en WilPOS": [
                 "Llena la hoja Productos con tus artículos.",
                 "Generado automáticamente mediante la aplicación web WilPOS.",
             ]
@@ -2463,8 +2431,8 @@ def resetear_todo():
 
 @st.dialog("Confirmar procesamiento")
 def modal_confirmacion(validas, duplicadas_count, margen):
-    st.markdown("### 🚀 Incorporar facturas al inventario")
-    st.caption("Esta acción acumulará stock y costos usando la misma lógica de la versión funcional.")
+    st.markdown("### 🚀 Consolidar facturas para WilPOS")
+    st.caption("Esta acción consolidará productos repetidos por código y preparará los datos para el Excel de WilPOS.")
 
     c1, c2 = st.columns(2)
     c1.metric("Facturas nuevas", len(validas))
@@ -2473,12 +2441,12 @@ def modal_confirmacion(validas, duplicadas_count, margen):
     if duplicadas_count:
         st.warning(
             f"⚠️ Se omitieron {duplicadas_count} factura(s) duplicada(s). "
-            "No se agregarán al inventario."
+            "No se incluirán en el consolidado."
         )
 
     b1, b2 = st.columns(2)
     with b1:
-        if st.button("✅ Confirmar y actualizar", type="primary", use_container_width=True):
+        if st.button("✅ Confirmar y consolidar", type="primary", use_container_width=True):
             st.session_state.margen_usado = margen
             st.session_state.articulos_repetidos_notif = []
 
@@ -2493,14 +2461,10 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                 }
 
                 for p in productos_en_archivo:
-                    codigo = str(p["codigo"]).replace("-", "").strip()
-                    cantidad_comprada_unidades = p["cant"] * p["emp"]
+                    codigo = re.sub(r"[^A-Za-z0-9]", "", str(p["codigo"])).upper()
+                    cantidad_comprada_unidades = float(p["cant"]) * float(p["emp"])
 
-                    # -------------------------------------------------
-                    # Guardar el origen del producto por factura.
-                    # Esto permite identificar productos repetidos
-                    # entre facturas diferentes.
-                    # -------------------------------------------------
+                    # Guardar de qué factura provino cada producto.
                     if codigo not in st.session_state.origen_productos_facturas:
                         st.session_state.origen_productos_facturas[codigo] = []
 
@@ -2516,18 +2480,21 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         "costo_total": float(p["costo_total"]),
                     })
 
+                    # MISMO CÓDIGO = MISMO PRODUCTO:
+                    # suma stock y suma costo aunque venga de otra factura.
                     if codigo in st.session_state.inventario_acumulado:
                         st.session_state.articulos_repetidos_notif.append(
-                            f'**{p["nombre"]}** ({codigo}) ya existía; stock y costo fueron acumulados.'
+                            f'**{p["nombre"]}** ({codigo}) apareció en otra factura; '
+                            f'se sumaron {int(cantidad_comprada_unidades)} unidades al consolidado.'
                         )
                         st.session_state.inventario_acumulado[codigo]["stock"] += cantidad_comprada_unidades
-                        st.session_state.inventario_acumulado[codigo]["costo_total"] += p["costo_total"]
+                        st.session_state.inventario_acumulado[codigo]["costo_total"] += float(p["costo_total"])
                     else:
                         st.session_state.inventario_acumulado[codigo] = {
                             "nombre": p["nombre"],
                             "categoria": p["cat"],
                             "stock": cantidad_comprada_unidades,
-                            "costo_total": p["costo_total"],
+                            "costo_total": float(p["costo_total"]),
                             "emp": p["emp"],
                             "itbis": p["itbis"],
                         }
@@ -2582,6 +2549,135 @@ def mostrar_vista_previa_archivo(nombre, tipo_mime, datos):
         use_container_width=True,
         key=f"preview_download_{abs(hash(nombre))}",
     )
+
+
+def detectar_productos_repetidos_en_facturas(archivos_validos):
+    """
+    Detecta el mismo código de producto presente en dos o más
+    facturas distintas del lote actual.
+    """
+    por_codigo = {}
+
+    for archivo, firma, proveedor, num_fac, fecha_fac, productos in archivos_validos:
+        factura_key = (str(proveedor), str(num_fac))
+
+        for p in productos:
+            codigo = re.sub(r"[^A-Za-z0-9]", "", str(p["codigo"])).upper()
+            if not codigo:
+                continue
+
+            if codigo not in por_codigo:
+                por_codigo[codigo] = {
+                    "nombre": p["nombre"],
+                    "apariciones": {}
+                }
+
+            # Una sola aparición por factura.
+            if factura_key not in por_codigo[codigo]["apariciones"]:
+                por_codigo[codigo]["apariciones"][factura_key] = {
+                    "proveedor": proveedor,
+                    "factura": str(num_fac),
+                    "fecha": fecha_fac,
+                    "cantidad": float(p["cant"]),
+                    "empaque": int(p["emp"]),
+                    "unidades": float(p["cant"]) * float(p["emp"]),
+                    "costo_total": float(p["costo_total"]),
+                }
+            else:
+                # Si el mismo código se repite dentro de una misma factura,
+                # consolidarlo antes de comparar contra otras facturas.
+                item = por_codigo[codigo]["apariciones"][factura_key]
+                item["cantidad"] += float(p["cant"])
+                item["unidades"] += float(p["cant"]) * float(p["emp"])
+                item["costo_total"] += float(p["costo_total"])
+
+    resumen = []
+    detalle = []
+
+    for codigo, info in por_codigo.items():
+        apariciones = list(info["apariciones"].values())
+
+        if len(apariciones) < 2:
+            continue
+
+        unidades_total = sum(x["unidades"] for x in apariciones)
+        costo_total = sum(x["costo_total"] for x in apariciones)
+        costo_promedio = costo_total / unidades_total if unidades_total else 0
+
+        resumen.append({
+            "Código": codigo,
+            "Producto": info["nombre"],
+            "Facturas": len(apariciones),
+            "Unidades acumuladas": int(unidades_total),
+            "Costo acumulado": round(costo_total, 2),
+            "Costo promedio": round(costo_promedio, 4),
+        })
+
+        for x in apariciones:
+            detalle.append({
+                "Código": codigo,
+                "Producto": info["nombre"],
+                "Proveedor": x["proveedor"],
+                "Factura": x["factura"],
+                "Fecha": x["fecha"],
+                "Cantidad": x["cantidad"],
+                "Empaque": x["empaque"],
+                "Unidades": int(x["unidades"]),
+                "Costo factura": round(x["costo_total"], 2),
+            })
+
+    return pd.DataFrame(resumen), pd.DataFrame(detalle)
+
+
+def construir_productos_repetidos_historicos():
+    """Productos repetidos ya incorporados al consolidado."""
+    resumen = []
+    detalle = []
+
+    for codigo, apariciones in st.session_state.origen_productos_facturas.items():
+        # El mismo producto debe estar en 2+ facturas diferentes.
+        facturas = {}
+        for item in apariciones:
+            key = (str(item.get("proveedor", "")), str(item.get("factura", "")))
+
+            if key not in facturas:
+                facturas[key] = dict(item)
+            else:
+                facturas[key]["unidades"] += float(item.get("unidades", 0))
+                facturas[key]["costo_total"] += float(item.get("costo_total", 0))
+
+        items = list(facturas.values())
+        if len(items) < 2:
+            continue
+
+        unidades_total = sum(float(x.get("unidades", 0)) for x in items)
+        costo_total = sum(float(x.get("costo_total", 0)) for x in items)
+        costo_promedio = costo_total / unidades_total if unidades_total else 0
+
+        resumen.append({
+            "Código": codigo,
+            "Producto": items[0].get("nombre", ""),
+            "Facturas": len(items),
+            "Unidades acumuladas": int(unidades_total),
+            "Costo acumulado": round(costo_total, 2),
+            "Costo promedio": round(costo_promedio, 4),
+        })
+
+        for x in items:
+            detalle.append({
+                "Código": codigo,
+                "Producto": x.get("nombre", ""),
+                "Proveedor": x.get("proveedor", ""),
+                "Factura": x.get("factura", ""),
+                "Fecha": x.get("fecha", ""),
+                "Cantidad": x.get("cantidad", 0),
+                "Empaque": x.get("empaque", 0),
+                "Unidades": int(x.get("unidades", 0)),
+                "Costo factura": round(float(x.get("costo_total", 0)), 2),
+            })
+
+    return pd.DataFrame(resumen), pd.DataFrame(detalle)
+
 
 def render_carga_facturas(titulo=True):
     """Carga y procesa facturas con un selector visual robusto basado en botones reales."""
@@ -2731,7 +2827,7 @@ def render_carga_facturas(titulo=True):
             )
 
     # =========================================================
-    # ARCHIVOS SELECCIONADOS — única vista de archivos
+    # ARCHIVOS SELECCIONADOS — vista compacta y funcional
     # =========================================================
     def _huella_archivo_ui(archivo):
         try:
@@ -2740,28 +2836,21 @@ def render_carga_facturas(titulo=True):
         except Exception:
             return f"{archivo.name}|0"
 
-    # Excluir archivos quitados con la X personalizada.
     uploaded_files = [
         f for f in uploaded_files
         if _huella_archivo_ui(f) not in st.session_state.archivos_ocultos_ui
     ]
 
     if uploaded_files:
-        st.markdown(
-            '<div class="selected-files-title">Selecciona tus facturas</div>',
-            unsafe_allow_html=True,
-        )
-
-        # Tarjetas compactas, máximo 4 por fila.
-        max_cols = 4
+        # El uploader ya muestra "Selecciona tus facturas", no lo repetimos.
+        max_cols = 3
 
         for fila_inicio in range(0, len(uploaded_files), max_cols):
             grupo = uploaded_files[fila_inicio:fila_inicio + max_cols]
-            columnas = st.columns(len(grupo), gap="small")
+            columnas_archivos = st.columns(len(grupo), gap="small")
 
             for offset, archivo in enumerate(grupo):
                 indice = fila_inicio + offset
-                col = columnas[offset]
 
                 try:
                     datos = archivo.getvalue()
@@ -2772,10 +2861,7 @@ def render_carga_facturas(titulo=True):
 
                 nombre = archivo.name
                 mime = getattr(archivo, "type", None)
-                extension = (
-                    nombre.lower().rsplit(".", 1)[-1]
-                    if "." in nombre else ""
-                )
+                extension = nombre.lower().rsplit(".", 1)[-1] if "." in nombre else ""
 
                 if extension in ("jpg", "jpeg", "png"):
                     icono = "🖼️"
@@ -2787,55 +2873,42 @@ def render_carga_facturas(titulo=True):
                     icono = "📎"
                     tipo = extension.upper() or "Archivo"
 
-                nombre_corto = nombre if len(nombre) <= 28 else nombre[:25] + "…"
+                nombre_corto = nombre if len(nombre) <= 25 else nombre[:22] + "…"
 
-                with col:
-                    st.markdown(
-                        f"""
-                        <div class="selected-file-card">
-                            <div class="selected-file-icon">{icono}</div>
+                with columnas_archivos[offset]:
+                    with st.container(border=True):
+                        info_col, ojo_col, x_col = st.columns(
+                            [6.6, 1.1, 1.1],
+                            gap="small",
+                            vertical_alignment="center",
+                        )
 
-                            <div class="selected-file-info">
-                                <div class="selected-file-name" title="{nombre}">
-                                    {nombre_corto}
-                                </div>
-                                <div class="selected-file-meta">
-                                    {len(datos)/1024:.1f} KB · {tipo}
-                                </div>
-                            </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
+                        with info_col:
+                            st.markdown(f"{icono} **{nombre_corto}**")
+                            st.caption(f"{len(datos)/1024:.1f} KB · {tipo}")
 
-                    action_eye, action_remove = st.columns([1, 1], gap="small")
+                        with ojo_col:
+                            if st.button(
+                                "👁",
+                                key=f"preview_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+                                help=f"Vista previa de {nombre}",
+                                use_container_width=True,
+                            ):
+                                mostrar_vista_previa_archivo(nombre, mime, datos)
 
-                    with action_eye:
-                        if st.button(
-                            "👁",
-                            key=f"preview_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
-                            help=f"Vista previa de {nombre}",
-                            use_container_width=True,
-                        ):
-                            mostrar_vista_previa_archivo(
-                                nombre,
-                                mime,
-                                datos,
-                            )
+                        with x_col:
+                            if st.button(
+                                "✕",
+                                key=f"remove_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+                                help=f"Quitar {nombre}",
+                                use_container_width=True,
+                            ):
+                                st.session_state.archivos_ocultos_ui.add(
+                                    _huella_archivo_ui(archivo)
+                                )
+                                st.rerun()
 
-                    with action_remove:
-                        if st.button(
-                            "✕",
-                            key=f"remove_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
-                            help=f"Quitar {nombre}",
-                            use_container_width=True,
-                        ):
-                            st.session_state.archivos_ocultos_ui.add(
-                                _huella_archivo_ui(archivo)
-                            )
-                            st.rerun()
-
-        st.markdown("<div style='height:.25rem'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:.2rem'></div>", unsafe_allow_html=True)
 
     archivos_validos = []
     archivos_duplicados = []
@@ -2883,10 +2956,43 @@ def render_carga_facturas(titulo=True):
                     )
 
     if uploaded_files:
+        # -----------------------------------------------------
+        # PRODUCTOS REPETIDOS EN FACTURAS DIFERENTES DEL LOTE
+        # -----------------------------------------------------
+        df_rep_lote, df_rep_lote_detalle = detectar_productos_repetidos_en_facturas(
+            archivos_validos
+        )
+
+        if not df_rep_lote.empty:
+            st.warning(
+                f"🔁 Se detectaron {len(df_rep_lote)} producto(s) presentes "
+                "en facturas diferentes. Al procesar se sumarán automáticamente."
+            )
+
+            st.dataframe(
+                df_rep_lote,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Costo acumulado": st.column_config.NumberColumn(format="RD$ %.2f"),
+                    "Costo promedio": st.column_config.NumberColumn(format="RD$ %.4f"),
+                },
+            )
+
+            with st.expander("Ver en cuáles facturas aparece cada producto"):
+                st.dataframe(
+                    df_rep_lote_detalle,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Costo factura": st.column_config.NumberColumn(format="RD$ %.2f"),
+                    },
+                )
+
         if archivos_duplicados:
             st.warning(
                 f"⚠️ Se detectaron {len(archivos_duplicados)} factura(s) duplicada(s). "
-                "Fueron omitidas automáticamente y no se agregarán al inventario."
+                "Fueron omitidas automáticamente y no se incluirán en el consolidado."
             )
 
         if st.session_state.errores_ocr:
@@ -2918,59 +3024,6 @@ def render_carga_facturas(titulo=True):
 
 
 
-
-def construir_df_productos_repetidos_facturas():
-    """
-    Devuelve:
-      - resumen: una fila por producto que aparece en 2+ facturas distintas.
-      - detalle: una fila por aparición del producto en cada factura.
-    """
-    resumen = []
-    detalle = []
-
-    for codigo, apariciones in st.session_state.origen_productos_facturas.items():
-        facturas_distintas = {}
-        for item in apariciones:
-            clave_factura = (
-                str(item.get("proveedor", "")),
-                str(item.get("factura", "")),
-            )
-            facturas_distintas[clave_factura] = item
-
-        if len(facturas_distintas) < 2:
-            continue
-
-        items = list(facturas_distintas.values())
-        nombre = items[0].get("nombre", "")
-        total_unidades = sum(float(x.get("unidades", 0)) for x in items)
-        total_costo = sum(float(x.get("costo_total", 0)) for x in items)
-        costo_promedio = total_costo / total_unidades if total_unidades else 0
-
-        resumen.append({
-            "Código": codigo,
-            "Producto": nombre,
-            "Facturas": len(items),
-            "Stock acumulado": int(total_unidades),
-            "Costo acumulado": round(total_costo, 2),
-            "Costo promedio": round(costo_promedio, 4),
-        })
-
-        for item in items:
-            detalle.append({
-                "Código": codigo,
-                "Producto": nombre,
-                "Proveedor": item.get("proveedor", ""),
-                "Factura": item.get("factura", ""),
-                "Fecha": item.get("fecha", ""),
-                "Cantidad": item.get("cantidad", 0),
-                "Empaque": item.get("empaque", 0),
-                "Unidades": int(item.get("unidades", 0)),
-                "Costo factura": round(float(item.get("costo_total", 0)), 2),
-            })
-
-    return pd.DataFrame(resumen), pd.DataFrame(detalle)
-
-
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -2994,7 +3047,7 @@ with st.sidebar:
         [
             "🏠 Inicio",
             "🧾 Procesar facturas",
-            "📦 Inventario acumulado",
+            "📦 Productos consolidados",
             "📋 Detalle de facturas",
             "📥 Exportar Excel",
         ],
@@ -3012,7 +3065,7 @@ with st.sidebar:
       <div class="row"><span>Productos únicos</span><span class="num">{total_productos}</span></div>
       <div class="row"><span>Líneas procesadas</span><span class="num">{total_lineas}</span></div>
       <div class="row"><span>Unidades totales</span><span class="num">{total_unidades:,}</span></div>
-      <div class="row"><span>Valor compra</span><span class="num">RD$ {valor_compra:,.2f}</span></div>
+      <div class="row"><span>Total procesado</span><span class="num">RD$ {valor_compra:,.2f}</span></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -3030,9 +3083,9 @@ if pagina == "🏠 Inicio":
     <div class="hero-grid">
       <div class="hero-card">
         <h1>¡Bienvenido! 👋</h1>
-        <div class="subtitle">Procesador Inteligente de Facturas WilPOS Móvil</div>
+        <div class="subtitle">Procesador de Facturas para WilPOS</div>
         <p>Carga tus facturas desde tu teléfono o computadora.</p>
-        <p>El sistema actualizará tu inventario y dejará el archivo listo para WilPOS.</p>
+        <p>El sistema consolidará los productos y generará el Excel listo para importar en WilPOS.</p>
         <div class="hero-visual">
           <div class="phone"></div>
           <div class="sheet"></div>
@@ -3058,7 +3111,7 @@ if pagina == "🏠 Inicio":
             <div class="stat-icon">🛒</div>
           </div>
           <div class="stat green">
-            <div class="label">Valor total compra</div>
+            <div class="label">Total procesado</div>
             <div class="value">RD$ {valor_compra:,.2f}</div>
             <div class="stat-icon">💰</div>
           </div>
@@ -3078,7 +3131,7 @@ if pagina == "🏠 Inicio":
         inv_c1, inv_c2 = st.columns([4, 1])
         with inv_c1:
             st.markdown(
-                f'<div class="inventory-title">📦 Inventario acumulado <span class="badge">{total_productos} productos únicos</span></div>',
+                f'<div class="inventory-title">📦 Productos consolidados <span class="badge">{total_productos} productos únicos</span></div>',
                 unsafe_allow_html=True
             )
 
@@ -3090,7 +3143,7 @@ if pagina == "🏠 Inicio":
                 st.download_button(
                     "📥 Descargar Excel",
                     data=excel_inicio,
-                    file_name="Inventario_WilPOS_Acumulado.xlsx",
+                    file_name="Productos_WilPOS_Consolidados.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                     type="primary",
@@ -3120,38 +3173,28 @@ elif pagina == "🧾 Procesar facturas":
 
 
 # =========================================================
-# INVENTARIO
+# PRODUCTOS CONSOLIDADOS
 # =========================================================
-elif pagina == "📦 Inventario acumulado":
+elif pagina == "📦 Productos consolidados":
     df_productos = construir_df_productos()
-    df_repetidos, df_repetidos_detalle = construir_df_productos_repetidos_facturas()
+    df_repetidos_hist, df_repetidos_hist_detalle = construir_productos_repetidos_historicos()
 
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown("### 📦 Inventario acumulado")
-    st.caption("Los productos repetidos entre facturas se consolidan en una sola fila. Las líneas procesadas pueden ser mayores que los productos únicos.")
+    st.markdown("### 📦 Productos consolidados")
+    st.caption("Los productos repetidos entre facturas se consolidan por código en una sola fila para generar el Excel final de WilPOS.")
+    st.info(
+        "Vista previa del consolidado que se exportará al archivo Excel para importarlo en WilPOS."
+    )
 
-    # =====================================================
-    # PRODUCTOS REPETIDOS ENTRE FACTURAS DIFERENTES
-    # =====================================================
-    if not df_repetidos.empty:
-        st.markdown(
-            f"""
-            <div class="duplicados-productos-banner">
-                <div>
-                    <div class="dup-title">🔁 Productos repetidos entre facturas</div>
-                    <div class="dup-sub">
-                        Se detectaron <b>{len(df_repetidos)}</b> producto(s) presente(s)
-                        en más de una factura diferente.
-                    </div>
-                </div>
-                <div class="dup-badge">{len(df_repetidos)}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    if not df_repetidos_hist.empty:
+        st.markdown("#### 🔁 Productos repetidos entre facturas")
+        st.success(
+            "Estos productos ya fueron consolidados automáticamente: "
+            "se sumaron sus unidades y sus costos."
         )
 
         st.dataframe(
-            df_repetidos,
+            df_repetidos_hist,
             use_container_width=True,
             hide_index=True,
             column_config={
@@ -3160,24 +3203,15 @@ elif pagina == "📦 Inventario acumulado":
             },
         )
 
-        with st.expander("🔎 Ver detalle por factura", expanded=True):
+        with st.expander("📄 Ver detalle por factura"):
             st.dataframe(
-                df_repetidos_detalle,
+                df_repetidos_hist_detalle,
                 use_container_width=True,
                 hide_index=True,
                 column_config={
                     "Costo factura": st.column_config.NumberColumn(format="RD$ %.2f"),
                 },
             )
-    else:
-        st.markdown(
-            """
-            <div class="sin-duplicados-productos">
-                ✓ No hay productos repetidos entre facturas diferentes.
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
 
     if st.session_state.articulos_repetidos_notif:
         with st.expander("🔄 Artículos acumulados desde varias facturas"):
@@ -3185,7 +3219,7 @@ elif pagina == "📦 Inventario acumulado":
                 st.info(notif)
 
     if df_productos.empty:
-        st.info("Todavía no hay productos en el inventario.")
+        st.info("Todavía no hay productos consolidados.")
     else:
         top_inv1, top_inv2 = st.columns([4, 1])
         with top_inv2:
@@ -3193,7 +3227,7 @@ elif pagina == "📦 Inventario acumulado":
             st.download_button(
                 "📥 Descargar Excel",
                 data=excel_inventario,
-                file_name="Inventario_WilPOS_Acumulado.xlsx",
+                file_name="Productos_WilPOS_Consolidados.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 type="primary",
@@ -3212,7 +3246,7 @@ elif pagina == "📦 Inventario acumulado":
         )
         c1, c2, c3 = st.columns(3)
         c1.metric("Productos únicos", len(df_productos))
-        c2.metric("Stock total", int(df_productos["Stock"].sum()))
+        c2.metric("Unidades consolidadas", int(df_productos["Stock"].sum()))
         c3.metric("Margen aplicado", f"{st.session_state.margen_usado:g}%")
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -3244,8 +3278,12 @@ elif pagina == "📋 Detalle de facturas":
 elif pagina == "📥 Exportar Excel":
     df_productos = construir_df_productos()
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown("### 📥 Exportar inventario para WilPOS")
-    st.caption("Genera el mismo archivo Excel consolidado de la versión funcional.")
+    st.markdown("### 📥 Generar Excel para WilPOS")
+    st.caption("Genera el archivo Excel consolidado y listo para importar en WilPOS.")
+    st.info(
+        "Los productos con el mismo código, aunque aparezcan en facturas diferentes, "
+        "se exportan en una sola fila con sus unidades y costos consolidados."
+    )
 
     if df_productos.empty:
         st.info("Procesa al menos una factura antes de exportar.")
@@ -3261,9 +3299,9 @@ elif pagina == "📥 Exportar Excel":
             """, unsafe_allow_html=True)
         with c2:
             st.download_button(
-                "📥 Descargar Inventario_WilPOS_Acumulado.xlsx",
+                "📥 Descargar Productos_WilPOS_Consolidados.xlsx",
                 data=excel_data,
-                file_name="Inventario_WilPOS_Acumulado.xlsx",
+                file_name="Productos_WilPOS_Consolidados.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 type="primary",
