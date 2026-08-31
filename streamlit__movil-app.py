@@ -2091,6 +2091,32 @@ div[data-testid="stDialog"] img{
     opacity:.82;
 }
 
+
+/* ===== TABLA COMPLETA PRODUCTOS CONSOLIDADOS ===== */
+.products-count-line{
+    margin:.35rem 0 .5rem 0;
+    font-size:.74rem;
+    color:#64748b;
+}
+
+[data-testid="stTable"]{
+    width:100% !important;
+    overflow-x:auto !important;
+}
+
+[data-testid="stTable"] table{
+    width:100% !important;
+    font-size:.75rem !important;
+}
+
+[data-testid="stTable"] th{
+    white-space:nowrap !important;
+}
+
+[data-testid="stTable"] td{
+    vertical-align:middle !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -3602,24 +3628,42 @@ elif pagina == "📦 Productos consolidados":
                 key="download_excel_inventario",
             )
 
-        # Mostrar todos los productos del lote sin ocultarlos en un
-        # viewport pequeño. La altura crece según la cantidad de filas.
-        altura_productos = min(
-            max(210, 38 + (len(df_productos) * 35)),
-            1200,
+        # =====================================================
+        # TABLA COMPLETA DE PRODUCTOS CONSOLIDADOS
+        # =====================================================
+        # st.table renderiza todas las filas y evita que Streamlit
+        # oculte productos dentro de un viewport con scroll vertical.
+        columnas_resumen = [
+            "Código Barra",
+            "Nombre",
+            "Cantidad Empaque",
+            "Stock",
+            "Costo",
+            "Precio Venta",
+            "Categoría",
+        ]
+
+        df_productos_vista = df_productos[columnas_resumen].copy()
+
+        # Formato visual, sin alterar los valores reales usados por el Excel.
+        df_productos_vista["Costo"] = df_productos_vista["Costo"].map(
+            lambda x: f"{float(x):,.4f}"
+        )
+        df_productos_vista["Precio Venta"] = df_productos_vista["Precio Venta"].map(
+            lambda x: f"{float(x):,.2f}"
         )
 
-        st.dataframe(
-            df_productos,
-            use_container_width=True,
-            hide_index=True,
-            height=altura_productos,
-            column_config={
-                "Precio Venta": st.column_config.NumberColumn(format="RD$ %.2f"),
-                "Costo": st.column_config.NumberColumn(format="RD$ %.4f"),
-                "ITBIS": st.column_config.NumberColumn(format="%.2f"),
-            },
+        st.markdown(
+            f"""
+            <div class="products-count-line">
+                Mostrando <b>{len(df_productos_vista)}</b> de
+                <b>{len(df_productos)}</b> productos consolidados
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
+
+        st.table(df_productos_vista)
         c1, c2, c3 = st.columns(3)
         c1.metric("Productos consolidados", len(df_productos))
         c2.metric("Unidades consolidadas", int(df_productos["Stock"].sum()))
