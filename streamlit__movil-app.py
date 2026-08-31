@@ -991,6 +991,50 @@ button[data-testid="stBaseButton-secondary"] *{
     color:#0f172a !important;
 }
 
+
+/* ===== POPUP / DIALOG CENTRADO ===== */
+
+/* Dialog nativo de Streamlit */
+div[data-testid="stDialog"]{
+    align-items:center !important;
+    justify-content:center !important;
+}
+
+div[data-testid="stDialog"] > div{
+    margin:auto !important;
+}
+
+/* Compatibilidad con versiones que usan role=dialog */
+div[role="dialog"]{
+    margin:auto !important;
+}
+
+/* Contenedor visual del popup */
+div[data-testid="stDialog"] div[data-testid="stVerticalBlock"]{
+    margin-left:auto !important;
+    margin-right:auto !important;
+}
+
+/* En desktop, ancho cómodo y centrado */
+@media (min-width:721px){
+    div[data-testid="stDialog"] > div,
+    div[role="dialog"]{
+        width:min(520px, calc(100vw - 3rem)) !important;
+        max-width:520px !important;
+    }
+}
+
+/* En móvil mantiene márgenes seguros */
+@media (max-width:720px){
+    div[data-testid="stDialog"] > div,
+    div[role="dialog"]{
+        width:calc(100vw - 1.25rem) !important;
+        max-width:calc(100vw - 1.25rem) !important;
+        margin-left:auto !important;
+        margin-right:auto !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -1421,7 +1465,7 @@ def modal_confirmacion(validas, duplicadas_count, margen):
 
     b1, b2 = st.columns(2)
     with b1:
-        if st.center("✅ Confirmar y actualizar", type="primary", use_container_width=True):
+        if st.button("✅ Confirmar y actualizar", type="primary", use_container_width=True):
             st.session_state.margen_usado = margen
             st.session_state.articulos_repetidos_notif = []
 
@@ -1574,7 +1618,7 @@ def render_carga_facturas(titulo=True):
             st.error("El margen de ganancia debe ser mayor al 15% para procesar.")
 
         if st.button(
-            "🚀 Procesar Facturas",
+            "🚀 Procesar facturas automáticamente",
             type="primary",
             use_container_width=True,
             disabled=(len(archivos_validos) == 0 or margen_porcentaje <= 15),
