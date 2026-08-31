@@ -1288,6 +1288,157 @@ div[data-testid="stNumberInput"]{
     }
 }
 
+
+/* ===== TRES BOTONES DE CARGA CENTRADOS ===== */
+
+/* Tres opciones iguales */
+div[data-testid="stRadio"] [role="radiogroup"]{
+    display:grid !important;
+    grid-template-columns:repeat(3, minmax(0,1fr)) !important;
+    gap:.75rem !important;
+    width:100% !important;
+    max-width:900px !important;
+    margin-left:auto !important;
+    margin-right:auto !important;
+}
+
+/* Tarjeta */
+div[data-testid="stRadio"] [role="radiogroup"] label{
+    position:relative !important;
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:center !important;
+    justify-content:center !important;
+    min-height:104px !important;
+    padding:2.7rem .8rem .8rem .8rem !important;
+    margin:0 !important;
+    border:1px solid #d7e0ec !important;
+    border-radius:12px !important;
+    background:#ffffff !important;
+    cursor:pointer !important;
+    transition:all .16s ease !important;
+    box-shadow:0 3px 10px rgba(15,23,42,.035) !important;
+    text-align:center !important;
+}
+
+/* Oculta radio nativo */
+div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child{
+    display:none !important;
+}
+
+/* Iconos grandes por posición */
+div[data-testid="stRadio"] [role="radiogroup"] label::before{
+    position:absolute !important;
+    top:.8rem !important;
+    left:50% !important;
+    transform:translateX(-50%) !important;
+    width:38px !important;
+    height:38px !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    border-radius:10px !important;
+    background:#eef4ff !important;
+    color:#2563eb !important;
+    font-size:1.15rem !important;
+    line-height:1 !important;
+}
+
+div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(1)::before{
+    content:"📁";
+}
+
+div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(2)::before{
+    content:"📷";
+}
+
+div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(3)::before{
+    content:"☁️";
+}
+
+/* Texto */
+div[data-testid="stRadio"] [role="radiogroup"] label p{
+    margin:0 !important;
+    color:#2563eb !important;
+    font-size:.9rem !important;
+    font-weight:800 !important;
+    text-align:center !important;
+    width:100% !important;
+}
+
+/* Hover */
+div[data-testid="stRadio"] [role="radiogroup"] label:hover{
+    background:#f8fbff !important;
+    border-color:#93c5fd !important;
+    transform:translateY(-2px) !important;
+}
+
+/* Seleccionado */
+div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){
+    background:#eff6ff !important;
+    border:1.5px solid #60a5fa !important;
+    box-shadow:0 0 0 3px rgba(96,165,250,.10) !important;
+}
+
+div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked)::before{
+    background:#2563eb !important;
+    color:#ffffff !important;
+}
+
+div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) p{
+    color:#1d4ed8 !important;
+}
+
+/* El uploader/drag-drop real también centrado */
+div[data-testid="stFileUploader"]{
+    max-width:900px !important;
+    margin:.7rem auto 0 auto !important;
+}
+
+div[data-testid="stFileUploader"] section{
+    min-height:92px !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    text-align:center !important;
+    border:1.5px dashed #bfcee2 !important;
+    border-radius:12px !important;
+    background:#fbfdff !important;
+}
+
+/* Cámara centrada */
+div[data-testid="stCameraInput"]{
+    max-width:900px !important;
+    margin:.7rem auto 0 auto !important;
+}
+
+/* Móvil */
+@media (max-width:720px){
+    div[data-testid="stRadio"] [role="radiogroup"]{
+        grid-template-columns:1fr !important;
+        max-width:100% !important;
+        gap:.5rem !important;
+    }
+
+    div[data-testid="stRadio"] [role="radiogroup"] label{
+        min-height:78px !important;
+        padding:1rem .75rem 1rem 3.5rem !important;
+        flex-direction:row !important;
+        justify-content:flex-start !important;
+        text-align:left !important;
+    }
+
+    div[data-testid="stRadio"] [role="radiogroup"] label::before{
+        top:50% !important;
+        left:1rem !important;
+        transform:translateY(-50%) !important;
+    }
+
+    div[data-testid="stRadio"] [role="radiogroup"] label p{
+        text-align:left !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -1791,26 +1942,38 @@ def render_carga_facturas(titulo=True):
     with carga_col:
         modo_carga = st.radio(
             "Origen",
-            ["📁 Seleccionar archivos", "📷 Tomar foto"],
+            ["Seleccionar archivos", "Tomar foto", "Arrastrar y soltar"],
             horizontal=True,
             label_visibility="collapsed",
         )
 
         uploaded_files = []
-        if modo_carga == "📁 Seleccionar archivos":
+
+        if modo_carga == "Seleccionar archivos":
             uploaded_files = st.file_uploader(
-                "PDF, JPG, JPEG o PNG",
+                "Selecciona tus facturas",
                 type=["pdf", "png", "jpg", "jpeg"],
                 accept_multiple_files=True,
                 key=f"uploader_{st.session_state.uploader_key}",
+                help="Puedes seleccionar varios archivos a la vez.",
             ) or []
-        else:
+
+        elif modo_carga == "Tomar foto":
             foto = st.camera_input(
                 "Toma la foto completa de la factura",
                 key=f"camera_{st.session_state.camera_key}",
             )
             if foto is not None:
                 uploaded_files = [foto]
+
+        else:
+            uploaded_files = st.file_uploader(
+                "Arrastra y suelta tus facturas aquí",
+                type=["pdf", "png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+                key=f"drag_uploader_{st.session_state.uploader_key}",
+                help="Arrastra uno o varios archivos PDF, JPG, JPEG o PNG.",
+            ) or []
 
     # Aviso breve: los controles funcionales están arriba.
     if margen_porcentaje <= 15:
