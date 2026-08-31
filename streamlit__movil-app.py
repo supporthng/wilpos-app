@@ -3558,6 +3558,160 @@ div[data-testid="stDialog"] img{
     }
 }
 
+
+/* =========================================================
+   DUPLICADAS RESPONSIVE — TABLA DESKTOP / TARJETAS MÓVIL
+   ========================================================= */
+.dup-mobile-only{
+    display:none;
+}
+
+.dup-desktop-only{
+    display:block;
+}
+
+.dup-detail-responsive{
+    display:none;
+}
+
+@media (max-width:900px){
+
+    /* Ocultar completamente la versión dataframe en móvil */
+    .dup-desktop-only{
+        display:none !important;
+    }
+
+    .dup-detail-responsive{
+        display:none !important;
+    }
+
+    .dup-mobile-only{
+        display:block !important;
+        width:100% !important;
+        margin:.55rem 0 .75rem 0 !important;
+    }
+
+    .dup-mobile-details{
+        width:100% !important;
+        border:1px solid #dbe5f0 !important;
+        border-radius:12px !important;
+        background:#fff !important;
+        overflow:hidden !important;
+        box-sizing:border-box !important;
+    }
+
+    .dup-mobile-details > summary{
+        list-style:none !important;
+        min-height:48px !important;
+        display:flex !important;
+        align-items:center !important;
+        justify-content:space-between !important;
+        gap:.5rem !important;
+        padding:.72rem .8rem !important;
+        background:#f8fbff !important;
+        color:#0f172a !important;
+        font-size:.82rem !important;
+        font-weight:800 !important;
+        line-height:1.3 !important;
+        cursor:pointer !important;
+    }
+
+    .dup-mobile-details > summary::-webkit-details-marker{
+        display:none !important;
+    }
+
+    .dup-mobile-details > summary::after{
+        content:"−";
+        flex:0 0 auto;
+        color:#2563eb;
+        font-size:1.05rem;
+        font-weight:900;
+    }
+
+    .dup-mobile-details:not([open]) > summary::after{
+        content:"+";
+    }
+
+    .dup-mobile-body{
+        padding:.62rem !important;
+    }
+
+    .dup-mobile-card{
+        width:100% !important;
+        box-sizing:border-box !important;
+        margin:0 0 .62rem 0 !important;
+        padding:.7rem !important;
+        border:1px solid #fecaca !important;
+        border-radius:10px !important;
+        background:#fffafa !important;
+    }
+
+    .dup-mobile-top{
+        display:flex !important;
+        justify-content:flex-end !important;
+        margin-bottom:.4rem !important;
+    }
+
+    .dup-mobile-badge{
+        display:inline-flex !important;
+        padding:.18rem .45rem !important;
+        border-radius:999px !important;
+        background:#fee2e2 !important;
+        color:#b91c1c !important;
+        font-size:.62rem !important;
+        font-weight:900 !important;
+        letter-spacing:.03em !important;
+    }
+
+    .dup-mobile-field{
+        display:grid !important;
+        grid-template-columns:78px minmax(0,1fr) !important;
+        gap:.45rem !important;
+        padding:.28rem 0 !important;
+        border-bottom:1px solid #f1f5f9 !important;
+        font-size:.74rem !important;
+        line-height:1.4 !important;
+    }
+
+    .dup-mobile-field:last-child{
+        border-bottom:none !important;
+    }
+
+    .dup-mobile-field b{
+        color:#64748b !important;
+        font-size:.68rem !important;
+        font-weight:850 !important;
+    }
+
+    .dup-mobile-field span{
+        min-width:0 !important;
+        color:#0f172a !important;
+        overflow-wrap:anywhere !important;
+        word-break:break-word !important;
+    }
+
+    .dup-mobile-caption{
+        margin-top:.25rem !important;
+        padding:.65rem !important;
+        border-radius:9px !important;
+        background:#f1f5f9 !important;
+        color:#64748b !important;
+        font-size:.7rem !important;
+        line-height:1.45 !important;
+    }
+}
+
+@media (max-width:520px){
+    .dup-mobile-field{
+        grid-template-columns:1fr !important;
+        gap:.06rem !important;
+    }
+
+    .dup-mobile-field b{
+        margin-bottom:.02rem !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -4803,27 +4957,68 @@ def render_carga_facturas(titulo=True):
 
             df_facturas_duplicadas = pd.DataFrame(filas_duplicadas)
 
-            with st.expander(
-                f"🔎 Ver detalle de facturas duplicadas ({len(df_facturas_duplicadas)})",
-                expanded=True,
-            ):
-                st.dataframe(
-                    df_facturas_duplicadas,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Archivo": st.column_config.TextColumn(width="medium"),
-                        "Proveedor": st.column_config.TextColumn(width="medium"),
-                        "Factura": st.column_config.TextColumn(width="small"),
-                        "Estado": st.column_config.TextColumn(width="small"),
-                        "Motivo": st.column_config.TextColumn(width="large"),
-                    },
+            # Detalle responsive:
+            # - escritorio: tabla completa
+            # - móvil: tarjetas verticales para evitar columnas cortadas
+            st.markdown(
+                f'<details class="dup-detail-responsive" open>'
+                f'<summary>🔎 Ver detalle de facturas duplicadas ({len(df_facturas_duplicadas)})</summary>'
+                f'<div class="dup-desktop-table-marker"></div>'
+                f'</details>',
+                unsafe_allow_html=True,
+            )
+
+            # Tabla para escritorio
+            st.markdown('<div class="dup-desktop-only">', unsafe_allow_html=True)
+            st.dataframe(
+                df_facturas_duplicadas,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Archivo": st.column_config.TextColumn(width="medium"),
+                    "Proveedor": st.column_config.TextColumn(width="medium"),
+                    "Factura": st.column_config.TextColumn(width="small"),
+                    "Estado": st.column_config.TextColumn(width="small"),
+                    "Motivo": st.column_config.TextColumn(width="large"),
+                },
+            )
+            st.caption(
+                "Estas facturas fueron excluidas automáticamente y no aportan "
+                "productos, unidades ni costos al consolidado."
+            )
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            # Tarjetas para móvil
+            tarjetas_dup = []
+            for fila in filas_duplicadas:
+                tarjetas_dup.append(
+                    '<div class="dup-mobile-card">'
+                    '<div class="dup-mobile-top">'
+                    '<span class="dup-mobile-badge">OMITIDA</span>'
+                    '</div>'
+                    f'<div class="dup-mobile-field"><b>Archivo</b><span>{html_lib.escape(str(fila["Archivo"]))}</span></div>'
+                    f'<div class="dup-mobile-field"><b>Proveedor</b><span>{html_lib.escape(str(fila["Proveedor"]))}</span></div>'
+                    f'<div class="dup-mobile-field"><b>Factura</b><span>{html_lib.escape(str(fila["Factura"]))}</span></div>'
+                    f'<div class="dup-mobile-field"><b>Estado</b><span>{html_lib.escape(str(fila["Estado"]))}</span></div>'
+                    f'<div class="dup-mobile-field"><b>Motivo</b><span>{html_lib.escape(str(fila["Motivo"]))}</span></div>'
+                    '</div>'
                 )
 
-                st.caption(
-                    "Estas facturas fueron excluidas automáticamente y no aportan "
-                    "productos, unidades ni costos al consolidado."
-                )
+            st.markdown(
+                '<div class="dup-mobile-only">'
+                '<details class="dup-mobile-details" open>'
+                f'<summary>🔎 Ver detalle de facturas duplicadas ({len(filas_duplicadas)})</summary>'
+                '<div class="dup-mobile-body">'
+                + ''.join(tarjetas_dup) +
+                '<div class="dup-mobile-caption">'
+                'Estas facturas fueron excluidas automáticamente y no aportan '
+                'productos, unidades ni costos al consolidado.'
+                '</div>'
+                '</div>'
+                '</details>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
 
         if st.session_state.errores_ocr:
             with st.expander("🔎 Diagnóstico OCR"):
