@@ -1998,6 +1998,16 @@ div[data-testid="stDialog"] img{
     margin-bottom:.45rem;
 }
 
+
+/* ===== DETALLE DE FACTURAS DUPLICADAS ===== */
+[data-testid="stExpander"]{
+    border-radius:10px !important;
+}
+
+[data-testid="stExpander"] summary{
+    font-weight:750 !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -2992,8 +3002,54 @@ def render_carga_facturas(titulo=True):
         if archivos_duplicados:
             st.warning(
                 f"⚠️ Se detectaron {len(archivos_duplicados)} factura(s) duplicada(s). "
-                "Fueron omitidas automáticamente y no se incluirán en el consolidado."
+                "Fueron omitidas automáticamente y no se incluirán en el consolidado ni en el Excel final."
             )
+
+            filas_duplicadas = []
+
+            for nombre_archivo, proveedor_dup, num_fac_dup in archivos_duplicados:
+                if num_fac_dup:
+                    motivo_dup = "Factura ya procesada o repetida en esta carga"
+                    proveedor_mostrar = proveedor_dup or "No identificado"
+                    factura_mostrar = num_fac_dup
+                else:
+                    # En el caso de archivo repetido dentro del mismo lote,
+                    # proveedor_dup contiene el texto explicativo.
+                    motivo_dup = proveedor_dup or "Archivo repetido en esta carga"
+                    proveedor_mostrar = "—"
+                    factura_mostrar = "—"
+
+                filas_duplicadas.append({
+                    "Archivo": nombre_archivo,
+                    "Proveedor": proveedor_mostrar,
+                    "Factura": factura_mostrar,
+                    "Estado": "Omitida",
+                    "Motivo": motivo_dup,
+                })
+
+            df_facturas_duplicadas = pd.DataFrame(filas_duplicadas)
+
+            with st.expander(
+                f"🔎 Ver detalle de facturas duplicadas ({len(df_facturas_duplicadas)})",
+                expanded=True,
+            ):
+                st.dataframe(
+                    df_facturas_duplicadas,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Archivo": st.column_config.TextColumn(width="medium"),
+                        "Proveedor": st.column_config.TextColumn(width="medium"),
+                        "Factura": st.column_config.TextColumn(width="small"),
+                        "Estado": st.column_config.TextColumn(width="small"),
+                        "Motivo": st.column_config.TextColumn(width="large"),
+                    },
+                )
+
+                st.caption(
+                    "Estas facturas fueron excluidas automáticamente y no aportan "
+                    "productos, unidades ni costos al consolidado."
+                )
 
         if st.session_state.errores_ocr:
             with st.expander("🔎 Diagnóstico OCR"):
