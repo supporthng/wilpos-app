@@ -3691,55 +3691,54 @@ def render_carga_facturas(titulo=True):
         with margen_col:
             st.markdown('<div class="process-action-spacer"></div>', unsafe_allow_html=True)
 
+            # =====================================================
+            # RESUMEN DE VALIDACIÓN DEL LOTE
+            # =====================================================
+            total_validas = len(archivos_validos) if uploaded_files else 0
+            total_omitidas = (
+                len(archivos_duplicados) + len(archivos_invalidos)
+                if uploaded_files else 0
+            )
+
             if uploaded_files:
-                # =====================================================
-                # RESUMEN DE VALIDACIÓN DEL LOTE
-                # =====================================================
-                total_validas = len(archivos_validos)
-                total_omitidas = len(archivos_duplicados) + len(archivos_invalidos)
-
                 motivos_omitidas = []
-
                 if archivos_duplicados:
                     motivos_omitidas.append(
-                        f"{len(archivos_duplicados)} duplicada(s)"
+                        f"{len(archivos_duplicados)} factura(s) duplicada(s)"
                     )
-
                 if archivos_invalidos:
                     motivos_omitidas.append(
-                        f"{len(archivos_invalidos)} no reconocida(s)"
+                        f"{len(archivos_invalidos)} factura(s) no reconocida(s)"
                     )
+                texto_motivos = " · ".join(motivos_omitidas) if motivos_omitidas else "Ninguna"
+            else:
+                texto_motivos = "Carga facturas para iniciar la validación"
 
-                if motivos_omitidas:
-                    texto_motivos = " · ".join(motivos_omitidas)
-                else:
-                    texto_motivos = "Sin facturas omitidas"
+            # IMPORTANTE:
+            # Se renderiza como un único bloque HTML, sin líneas en blanco
+            # entre etiquetas, para evitar que Markdown muestre el HTML
+            # como texto dentro de la tarjeta.
+            resumen_html = (
+                '<div class="process-ready validation-summary">'
+                '<div class="process-ready-icon">✨</div>'
+                '<div class="validation-summary-body">'
+                '<div class="validation-row valid-row">'
+                '<span class="validation-label">Facturas Válidas</span>'
+                f'<span class="validation-value">{total_validas}</span>'
+                '</div>'
+                '<div class="validation-row omitted-row">'
+                '<span class="validation-label">Facturas Omitidas</span>'
+                f'<span class="validation-value">{total_omitidas}</span>'
+                '</div>'
+                '<div class="validation-reason">'
+                f'<b>Motivo:</b> {texto_motivos}'
+                '</div>'
+                '</div>'
+                '</div>'
+            )
+            st.markdown(resumen_html, unsafe_allow_html=True)
 
-                st.markdown(
-                    f"""
-                    <div class="process-ready validation-summary">
-                        <div class="process-ready-icon">✨</div>
-                        <div class="validation-summary-body">
-                            <div class="validation-row valid-row">
-                                <span class="validation-label">Facturas Válidas</span>
-                                <span class="validation-value">{total_validas}</span>
-                            </div>
-
-                            <div class="validation-row omitted-row">
-                                <span class="validation-label">Facturas Omitidas</span>
-                                <span class="validation-value">{total_omitidas}</span>
-                            </div>
-
-                            <div class="validation-reason">
-                                <b>Motivo:</b> {texto_motivos}
-                            </div>
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-            if total_omitidas > 0:
+            if uploaded_files and total_omitidas > 0:
                 with st.expander(
                     f"🔎 Ver por qué se omitieron ({total_omitidas})",
                     expanded=False,
