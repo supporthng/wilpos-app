@@ -579,6 +579,72 @@ footer{visibility:hidden;}
     .file-strip{grid-template-columns:1fr;}
     .hero-card h1{font-size:1.65rem;}
 }
+
+/* Componentes utilizados por las páginas internas */
+.section-card{
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:1rem;
+    margin-bottom:.85rem;
+    box-shadow:0 5px 16px rgba(15,23,42,.035);
+}
+
+.file-card{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:.8rem;
+    padding:.72rem .8rem;
+    margin:.45rem 0;
+    border:1px solid #e2e8f0;
+    border-radius:9px;
+    background:#fff;
+}
+
+.file-card .file-name{
+    font-size:.78rem;
+    font-weight:750;
+    color:#0f172a;
+}
+
+.file-card .meta{
+    margin-top:.15rem;
+    color:#64748b;
+    font-size:.68rem;
+}
+
+.bad{
+    color:#dc2626;
+    font-size:.7rem;
+    font-weight:800;
+    white-space:nowrap;
+}
+
+.info-strip{
+    padding:.7rem .8rem;
+    background:#eff6ff;
+    border:1px solid #bfdbfe;
+    color:#1e40af;
+    border-radius:9px;
+    font-size:.75rem;
+    line-height:1.45;
+}
+
+.empty-state{
+    padding:2rem 1rem;
+    border:1px dashed #cbd5e1;
+    border-radius:12px;
+    background:#fbfdff;
+    color:#64748b;
+    text-align:center;
+}
+
+.empty-state .big{
+    font-size:2rem;
+    margin-bottom:.4rem;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -1048,175 +1114,14 @@ def modal_confirmacion(validas, duplicadas_count, margen):
             st.rerun()
 
 
-# =========================================================
-# SIDEBAR
-# =========================================================
-total_facturas, total_productos, total_unidades, valor_compra = totales_dashboard()
 
-with st.sidebar:
-    st.markdown("""
-    <div class="side-logo">
-      <div class="brand">
-        <div class="mark">📦</div>
-        <div>
-          <div class="name">WilPOS</div>
-          <div class="sub">MÓVIL</div>
-        </div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    pagina = st.radio(
-        "Navegación",
-        [
-            "🏠 Inicio",
-            "🧾 Procesar facturas",
-            "📦 Inventario acumulado",
-            "📋 Detalle de facturas",
-            "📥 Exportar Excel",
-        ],
-        label_visibility="collapsed",
-    )
-
-    st.markdown("""
-    <div style="height:1px;background:rgba(255,255,255,.08);margin:.9rem 0;"></div>
-    """, unsafe_allow_html=True)
-
-    st.markdown(f"""
-    <div class="side-summary">
-      <div class="s-title">RESUMEN RÁPIDO</div>
-      <div class="row"><span>Facturas procesadas</span><span class="num">{total_facturas}</span></div>
-      <div class="row"><span>Artículos únicos</span><span class="num">{total_productos}</span></div>
-      <div class="row"><span>Unidades totales</span><span class="num">{total_unidades:,}</span></div>
-      <div class="row"><span>Valor compra</span><span class="num">RD$ {valor_compra:,.2f}</span></div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("<div style='height:.7rem'></div>", unsafe_allow_html=True)
-    if st.button("🔄 Reiniciar todo", use_container_width=True):
-        resetear_todo()
-        st.rerun()
-
-
-# =========================================================
-# CABECERA
-# =========================================================
-top_c1, top_c2 = st.columns([1, 5])
-with top_c2:
-    ta1, ta2, ta3 = st.columns([8, .5, 1.25])
-    with ta2:
-        st.markdown('<div class="top-icon">◐</div>', unsafe_allow_html=True)
-    with ta3:
-        if st.button("🔄 Reiniciar todo", type="secondary", use_container_width=True):
-            resetear_todo()
-            st.rerun()
-
-
-# =========================================================
-# INICIO
-# =========================================================
-if pagina == "🏠 Inicio":
-    st.markdown(f"""
-    <div class="hero-grid">
-      <div class="hero-card">
-        <h1>¡Bienvenido! 👋</h1>
-        <div class="subtitle">Procesador Inteligente de Facturas WilPOS Móvil</div>
-        <p>Carga tus facturas desde tu teléfono o computadora.</p>
-        <p>El sistema actualizará tu inventario y dejará el archivo listo para WilPOS.</p>
-        <div class="hero-visual">
-          <div class="phone"></div>
-          <div class="sheet"></div>
-        </div>
-      </div>
-
-      <div class="stats-card">
-        <div class="stats-title">Estadísticas generales</div>
-        <div class="stats-grid">
-          <div class="stat blue">
-            <div class="label">Facturas procesadas</div>
-            <div class="value">{total_facturas}</div>
-            <div class="stat-icon">🧾</div>
-          </div>
-          <div class="stat purple">
-            <div class="label">Artículos únicos</div>
-            <div class="value">{total_productos}</div>
-            <div class="stat-icon">📦</div>
-          </div>
-          <div class="stat orange">
-            <div class="label">Unidades totales</div>
-            <div class="value">{total_unidades:,}</div>
-            <div class="stat-icon">🛒</div>
-          </div>
-          <div class="stat green">
-            <div class="label">Valor total compra</div>
-            <div class="value">RD$ {valor_compra:,.2f}</div>
-            <div class="stat-icon">💰</div>
-          </div>
-        </div>
-        <div class="stats-link">Ver detalle completo →</div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("""
-    <div class="main-card">
-      <div class="main-card-header">1. Cargar facturas</div>
-      <div class="upload-grid">
-        <div class="upload-zone">
-          <div class="fake-upload">
-            <div class="fake-upload-item">
-              <div class="fake-upload-icon">📁</div>
-              <div class="fake-upload-title">Seleccionar archivos</div>
-              <div class="fake-upload-sub">PDF, JPG, JPEG o PNG</div>
-            </div>
-            <div class="fake-upload-item active">
-              <div class="fake-upload-icon">📷</div>
-              <div class="fake-upload-title">Tomar foto</div>
-              <div class="fake-upload-sub">Usar cámara del teléfono</div>
-            </div>
-            <div class="fake-upload-item">
-              <div class="fake-upload-icon">☁️</div>
-              <div class="fake-upload-title" style="color:#64748b;">Arrastra y suelta</div>
-              <div class="fake-upload-sub">tus archivos aquí</div>
-            </div>
-          </div>
-          <div class="upload-foot">Formatos soportados: PDF, JPG, JPEG, PNG · Puedes seleccionar múltiples archivos</div>
-        </div>
-        <div class="margin-zone">
-          <div style="font-size:.78rem;font-weight:750;margin-bottom:.45rem;">Margen de ganancia (%)</div>
-          <div style="padding:.75rem;border:1px solid #dbe3ef;border-radius:9px;background:#fff;">
-            <div style="font-size:1rem;font-weight:750;">{st.session_state.margen_usado:.2f}%</div>
-          </div>
-          <div style="margin-top:.55rem;padding:.65rem;border-radius:8px;background:#f0fdf4;border:1px solid #bbf7d0;color:#15803d;font-size:.7rem;">
-            ⓘ El margen debe ser mayor al 15% para procesar el inventario.
-          </div>
-        </div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.info("Usa **Procesar facturas** en el menú lateral para cargar archivos o tomar una foto.")
-
-    if st.session_state.detalle_facturas_procesadas:
-        st.markdown('<div class="inventory-card">', unsafe_allow_html=True)
-        st.markdown(
-            f'<div class="inventory-head"><div class="inventory-title">📦 Inventario acumulado <span class="badge">{total_productos} artículos</span></div></div>',
-            unsafe_allow_html=True
-        )
-        df_inicio = construir_df_productos()
-        if not df_inicio.empty:
-            cols = [c for c in ["Código Barra","Nombre","Cantidad Empaque","Stock","Costo","Precio Venta","Categoría"] if c in df_inicio.columns]
-            st.dataframe(df_inicio[cols].head(8), use_container_width=True, hide_index=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-
-# =========================================================
-# PROCESAR FACTURAS
-# =========================================================
-elif pagina == "🧾 Procesar facturas":
+def render_carga_facturas(titulo=True):
+    """Carga y procesa facturas usando una única lógica para Inicio y Procesar facturas."""
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown("### 1. Cargar facturas")
-    st.caption("Selecciona varios archivos desde desktop o toma una foto directamente desde el teléfono.")
+    if titulo:
+        st.markdown("### 1. Cargar facturas")
+    if titulo:
+        st.caption("Selecciona varios archivos desde desktop o toma una foto directamente desde el teléfono.")
 
     carga_col, margen_col = st.columns([2.2, 1], gap="large")
 
@@ -1340,6 +1245,127 @@ elif pagina == "🧾 Procesar facturas":
           Selecciona archivos o usa la cámara para comenzar.
         </div>
         """, unsafe_allow_html=True)
+
+
+
+# =========================================================
+# SIDEBAR
+# =========================================================
+total_facturas, total_productos, total_unidades, valor_compra = totales_dashboard()
+
+with st.sidebar:
+    st.markdown("""
+    <div class="side-logo">
+      <div class="brand">
+        <div class="mark">📦</div>
+        <div>
+          <div class="name">WilPOS</div>
+          <div class="sub">MÓVIL</div>
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    pagina = st.radio(
+        "Navegación",
+        [
+            "🏠 Inicio",
+            "🧾 Procesar facturas",
+            "📦 Inventario acumulado",
+            "📋 Detalle de facturas",
+            "📥 Exportar Excel",
+        ],
+        label_visibility="collapsed",
+    )
+
+    st.markdown("""
+    <div style="height:1px;background:rgba(255,255,255,.08);margin:.9rem 0;"></div>
+    """, unsafe_allow_html=True)
+
+    st.markdown(f"""
+    <div class="side-summary">
+      <div class="s-title">RESUMEN RÁPIDO</div>
+      <div class="row"><span>Facturas procesadas</span><span class="num">{total_facturas}</span></div>
+      <div class="row"><span>Artículos únicos</span><span class="num">{total_productos}</span></div>
+      <div class="row"><span>Unidades totales</span><span class="num">{total_unidades:,}</span></div>
+      <div class="row"><span>Valor compra</span><span class="num">RD$ {valor_compra:,.2f}</span></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<div style='height:.7rem'></div>", unsafe_allow_html=True)
+    if st.button("🔄 Reiniciar todo", use_container_width=True):
+        resetear_todo()
+        st.rerun()
+
+
+# =========================================================
+# INICIO
+# =========================================================
+if pagina == "🏠 Inicio":
+    st.markdown(f"""
+    <div class="hero-grid">
+      <div class="hero-card">
+        <h1>¡Bienvenido! 👋</h1>
+        <div class="subtitle">Procesador Inteligente de Facturas WilPOS Móvil</div>
+        <p>Carga tus facturas desde tu teléfono o computadora.</p>
+        <p>El sistema actualizará tu inventario y dejará el archivo listo para WilPOS.</p>
+        <div class="hero-visual">
+          <div class="phone"></div>
+          <div class="sheet"></div>
+        </div>
+      </div>
+
+      <div class="stats-card">
+        <div class="stats-title">Estadísticas generales</div>
+        <div class="stats-grid">
+          <div class="stat blue">
+            <div class="label">Facturas procesadas</div>
+            <div class="value">{total_facturas}</div>
+            <div class="stat-icon">🧾</div>
+          </div>
+          <div class="stat purple">
+            <div class="label">Artículos únicos</div>
+            <div class="value">{total_productos}</div>
+            <div class="stat-icon">📦</div>
+          </div>
+          <div class="stat orange">
+            <div class="label">Unidades totales</div>
+            <div class="value">{total_unidades:,}</div>
+            <div class="stat-icon">🛒</div>
+          </div>
+          <div class="stat green">
+            <div class="label">Valor total compra</div>
+            <div class="value">RD$ {valor_compra:,.2f}</div>
+            <div class="stat-icon">💰</div>
+          </div>
+        </div>
+        <div class="stats-link">Ver detalle completo →</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    render_carga_facturas(titulo=False)
+
+
+
+    if st.session_state.detalle_facturas_procesadas:
+        st.markdown('<div class="inventory-card">', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="inventory-head"><div class="inventory-title">📦 Inventario acumulado <span class="badge">{total_productos} artículos</span></div></div>',
+            unsafe_allow_html=True
+        )
+        df_inicio = construir_df_productos()
+        if not df_inicio.empty:
+            cols = [c for c in ["Código Barra","Nombre","Cantidad Empaque","Stock","Costo","Precio Venta","Categoría"] if c in df_inicio.columns]
+            st.dataframe(df_inicio[cols].head(8), use_container_width=True, hide_index=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
+# =========================================================
+# PROCESAR FACTURAS
+# =========================================================
+elif pagina == "🧾 Procesar facturas":
+    render_carga_facturas(titulo=True)
 
 
 # =========================================================
