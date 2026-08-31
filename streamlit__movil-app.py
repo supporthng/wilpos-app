@@ -3286,6 +3286,91 @@ div[data-testid="stDialog"] img{
     }
 }
 
+
+/* ===== HERO DEFINITIVO: SIN MARKDOWN-CODE Y SIN SOLAPES ===== */
+.hero-card-logo{
+    display:grid !important;
+    grid-template-columns:minmax(420px,1fr) 185px 150px !important;
+    column-gap:18px !important;
+    align-items:center !important;
+    min-height:185px !important;
+    padding:1.15rem 1.25rem !important;
+    box-sizing:border-box !important;
+}
+.hero-card-logo .hero-copy{
+    position:relative !important;
+    width:100% !important;
+    max-width:none !important;
+    z-index:3 !important;
+}
+.hero-card-logo .hero-brand-zone{
+    position:static !important;
+    inset:auto !important;
+    transform:none !important;
+    width:185px !important;
+    height:86px !important;
+    margin:0 !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    background:transparent !important;
+    border:0 !important;
+    box-shadow:none !important;
+    overflow:visible !important;
+}
+.hero-card-logo .wilpos-hero-logo{
+    display:block !important;
+    width:100% !important;
+    height:100% !important;
+    object-fit:contain !important;
+    background:transparent !important;
+    border:0 !important;
+    box-shadow:none !important;
+}
+.hero-card-logo .hero-visual{
+    position:relative !important;
+    left:auto !important;
+    right:auto !important;
+    top:auto !important;
+    bottom:auto !important;
+    width:150px !important;
+    height:130px !important;
+    transform:scale(.82) !important;
+    transform-origin:center !important;
+    margin:0 !important;
+}
+@media (max-width:1100px){
+    .hero-card-logo{
+        grid-template-columns:minmax(340px,1fr) 160px 125px !important;
+        column-gap:10px !important;
+    }
+    .hero-card-logo .hero-brand-zone{
+        width:160px !important;
+        height:76px !important;
+    }
+    .hero-card-logo .hero-visual{
+        width:125px !important;
+        transform:scale(.7) !important;
+    }
+}
+@media (max-width:900px){
+    .hero-card-logo{
+        display:flex !important;
+        flex-direction:column !important;
+        align-items:flex-start !important;
+        min-height:auto !important;
+    }
+    .hero-card-logo .hero-brand-zone{
+        width:150px !important;
+        height:68px !important;
+        margin:.5rem auto 0 !important;
+        align-self:center !important;
+    }
+    .hero-card-logo .hero-visual{
+        display:none !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -4749,56 +4834,49 @@ with st.sidebar:
 # INICIO
 # =========================================================
 if pagina == "🏠 Inicio":
-    st.markdown(f"""
-    <div class="hero-grid">
-      <div class="hero-card hero-card-logo">
-        <div class="hero-copy">
-          <h1>¡Bienvenido! 👋</h1>
-          <div class="subtitle">Procesador de Facturas para WilPOS</div>
-          <p>Carga tus facturas desde tu teléfono o computadora.</p>
-          <p>El sistema consolidará los productos y generará el Excel listo para importar en WilPOS.</p>
-        </div>
-
-        <div class="hero-brand-zone">
-          <img class="wilpos-hero-logo"
-               src="data:image/png;base64,{WILPOS_LOGO_B64}"
-               alt="WilPOS">
-        </div>
-
-        <div class="hero-visual">
-          <div class="phone"></div>
-          <div class="sheet"></div>
-        </div>
-      </div>
-
-      <div class="stats-card">
-        <div class="stats-title">Estadísticas generales</div>
-        <div class="stats-grid">
-          <div class="stat blue">
-            <div class="label">Facturas procesadas</div>
-            <div class="value">{total_facturas}</div>
-            <div class="stat-icon">🧾</div>
-          </div>
-          <div class="stat purple">
-            <div class="label">Productos únicos</div>
-            <div class="value">{total_productos}</div>
-            <div class="stat-icon">📦</div>
-          </div>
-          <div class="stat orange">
-            <div class="label">Unidades totales</div>
-            <div class="value">{total_unidades:,}</div>
-            <div class="stat-icon">🛒</div>
-          </div>
-          <div class="stat green">
-            <div class="label">Total procesado</div>
-            <div class="value">RD$ {valor_compra:,.2f}</div>
-            <div class="stat-icon">💰</div>
-          </div>
-        </div>
-        <div class="stats-link">Ver detalle completo →</div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(f"""<div class="hero-grid">
+<div class="hero-card hero-card-logo">
+<div class="hero-copy">
+<h1>¡Bienvenido! 👋</h1>
+<div class="subtitle">Procesador de Facturas para WilPOS</div>
+<p>Carga tus facturas desde tu teléfono o computadora.</p>
+<p>El sistema consolidará los productos y generará el Excel listo para importar en WilPOS.</p>
+</div>
+<div class="hero-brand-zone">
+<img class="wilpos-hero-logo" src="data:image/png;base64,{WILPOS_LOGO_B64}" alt="WilPOS">
+</div>
+<div class="hero-visual">
+<div class="phone"></div>
+<div class="sheet"></div>
+</div>
+</div>
+<div class="stats-card">
+<div class="stats-title">Estadísticas generales</div>
+<div class="stats-grid">
+<div class="stat blue">
+<div class="label">Facturas procesadas</div>
+<div class="value">{total_facturas}</div>
+<div class="stat-icon">🧾</div>
+</div>
+<div class="stat purple">
+<div class="label">Productos únicos</div>
+<div class="value">{total_productos}</div>
+<div class="stat-icon">📦</div>
+</div>
+<div class="stat orange">
+<div class="label">Unidades totales</div>
+<div class="value">{total_unidades:,}</div>
+<div class="stat-icon">🛒</div>
+</div>
+<div class="stat green">
+<div class="label">Total procesado</div>
+<div class="value">RD$ {valor_compra:,.2f}</div>
+<div class="stat-icon">💰</div>
+</div>
+</div>
+<div class="stats-link">Ver detalle completo →</div>
+</div>
+</div>""", unsafe_allow_html=True)
 
     render_carga_facturas(titulo=False)
 
