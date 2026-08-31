@@ -1979,6 +1979,38 @@ div[data-testid="stDialog"] img{
     object-fit:contain !important;
 }
 
+
+/* ===== ARCHIVOS SELECCIONADOS - VERSIÓN FINAL ===== */
+
+/* Ocultar solamente las fichas de archivos nativas.
+   El uploader y su botón de agregar archivos siguen funcionando. */
+[data-testid="stFileUploaderFile"]{
+    display:none !important;
+}
+
+/* Compactar las filas creadas con st.container(border=True) */
+[data-testid="stMain"] div[data-testid="stVerticalBlockBorderWrapper"]{
+    border-radius:10px !important;
+}
+
+/* Botones pequeños de acción dentro de las fichas */
+[data-testid="stMain"] button[aria-label*="Vista previa"],
+[data-testid="stMain"] button[aria-label*="Quitar"]{
+    min-width:34px !important;
+    min-height:34px !important;
+    padding:.2rem !important;
+    border-radius:999px !important;
+}
+
+/* En móvil, mantener botones cómodos para tocar */
+@media (max-width:720px){
+    [data-testid="stMain"] button[aria-label*="Vista previa"],
+    [data-testid="stMain"] button[aria-label*="Quitar"]{
+        min-width:40px !important;
+        min-height:40px !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -2658,7 +2690,7 @@ def render_carga_facturas(titulo=True):
             )
 
     # =========================================================
-    # ARCHIVOS SELECCIONADOS — única vista de archivos
+    # ARCHIVOS SELECCIONADOS — una sola vista compacta
     # =========================================================
     def _huella_archivo_ui(archivo):
         try:
@@ -2667,28 +2699,24 @@ def render_carga_facturas(titulo=True):
         except Exception:
             return f"{archivo.name}|0"
 
-    # Excluir archivos quitados con la X personalizada.
+    # Excluir únicamente los archivos quitados con la X personalizada.
     uploaded_files = [
         f for f in uploaded_files
         if _huella_archivo_ui(f) not in st.session_state.archivos_ocultos_ui
     ]
 
     if uploaded_files:
-        st.markdown(
-            '<div class="selected-files-title">Selecciona tus facturas</div>',
-            unsafe_allow_html=True,
-        )
+        # No añadimos otro título "Selecciona tus facturas":
+        # el file_uploader ya muestra ese texto.
 
-        # Tarjetas compactas, máximo 4 por fila.
-        max_cols = 4
+        max_cols = 3
 
         for fila_inicio in range(0, len(uploaded_files), max_cols):
             grupo = uploaded_files[fila_inicio:fila_inicio + max_cols]
-            columnas = st.columns(len(grupo), gap="small")
+            columnas_archivos = st.columns(len(grupo), gap="small")
 
             for offset, archivo in enumerate(grupo):
                 indice = fila_inicio + offset
-                col = columnas[offset]
 
                 try:
                     datos = archivo.getvalue()
@@ -2714,55 +2742,60 @@ def render_carga_facturas(titulo=True):
                     icono = "📎"
                     tipo = extension.upper() or "Archivo"
 
-                nombre_corto = nombre if len(nombre) <= 28 else nombre[:25] + "…"
+                nombre_corto = (
+                    nombre
+                    if len(nombre) <= 24
+                    else nombre[:21] + "…"
+                )
 
-                with col:
-                    st.markdown(
-                        f"""
-                        <div class="selected-file-card">
-                            <div class="selected-file-icon">{icono}</div>
+                with columnas_archivos[offset]:
+                    with st.container(border=True):
+                        fila_info, fila_ojo, fila_x = st.columns(
+                            [6.6, 1.15, 1.15],
+                            gap="small",
+                            vertical_alignment="center",
+                        )
 
-                            <div class="selected-file-info">
-                                <div class="selected-file-name" title="{nombre}">
-                                    {nombre_corto}
-                                </div>
-                                <div class="selected-file-meta">
-                                    {len(datos)/1024:.1f} KB · {tipo}
-                                </div>
-                            </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
+                        with fila_info:
+                            # Usamos controles nativos de Streamlit para evitar
+                            # que HTML termine mostrándose como texto.
+                            st.markdown(f"{icono} **{nombre_corto}**")
+                            st.caption(f"{len(datos)/1024:.1f} KB · {tipo}")
 
-                    action_eye, action_remove = st.columns([1, 1], gap="small")
+                        with fila_ojo:
+                            if st.button(
+                                "👁",
+                                key=(
+                                    f"preview_btn_{indice}_"
+                                    f"{st.session_state.uploader_key}_"
+                                    f"{st.session_state.camera_key}"
+                                ),
+                                help=f"Vista previa de {nombre}",
+                                use_container_width=True,
+                            ):
+                                mostrar_vista_previa_archivo(
+                                    nombre,
+                                    mime,
+                                    datos,
+                                )
 
-                    with action_eye:
-                        if st.button(
-                            "👁",
-                            key=f"preview_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
-                            help=f"Vista previa de {nombre}",
-                            use_container_width=True,
-                        ):
-                            mostrar_vista_previa_archivo(
-                                nombre,
-                                mime,
-                                datos,
-                            )
+                        with fila_x:
+                            if st.button(
+                                "✕",
+                                key=(
+                                    f"remove_btn_{indice}_"
+                                    f"{st.session_state.uploader_key}_"
+                                    f"{st.session_state.camera_key}"
+                                ),
+                                help=f"Quitar {nombre}",
+                                use_container_width=True,
+                            ):
+                                st.session_state.archivos_ocultos_ui.add(
+                                    _huella_archivo_ui(archivo)
+                                )
+                                st.rerun()
 
-                    with action_remove:
-                        if st.button(
-                            "✕",
-                            key=f"remove_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
-                            help=f"Quitar {nombre}",
-                            use_container_width=True,
-                        ):
-                            st.session_state.archivos_ocultos_ui.add(
-                                _huella_archivo_ui(archivo)
-                            )
-                            st.rerun()
-
-        st.markdown("<div style='height:.25rem'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:.2rem'></div>", unsafe_allow_html=True)
 
     archivos_validos = []
     archivos_duplicados = []
