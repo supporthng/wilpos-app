@@ -2718,6 +2718,242 @@ div[data-testid="stDialog"] img{
     }
 }
 
+
+/* =========================================================
+   WILPOS MOBILE FIX — iPhone / Android
+   ========================================================= */
+@media (max-width: 900px){
+
+    /* El contenido principal nunca queda por debajo del sidebar */
+    [data-testid="stAppViewContainer"]{
+        overflow-x:hidden !important;
+    }
+
+    /* Sidebar abierto = panel completo, no franja angosta */
+    [data-testid="stSidebar"]{
+        width:100vw !important;
+        min-width:100vw !important;
+        max-width:100vw !important;
+        z-index:999999 !important;
+    }
+
+    [data-testid="stSidebar"] > div:first-child{
+        width:100vw !important;
+        min-width:100vw !important;
+        max-width:100vw !important;
+    }
+
+    /* Contenedor principal a ancho real del teléfono */
+    [data-testid="stMain"]{
+        width:100% !important;
+        max-width:100% !important;
+        overflow-x:hidden !important;
+    }
+
+    [data-testid="stMainBlockContainer"],
+    .block-container{
+        width:100% !important;
+        max-width:100% !important;
+        margin:0 !important;
+        padding:.5rem .45rem 1.25rem .45rem !important;
+        box-sizing:border-box !important;
+    }
+
+    /* Hero y estadísticas 100% ancho */
+    .hero-grid{
+        display:block !important;
+        width:100% !important;
+    }
+
+    .hero-card,
+    .stats-card{
+        width:100% !important;
+        max-width:100% !important;
+        margin:0 0 .65rem 0 !important;
+        box-sizing:border-box !important;
+    }
+
+    .hero-visual{
+        display:none !important;
+    }
+
+    .hero-card h1{
+        font-size:1.45rem !important;
+    }
+
+    .hero-card p{
+        font-size:.78rem !important;
+        line-height:1.4 !important;
+    }
+
+    .stats-grid{
+        grid-template-columns:1fr 1fr !important;
+        gap:.42rem !important;
+    }
+
+    /* =====================================================
+       CARGA DE FACTURAS: TODO APILADO
+       ===================================================== */
+
+    /* Cualquier bloque horizontal dentro del área de carga se vuelve columna */
+    [data-testid="stMain"] .stHorizontalBlock,
+    [data-testid="stMain"] [data-testid="stHorizontalBlock"]{
+        flex-direction:column !important;
+        flex-wrap:nowrap !important;
+        width:100% !important;
+        gap:.55rem !important;
+    }
+
+    [data-testid="stMain"] .stHorizontalBlock > div,
+    [data-testid="stMain"] [data-testid="stHorizontalBlock"] > div{
+        width:100% !important;
+        flex:1 1 100% !important;
+        max-width:100% !important;
+        min-width:0 !important;
+    }
+
+    /* Excepción: estadísticas internas siguen 2x2 porque son CSS grid */
+    .stats-grid{
+        display:grid !important;
+    }
+
+    /* Opciones visuales de carga */
+    .fake-upload{
+        display:block !important;
+        width:100% !important;
+        min-height:0 !important;
+    }
+
+    .fake-upload-item{
+        width:100% !important;
+        min-height:88px !important;
+        border-right:none !important;
+        border-bottom:1px solid #eef2f7 !important;
+        box-sizing:border-box !important;
+    }
+
+    .fake-upload-item:last-child{
+        border-bottom:none !important;
+    }
+
+    /* Zona de carga y margen uno debajo del otro */
+    .upload-grid{
+        display:block !important;
+        width:100% !important;
+    }
+
+    .upload-zone,
+    .margin-zone{
+        width:100% !important;
+        max-width:100% !important;
+        box-sizing:border-box !important;
+        padding:.7rem !important;
+        border-right:none !important;
+    }
+
+    .upload-zone{
+        border-bottom:1px solid #e5e7eb !important;
+    }
+
+    /* File uploader no puede desbordarse */
+    div[data-testid="stFileUploader"]{
+        width:100% !important;
+        max-width:100% !important;
+        box-sizing:border-box !important;
+    }
+
+    div[data-testid="stFileUploader"] section{
+        width:100% !important;
+        max-width:100% !important;
+        box-sizing:border-box !important;
+    }
+
+    /* Archivos seleccionados */
+    .file-strip{
+        grid-template-columns:1fr !important;
+        width:100% !important;
+    }
+
+    /* Número / margen */
+    div[data-testid="stNumberInput"]{
+        width:100% !important;
+        max-width:100% !important;
+    }
+
+    div[data-testid="stNumberInput"] input{
+        width:100% !important;
+        min-height:48px !important;
+        font-size:.95rem !important;
+    }
+
+    /* Resumen validación */
+    .process-ready,
+    .validation-summary{
+        width:100% !important;
+        max-width:100% !important;
+        box-sizing:border-box !important;
+    }
+
+    .validation-row{
+        width:100% !important;
+    }
+
+    /* CTA grande y a ancho completo */
+    .stButton > button,
+    .stDownloadButton > button{
+        width:100% !important;
+        min-height:50px !important;
+        font-size:.88rem !important;
+    }
+
+    /* Tablas: scroll horizontal */
+    div[data-testid="stDataFrame"]{
+        width:100% !important;
+        max-width:100% !important;
+        overflow-x:auto !important;
+    }
+
+    div[data-testid="stDataFrame"] > div{
+        overflow-x:auto !important;
+    }
+
+    /* Cards generales */
+    .section-card,
+    .inventory-card{
+        width:100% !important;
+        max-width:100% !important;
+        box-sizing:border-box !important;
+        padding:.65rem !important;
+        margin-left:0 !important;
+        margin-right:0 !important;
+    }
+}
+
+@media (max-width: 600px){
+    .stats-grid{
+        grid-template-columns:1fr 1fr !important;
+    }
+
+    .stat{
+        min-height:92px !important;
+        padding:.55rem !important;
+    }
+
+    .stat .label{
+        font-size:.66rem !important;
+        line-height:1.25 !important;
+    }
+
+    .stat .value{
+        font-size:1rem !important;
+    }
+
+    .upload-foot{
+        font-size:.62rem !important;
+        line-height:1.35 !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
