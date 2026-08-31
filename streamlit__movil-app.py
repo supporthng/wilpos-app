@@ -1163,6 +1163,153 @@ textarea{
     }
 }
 
+
+/* ===== BLOQUE DE CARGA COMO REFERENCIA ===== */
+.upload-reference-card{
+    background:#ffffff;
+    border:1px solid #dfe7f1;
+    border-radius:12px;
+    overflow:hidden;
+    margin-bottom:.75rem;
+}
+
+.upload-reference-grid{
+    display:grid;
+    grid-template-columns:minmax(0,2.3fr) minmax(260px,.9fr);
+    align-items:stretch;
+}
+
+.upload-reference-left{
+    padding:.75rem .8rem;
+    border-right:1px solid #e5e7eb;
+}
+
+.upload-reference-right{
+    padding:.75rem .8rem;
+}
+
+.upload-reference-title{
+    font-size:.92rem;
+    font-weight:850;
+    color:#0f172a;
+    margin-bottom:.55rem;
+}
+
+.upload-options{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    min-height:92px;
+    border:1px dashed #cbd5e1;
+    border-radius:9px;
+    overflow:hidden;
+    background:#fbfdff;
+}
+
+.upload-option{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:.18rem;
+    text-align:center;
+    padding:.5rem;
+    border-right:1px solid #eef2f7;
+}
+
+.upload-option:last-child{
+    border-right:none;
+}
+
+.upload-option.active{
+    background:#f7faff;
+    outline:1px solid #bfdbfe;
+    outline-offset:-1px;
+}
+
+.upload-option-icon{
+    width:30px;
+    height:30px;
+    border-radius:8px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:#eef4ff;
+    color:#2563eb;
+    font-size:.95rem;
+    margin-bottom:.1rem;
+}
+
+.upload-option-title{
+    color:#2563eb;
+    font-size:.74rem;
+    font-weight:750;
+}
+
+.upload-option-sub{
+    color:#64748b;
+    font-size:.64rem;
+    line-height:1.25;
+}
+
+.upload-reference-foot{
+    margin-top:.38rem;
+    color:#94a3b8;
+    font-size:.63rem;
+}
+
+.margin-preview{
+    border:1px solid #dbe3ef;
+    border-radius:8px;
+    background:#fff;
+    padding:.55rem .65rem;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    min-height:38px;
+    font-size:.8rem;
+    font-weight:700;
+}
+
+.margin-valid{
+    margin-top:.5rem;
+    padding:.58rem .65rem;
+    border:1px solid #bbf7d0;
+    border-radius:8px;
+    background:#f0fdf4;
+    color:#15803d;
+    font-size:.68rem;
+    line-height:1.35;
+}
+
+/* Hacer más discreto el uploader real debajo del bloque visual */
+.real-upload-wrap{
+    margin-top:.6rem;
+}
+
+@media (max-width:900px){
+    .upload-reference-grid{
+        grid-template-columns:1fr;
+    }
+    .upload-reference-left{
+        border-right:none;
+        border-bottom:1px solid #e5e7eb;
+    }
+}
+
+@media (max-width:640px){
+    .upload-options{
+        grid-template-columns:1fr;
+    }
+    .upload-option{
+        border-right:none;
+        border-bottom:1px solid #eef2f7;
+        min-height:70px;
+    }
+    .upload-option:last-child{
+        border-bottom:none;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -1649,28 +1796,19 @@ def modal_confirmacion(validas, duplicadas_count, margen):
 
 def render_carga_facturas(titulo=True):
     """Carga y procesa facturas usando una única lógica para Inicio y Procesar facturas."""
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    if titulo:
-        st.markdown("### 1. Cargar facturas")
-    if titulo:
-        st.caption("Selecciona varios archivos desde desktop o toma una foto directamente desde el teléfono.")
 
-    carga_col, margen_col = st.columns([2.2, 1], gap="large")
+    # Controles reales
+    carga_col, margen_col = st.columns([2.25, 1], gap="large")
 
     with margen_col:
-        st.markdown("#### Margen de ganancia")
         margen_porcentaje = st.number_input(
             "Margen (%)",
             min_value=0.0,
             max_value=500.0,
             value=float(st.session_state.margen_usado),
             step=1.0,
+            label_visibility="collapsed",
         )
-        if margen_porcentaje > 15:
-            st.success("✓ Margen válido para procesar")
-        else:
-            st.warning("Debe ser mayor al 15%")
-        st.markdown('<div class="info-strip">La identificación es automática por OCR, NCF, códigos y descripciones.</div>', unsafe_allow_html=True)
 
     with carga_col:
         modo_carga = st.radio(
@@ -1679,6 +1817,7 @@ def render_carga_facturas(titulo=True):
             horizontal=True,
             label_visibility="collapsed",
         )
+
         uploaded_files = []
         if modo_carga == "📁 Archivo / galería":
             uploaded_files = st.file_uploader(
@@ -1695,7 +1834,58 @@ def render_carga_facturas(titulo=True):
             if foto is not None:
                 uploaded_files = [foto]
 
-    st.markdown('</div>', unsafe_allow_html=True)
+    # Presentación visual superior inspirada en la referencia.
+    estado_margen = (
+        "ⓘ Margen válido para procesar el inventario."
+        if margen_porcentaje > 15
+        else "ⓘ El margen debe ser mayor al 15% para procesar el inventario."
+    )
+
+    st.markdown(
+        f"""
+        <div class="upload-reference-card">
+          <div class="upload-reference-grid">
+            <div class="upload-reference-left">
+              <div class="upload-reference-title">1. Cargar facturas</div>
+              <div class="upload-options">
+                <div class="upload-option">
+                  <div class="upload-option-icon">📁</div>
+                  <div class="upload-option-title">Seleccionar archivos</div>
+                  <div class="upload-option-sub">PDF, JPG, JPEG o PNG</div>
+                </div>
+                <div class="upload-option active">
+                  <div class="upload-option-icon">📷</div>
+                  <div class="upload-option-title">Tomar foto</div>
+                  <div class="upload-option-sub">Usar cámara del teléfono</div>
+                </div>
+                <div class="upload-option">
+                  <div class="upload-option-icon">☁️</div>
+                  <div class="upload-option-title" style="color:#64748b;">Arrastra y suelta</div>
+                  <div class="upload-option-sub">tus archivos aquí</div>
+                </div>
+              </div>
+              <div class="upload-reference-foot">
+                Formatos soportados: PDF, JPG, JPEG, PNG · Puedes seleccionar múltiples archivos
+              </div>
+            </div>
+
+            <div class="upload-reference-right">
+              <div class="upload-reference-title">Margen de ganancia (%)</div>
+              <div class="margin-preview">
+                <span>{margen_porcentaje:.2f}</span>
+                <span style="color:#64748b;">%</span>
+              </div>
+              <div class="margin-valid">{estado_margen}</div>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Aviso breve: los controles funcionales están arriba.
+    if margen_porcentaje <= 15:
+        st.warning("El margen de ganancia debe ser mayor al 15% para procesar.")
 
     archivos_validos = []
     archivos_duplicados = []
