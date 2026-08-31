@@ -1035,6 +1035,134 @@ div[data-testid="stDialog"] div[data-testid="stVerticalBlock"]{
     }
 }
 
+
+/* ===== TIPOGRAFÍA MÁS LEGIBLE ===== */
+
+/* Texto general de la aplicación */
+.stApp{
+    font-size:16px !important;
+}
+
+p, label, li,
+[data-testid="stMarkdownContainer"] p{
+    font-size:.94rem !important;
+    line-height:1.5 !important;
+}
+
+/* Sidebar */
+[data-testid="stSidebar"] [role="radiogroup"] p{
+    font-size:.91rem !important;
+    font-weight:650 !important;
+}
+
+.side-summary .s-title{
+    font-size:.75rem !important;
+}
+
+.side-summary .row{
+    font-size:.83rem !important;
+}
+
+/* Bienvenida */
+.hero-card h1{
+    font-size:1.95rem !important;
+}
+
+.hero-card .subtitle{
+    font-size:1rem !important;
+}
+
+.hero-card p{
+    font-size:.9rem !important;
+}
+
+/* Estadísticas */
+.stats-title{
+    font-size:.96rem !important;
+}
+
+.stat .label{
+    font-size:.75rem !important;
+}
+
+.stat .value{
+    font-size:1.1rem !important;
+}
+
+.stats-link{
+    font-size:.78rem !important;
+}
+
+/* Formularios */
+[data-testid="stWidgetLabel"] p,
+.stRadio label p,
+.stCheckbox label p{
+    font-size:.9rem !important;
+}
+
+input,
+textarea{
+    font-size:.92rem !important;
+}
+
+/* Botones */
+.stButton > button,
+.stDownloadButton > button{
+    font-size:.92rem !important;
+    font-weight:750 !important;
+    min-height:40px !important;
+}
+
+.stButton > button p,
+.stDownloadButton > button p{
+    font-size:.92rem !important;
+    font-weight:750 !important;
+}
+
+/* Títulos y tarjetas */
+.main-card-header{
+    font-size:1rem !important;
+}
+
+.inventory-title{
+    font-size:1rem !important;
+}
+
+.file-card .file-name{
+    font-size:.84rem !important;
+}
+
+.file-card .meta,
+.upload-foot,
+.fake-upload-sub{
+    font-size:.75rem !important;
+}
+
+.fake-upload-title{
+    font-size:.83rem !important;
+}
+
+/* Tablas */
+[data-testid="stDataFrame"]{
+    font-size:.86rem !important;
+}
+
+/* Móvil: evitar que todo se vuelva excesivamente grande */
+@media (max-width:720px){
+    .stApp{
+        font-size:15px !important;
+    }
+
+    .hero-card h1{
+        font-size:1.65rem !important;
+    }
+
+    .stButton > button,
+    .stDownloadButton > button{
+        font-size:.88rem !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -1618,7 +1746,7 @@ def render_carga_facturas(titulo=True):
             st.error("El margen de ganancia debe ser mayor al 15% para procesar.")
 
         if st.button(
-            "🚀 Procesar facturas automáticamente",
+            "🚀 Procesar Facturas",
             type="primary",
             use_container_width=True,
             disabled=(len(archivos_validos) == 0 or margen_porcentaje <= 15),
