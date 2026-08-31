@@ -1164,149 +1164,127 @@ textarea{
 }
 
 
-/* ===== BLOQUE DE CARGA COMO REFERENCIA ===== */
-.upload-reference-card{
-    background:#ffffff;
-    border:1px solid #dfe7f1;
-    border-radius:12px;
-    overflow:hidden;
-    margin-bottom:.75rem;
+
+/* ===== CONTROLES REALES DE CARGA CON APARIENCIA DE TARJETAS ===== */
+
+/* Contenedor del selector Archivo / Cámara */
+div[data-testid="stRadio"] [role="radiogroup"]{
+    display:grid !important;
+    grid-template-columns:1fr 1fr !important;
+    gap:.65rem !important;
+    width:100% !important;
 }
 
-.upload-reference-grid{
-    display:grid;
-    grid-template-columns:minmax(0,2.3fr) minmax(260px,.9fr);
-    align-items:stretch;
+/* Cada opción se convierte en tarjeta */
+div[data-testid="stRadio"] [role="radiogroup"] label{
+    position:relative !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    min-height:78px !important;
+    padding:.8rem 1rem !important;
+    margin:0 !important;
+    border:1px solid #d7e0ec !important;
+    border-radius:10px !important;
+    background:#ffffff !important;
+    cursor:pointer !important;
+    transition:all .16s ease !important;
+    box-shadow:0 2px 8px rgba(15,23,42,.025) !important;
 }
 
-.upload-reference-left{
-    padding:.75rem .8rem;
-    border-right:1px solid #e5e7eb;
+/* Oculta el círculo nativo */
+div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child{
+    display:none !important;
 }
 
-.upload-reference-right{
-    padding:.75rem .8rem;
+/* Texto del botón */
+div[data-testid="stRadio"] [role="radiogroup"] label p{
+    margin:0 !important;
+    font-size:.9rem !important;
+    font-weight:750 !important;
+    color:#2563eb !important;
+    text-align:center !important;
 }
 
-.upload-reference-title{
-    font-size:.92rem;
-    font-weight:850;
-    color:#0f172a;
-    margin-bottom:.55rem;
+/* Hover */
+div[data-testid="stRadio"] [role="radiogroup"] label:hover{
+    border-color:#93c5fd !important;
+    background:#f8fbff !important;
+    transform:translateY(-1px);
 }
 
-.upload-options{
-    display:grid;
-    grid-template-columns:1fr 1fr 1fr;
-    min-height:92px;
-    border:1px dashed #cbd5e1;
-    border-radius:9px;
-    overflow:hidden;
-    background:#fbfdff;
+/* Estado seleccionado */
+div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){
+    border:1.5px solid #60a5fa !important;
+    background:#eff6ff !important;
+    box-shadow:0 0 0 2px rgba(96,165,250,.10) !important;
 }
 
-.upload-option{
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    justify-content:center;
-    gap:.18rem;
-    text-align:center;
-    padding:.5rem;
-    border-right:1px solid #eef2f7;
+div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) p{
+    color:#1d4ed8 !important;
 }
 
-.upload-option:last-child{
-    border-right:none;
+/* Uploader real */
+div[data-testid="stFileUploader"]{
+    margin-top:.55rem !important;
+    border:none !important;
+    background:transparent !important;
+    padding:0 !important;
 }
 
-.upload-option.active{
-    background:#f7faff;
-    outline:1px solid #bfdbfe;
-    outline-offset:-1px;
+div[data-testid="stFileUploader"] section{
+    min-height:76px !important;
+    border:1px dashed #cbd5e1 !important;
+    border-radius:10px !important;
+    background:#fbfdff !important;
+    padding:.7rem !important;
 }
 
-.upload-option-icon{
-    width:30px;
-    height:30px;
-    border-radius:8px;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    background:#eef4ff;
-    color:#2563eb;
-    font-size:.95rem;
-    margin-bottom:.1rem;
+/* Botón Browse/Upload del uploader */
+div[data-testid="stFileUploader"] button{
+    border-radius:8px !important;
+    min-height:38px !important;
+    padding:.4rem .9rem !important;
+    border:1px solid #cbd5e1 !important;
+    background:#ffffff !important;
+    color:#0f172a !important;
+    font-weight:700 !important;
 }
 
-.upload-option-title{
-    color:#2563eb;
-    font-size:.74rem;
-    font-weight:750;
+div[data-testid="stFileUploader"] button *{
+    color:#0f172a !important;
 }
 
-.upload-option-sub{
-    color:#64748b;
-    font-size:.64rem;
-    line-height:1.25;
+/* Cámara real */
+div[data-testid="stCameraInput"]{
+    margin-top:.55rem !important;
 }
 
-.upload-reference-foot{
-    margin-top:.38rem;
-    color:#94a3b8;
-    font-size:.63rem;
+div[data-testid="stCameraInput"] button{
+    border-radius:9px !important;
+    min-height:44px !important;
+    font-weight:750 !important;
 }
 
-.margin-preview{
-    border:1px solid #dbe3ef;
-    border-radius:8px;
-    background:#fff;
-    padding:.55rem .65rem;
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    min-height:38px;
-    font-size:.8rem;
-    font-weight:700;
+/* Margen alineado visualmente con las tarjetas */
+div[data-testid="stNumberInput"]{
+    margin-top:.1rem !important;
 }
 
-.margin-valid{
-    margin-top:.5rem;
-    padding:.58rem .65rem;
-    border:1px solid #bbf7d0;
-    border-radius:8px;
-    background:#f0fdf4;
-    color:#15803d;
-    font-size:.68rem;
-    line-height:1.35;
-}
-
-/* Hacer más discreto el uploader real debajo del bloque visual */
-.real-upload-wrap{
-    margin-top:.6rem;
-}
-
-@media (max-width:900px){
-    .upload-reference-grid{
-        grid-template-columns:1fr;
-    }
-    .upload-reference-left{
-        border-right:none;
-        border-bottom:1px solid #e5e7eb;
-    }
-}
-
+/* Móvil */
 @media (max-width:640px){
-    .upload-options{
-        grid-template-columns:1fr;
+    div[data-testid="stRadio"] [role="radiogroup"]{
+        grid-template-columns:1fr 1fr !important;
+        gap:.45rem !important;
     }
-    .upload-option{
-        border-right:none;
-        border-bottom:1px solid #eef2f7;
-        min-height:70px;
+
+    div[data-testid="stRadio"] [role="radiogroup"] label{
+        min-height:68px !important;
+        padding:.6rem .45rem !important;
     }
-    .upload-option:last-child{
-        border-bottom:none;
+
+    div[data-testid="stRadio"] [role="radiogroup"] label p{
+        font-size:.82rem !important;
     }
 }
 
@@ -1813,13 +1791,13 @@ def render_carga_facturas(titulo=True):
     with carga_col:
         modo_carga = st.radio(
             "Origen",
-            ["📁 Archivo / galería", "📷 Cámara del teléfono"],
+            ["📁 Seleccionar archivos", "📷 Tomar foto"],
             horizontal=True,
             label_visibility="collapsed",
         )
 
         uploaded_files = []
-        if modo_carga == "📁 Archivo / galería":
+        if modo_carga == "📁 Seleccionar archivos":
             uploaded_files = st.file_uploader(
                 "PDF, JPG, JPEG o PNG",
                 type=["pdf", "png", "jpg", "jpeg"],
@@ -1833,55 +1811,6 @@ def render_carga_facturas(titulo=True):
             )
             if foto is not None:
                 uploaded_files = [foto]
-
-    # Presentación visual superior inspirada en la referencia.
-    estado_margen = (
-        "ⓘ Margen válido para procesar el inventario."
-        if margen_porcentaje > 15
-        else "ⓘ El margen debe ser mayor al 15% para procesar el inventario."
-    )
-
-    st.markdown(
-        f"""
-        <div class="upload-reference-card">
-          <div class="upload-reference-grid">
-            <div class="upload-reference-left">
-              <div class="upload-reference-title">1. Cargar facturas</div>
-              <div class="upload-options">
-                <div class="upload-option">
-                  <div class="upload-option-icon">📁</div>
-                  <div class="upload-option-title">Seleccionar archivos</div>
-                  <div class="upload-option-sub">PDF, JPG, JPEG o PNG</div>
-                </div>
-                <div class="upload-option active">
-                  <div class="upload-option-icon">📷</div>
-                  <div class="upload-option-title">Tomar foto</div>
-                  <div class="upload-option-sub">Usar cámara del teléfono</div>
-                </div>
-                <div class="upload-option">
-                  <div class="upload-option-icon">☁️</div>
-                  <div class="upload-option-title" style="color:#64748b;">Arrastra y suelta</div>
-                  <div class="upload-option-sub">tus archivos aquí</div>
-                </div>
-              </div>
-              <div class="upload-reference-foot">
-                Formatos soportados: PDF, JPG, JPEG, PNG · Puedes seleccionar múltiples archivos
-              </div>
-            </div>
-
-            <div class="upload-reference-right">
-              <div class="upload-reference-title">Margen de ganancia (%)</div>
-              <div class="margin-preview">
-                <span>{margen_porcentaje:.2f}</span>
-                <span style="color:#64748b;">%</span>
-              </div>
-              <div class="margin-valid">{estado_margen}</div>
-            </div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
     # Aviso breve: los controles funcionales están arriba.
     if margen_porcentaje <= 15:
