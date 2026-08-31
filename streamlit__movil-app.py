@@ -26,7 +26,7 @@ except ImportError:
 
 # Configuración de la página
 st.set_page_config(
-    page_title="Generador de Inventario WilPOS Movil", 
+    page_title="Generador de Inventario WilPOS", 
     page_icon="📦", 
     layout="wide"
 )
