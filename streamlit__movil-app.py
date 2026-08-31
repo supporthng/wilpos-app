@@ -2117,6 +2117,102 @@ div[data-testid="stDialog"] img{
     vertical-align:middle !important;
 }
 
+
+/* =========================================================
+   PRODUCTOS CONSOLIDADOS — TABLA COMPLETA SIN RECORTE
+   ========================================================= */
+.products-count-line{
+    width:100%;
+    box-sizing:border-box;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:1rem;
+    margin:.45rem 0 .55rem 0;
+    padding:.55rem .7rem;
+    border:1px solid #dbe5f0;
+    border-radius:8px;
+    background:#f8fbff;
+    color:#64748b;
+    font-size:.75rem;
+}
+
+.products-ok{
+    color:#15803d;
+    font-weight:800;
+    white-space:nowrap;
+}
+
+.wilpos-products-wrap{
+    width:100% !important;
+    height:auto !important;
+    max-height:none !important;
+    overflow-x:auto !important;
+    overflow-y:visible !important;
+    border:1px solid #dbe5f0;
+    border-radius:9px;
+    background:#fff;
+}
+
+.wilpos-products-table{
+    width:100% !important;
+    min-width:900px;
+    border-collapse:collapse;
+    table-layout:auto;
+    margin:0 !important;
+    font-size:.76rem;
+}
+
+.wilpos-products-table thead th{
+    position:static !important;
+    padding:.58rem .6rem;
+    text-align:left;
+    white-space:nowrap;
+    color:#64748b;
+    font-weight:650;
+    background:#f8fafc;
+    border-bottom:1px solid #dbe5f0;
+    border-right:1px solid #e5e7eb;
+}
+
+.wilpos-products-table tbody td{
+    padding:.55rem .6rem;
+    color:#0f172a;
+    background:#fff;
+    border-bottom:1px solid #e5e7eb;
+    border-right:1px solid #e5e7eb;
+    vertical-align:middle;
+    white-space:nowrap;
+}
+
+.wilpos-products-table tbody tr:last-child td{
+    border-bottom:none;
+}
+
+.wilpos-products-table th:last-child,
+.wilpos-products-table td:last-child{
+    border-right:none;
+}
+
+/* Muy importante: ningún padre del bloque puede cortar la tabla */
+[data-testid="stMain"] .section-card,
+[data-testid="stMain"] [data-testid="stMarkdownContainer"],
+[data-testid="stMain"] [data-testid="stVerticalBlock"]{
+    max-height:none;
+}
+
+@media (max-width:720px){
+    .products-count-line{
+        align-items:flex-start;
+        flex-direction:column;
+        gap:.25rem;
+    }
+
+    .wilpos-products-table{
+        font-size:.72rem;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -3629,10 +3725,8 @@ elif pagina == "📦 Productos consolidados":
             )
 
         # =====================================================
-        # TABLA COMPLETA DE PRODUCTOS CONSOLIDADOS
+        # TABLA HTML COMPLETA — SIN LÍMITE VERTICAL DE STREAMLIT
         # =====================================================
-        # st.table renderiza todas las filas y evita que Streamlit
-        # oculte productos dentro de un viewport con scroll vertical.
         columnas_resumen = [
             "Código Barra",
             "Nombre",
@@ -3645,7 +3739,7 @@ elif pagina == "📦 Productos consolidados":
 
         df_productos_vista = df_productos[columnas_resumen].copy()
 
-        # Formato visual, sin alterar los valores reales usados por el Excel.
+        # Formato solo visual. El Excel sigue usando los valores numéricos reales.
         df_productos_vista["Costo"] = df_productos_vista["Costo"].map(
             lambda x: f"{float(x):,.4f}"
         )
@@ -3656,14 +3750,25 @@ elif pagina == "📦 Productos consolidados":
         st.markdown(
             f"""
             <div class="products-count-line">
-                Mostrando <b>{len(df_productos_vista)}</b> de
-                <b>{len(df_productos)}</b> productos consolidados
+                <span>Mostrando <b>{len(df_productos_vista)}</b> de
+                <b>{len(df_productos)}</b> productos consolidados</span>
+                <span class="products-ok">✓ Vista completa</span>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        st.table(df_productos_vista)
+        tabla_productos_html = df_productos_vista.to_html(
+            index=False,
+            escape=True,
+            classes="wilpos-products-table",
+            border=0,
+        )
+
+        st.markdown(
+            f'<div class="wilpos-products-wrap">{tabla_productos_html}</div>',
+            unsafe_allow_html=True,
+        )
         c1, c2, c3 = st.columns(3)
         c1.metric("Productos consolidados", len(df_productos))
         c2.metric("Unidades consolidadas", int(df_productos["Stock"].sum()))
