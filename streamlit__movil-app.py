@@ -3203,6 +3203,89 @@ div[data-testid="stDialog"] img{
     }
 }
 
+
+/* ===== FIX HERO HTML + DISTRIBUCIÓN FINAL ===== */
+.hero-card-logo{
+    display:grid !important;
+    grid-template-columns:minmax(0,1fr) 190px 155px !important;
+    gap:12px !important;
+    align-items:center !important;
+    min-height:185px !important;
+    padding:1.1rem 1.2rem !important;
+}
+
+.hero-card-logo .hero-copy{
+    position:relative !important;
+    width:auto !important;
+    max-width:none !important;
+    z-index:2 !important;
+}
+
+.hero-card-logo .hero-brand-zone{
+    position:static !important;
+    transform:none !important;
+    width:190px !important;
+    height:90px !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    background:transparent !important;
+    border:0 !important;
+    box-shadow:none !important;
+    z-index:2 !important;
+}
+
+.hero-card-logo .wilpos-hero-logo{
+    width:100% !important;
+    height:100% !important;
+    object-fit:contain !important;
+    display:block !important;
+    background:transparent !important;
+    border:0 !important;
+    box-shadow:none !important;
+}
+
+.hero-card-logo .hero-visual{
+    position:relative !important;
+    inset:auto !important;
+    width:155px !important;
+    height:130px !important;
+    transform:none !important;
+    z-index:1 !important;
+}
+
+@media (max-width:1100px){
+    .hero-card-logo{
+        grid-template-columns:minmax(0,1fr) 165px 130px !important;
+    }
+    .hero-card-logo .hero-brand-zone{
+        width:165px !important;
+        height:78px !important;
+    }
+    .hero-card-logo .hero-visual{
+        width:130px !important;
+        transform:scale(.8) !important;
+        transform-origin:center !important;
+    }
+}
+
+@media (max-width:900px){
+    .hero-card-logo{
+        display:flex !important;
+        flex-direction:column !important;
+        align-items:flex-start !important;
+        min-height:auto !important;
+    }
+    .hero-card-logo .hero-brand-zone{
+        width:150px !important;
+        height:68px !important;
+        margin:.4rem auto 0 !important;
+    }
+    .hero-card-logo .hero-visual{
+        display:none !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -4677,11 +4760,9 @@ if pagina == "🏠 Inicio":
         </div>
 
         <div class="hero-brand-zone">
-          <img
-            class="wilpos-hero-logo"
-            src="data:image/png;base64,{WILPOS_LOGO_B64}"
-            alt="WilPOS"
-          >
+          <img class="wilpos-hero-logo"
+               src="data:image/png;base64,{WILPOS_LOGO_B64}"
+               alt="WilPOS">
         </div>
 
         <div class="hero-visual">
