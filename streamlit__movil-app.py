@@ -20,10 +20,9 @@ except ImportError:
     OCR_DISPONIBLE = False
 
 st.set_page_config(
-    page_title="WilPOS Móvil | Procesador de Facturas",
+page_title="WilPOS Móvil | Procesador de Facturas",
     page_icon="📦",
     layout="wide",
-    initial_sidebar_state="expanded",
     initial_sidebar_state="collapsed",
 )
 
