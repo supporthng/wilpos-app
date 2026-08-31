@@ -1421,7 +1421,7 @@ def modal_confirmacion(validas, duplicadas_count, margen):
 
     b1, b2 = st.columns(2)
     with b1:
-        if st.button("✅ Confirmar y actualizar", type="primary", use_container_width=True):
+        if st.center("✅ Confirmar y actualizar", type="primary", use_container_width=True):
             st.session_state.margen_usado = margen
             st.session_state.articulos_repetidos_notif = []
 
