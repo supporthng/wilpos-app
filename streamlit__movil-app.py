@@ -1876,6 +1876,109 @@ div[data-testid="stDialog"] img{
     }
 }
 
+
+/* ===== ÚNICA SECCIÓN DE ARCHIVOS SELECCIONADOS ===== */
+
+.selected-files-title{
+    margin:.55rem 0 .42rem 0;
+    font-size:.88rem;
+    font-weight:850;
+    color:#0f172a;
+}
+
+.selected-file-card{
+    min-height:66px;
+    display:flex;
+    align-items:center;
+    gap:.62rem;
+    padding:.62rem .68rem;
+
+    border:1px solid #dbe5f0;
+    border-bottom:none;
+    border-radius:11px 11px 0 0;
+    background:#fff;
+}
+
+.selected-file-icon{
+    width:40px;
+    height:40px;
+    flex:0 0 40px;
+
+    display:flex;
+    align-items:center;
+    justify-content:center;
+
+    border-radius:8px;
+    background:#f1f5f9;
+    font-size:1.2rem;
+}
+
+.selected-file-info{
+    flex:1;
+    min-width:0;
+}
+
+.selected-file-name{
+    color:#0f172a;
+    font-size:.74rem;
+    font-weight:780;
+
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+
+.selected-file-meta{
+    margin-top:.12rem;
+    color:#64748b;
+    font-size:.64rem;
+}
+
+/* Ojo y X como pie compacto de la misma tarjeta */
+[data-testid="stMain"] .selected-file-card + div{
+    gap:0 !important;
+    margin-top:0 !important;
+}
+
+[data-testid="stMain"] .selected-file-card + div button{
+    min-height:34px !important;
+    border-radius:0 !important;
+    background:#fff !important;
+    border-color:#dbe5f0 !important;
+    padding:.15rem !important;
+}
+
+[data-testid="stMain"] .selected-file-card + div > div:first-child button{
+    border-radius:0 0 0 11px !important;
+    color:#2563eb !important;
+}
+
+[data-testid="stMain"] .selected-file-card + div > div:last-child button{
+    border-radius:0 0 11px 0 !important;
+    color:#ef4444 !important;
+}
+
+[data-testid="stMain"] .selected-file-card + div > div:first-child button:hover{
+    background:#eff6ff !important;
+    border-color:#93c5fd !important;
+}
+
+[data-testid="stMain"] .selected-file-card + div > div:last-child button:hover{
+    background:#fff1f2 !important;
+    border-color:#fca5a5 !important;
+}
+
+/* Ocultar las fichas nativas del uploader para no duplicar archivos */
+[data-testid="stFileUploaderFile"]{
+    display:none !important;
+}
+
+/* Popup de vista previa */
+div[data-testid="stDialog"] img{
+    max-height:68vh !important;
+    object-fit:contain !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -2555,7 +2658,7 @@ def render_carga_facturas(titulo=True):
             )
 
     # =========================================================
-    # ARCHIVOS SELECCIONADOS — ojo al lado de X
+    # ARCHIVOS SELECCIONADOS — única vista de archivos
     # =========================================================
     def _huella_archivo_ui(archivo):
         try:
@@ -2564,8 +2667,7 @@ def render_carga_facturas(titulo=True):
         except Exception:
             return f"{archivo.name}|0"
 
-    # La X personalizada elimina el archivo de esta carga aunque el
-    # file_uploader de Streamlit conserve internamente su selección.
+    # Excluir archivos quitados con la X personalizada.
     uploaded_files = [
         f for f in uploaded_files
         if _huella_archivo_ui(f) not in st.session_state.archivos_ocultos_ui
@@ -2573,60 +2675,59 @@ def render_carga_facturas(titulo=True):
 
     if uploaded_files:
         st.markdown(
-            f'<div class="uploaded-preview-title">Archivos cargados ({len(uploaded_files)})</div>',
+            '<div class="selected-files-title">Selecciona tus facturas</div>',
             unsafe_allow_html=True,
         )
 
+        # Tarjetas compactas, máximo 4 por fila.
         max_cols = 4
+
         for fila_inicio in range(0, len(uploaded_files), max_cols):
             grupo = uploaded_files[fila_inicio:fila_inicio + max_cols]
-            columnas_preview = st.columns(len(grupo), gap="small")
+            columnas = st.columns(len(grupo), gap="small")
 
-            for offset, archivo_preview in enumerate(grupo):
+            for offset, archivo in enumerate(grupo):
                 indice = fila_inicio + offset
-                columna = columnas_preview[offset]
+                col = columnas[offset]
 
                 try:
-                    datos_preview = archivo_preview.getvalue()
+                    datos = archivo.getvalue()
                 except Exception:
-                    archivo_preview.seek(0)
-                    datos_preview = archivo_preview.read()
-                    archivo_preview.seek(0)
+                    archivo.seek(0)
+                    datos = archivo.read()
+                    archivo.seek(0)
 
-                nombre_preview = archivo_preview.name
-                mime_preview = getattr(archivo_preview, "type", None)
+                nombre = archivo.name
+                mime = getattr(archivo, "type", None)
                 extension = (
-                    nombre_preview.lower().rsplit(".", 1)[-1]
-                    if "." in nombre_preview else ""
+                    nombre.lower().rsplit(".", 1)[-1]
+                    if "." in nombre else ""
                 )
 
                 if extension in ("jpg", "jpeg", "png"):
-                    icono_archivo = "🖼️"
-                    tipo_archivo = "Imagen"
+                    icono = "🖼️"
+                    tipo = "Imagen"
                 elif extension == "pdf":
-                    icono_archivo = "📄"
-                    tipo_archivo = "PDF"
+                    icono = "📄"
+                    tipo = "PDF"
                 else:
-                    icono_archivo = "📎"
-                    tipo_archivo = extension.upper() or "Archivo"
+                    icono = "📎"
+                    tipo = extension.upper() or "Archivo"
 
-                nombre_corto = (
-                    nombre_preview
-                    if len(nombre_preview) <= 27
-                    else nombre_preview[:24] + "…"
-                )
+                nombre_corto = nombre if len(nombre) <= 28 else nombre[:25] + "…"
 
-                with columna:
+                with col:
                     st.markdown(
                         f"""
-                        <div class="file-action-card">
-                            <div class="file-action-icon">{icono_archivo}</div>
-                            <div class="file-action-info">
-                                <div class="file-action-name" title="{nombre_preview}">
+                        <div class="selected-file-card">
+                            <div class="selected-file-icon">{icono}</div>
+
+                            <div class="selected-file-info">
+                                <div class="selected-file-name" title="{nombre}">
                                     {nombre_corto}
                                 </div>
-                                <div class="file-action-meta">
-                                    {len(datos_preview)/1024:.1f} KB · {tipo_archivo}
+                                <div class="selected-file-meta">
+                                    {len(datos)/1024:.1f} KB · {tipo}
                                 </div>
                             </div>
                         </div>
@@ -2634,30 +2735,30 @@ def render_carga_facturas(titulo=True):
                         unsafe_allow_html=True,
                     )
 
-                    ojo_col, x_col = st.columns([1, 1], gap="small")
+                    action_eye, action_remove = st.columns([1, 1], gap="small")
 
-                    with ojo_col:
+                    with action_eye:
                         if st.button(
                             "👁",
                             key=f"preview_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
-                            help=f"Vista previa de {nombre_preview}",
+                            help=f"Vista previa de {nombre}",
                             use_container_width=True,
                         ):
                             mostrar_vista_previa_archivo(
-                                nombre_preview,
-                                mime_preview,
-                                datos_preview,
+                                nombre,
+                                mime,
+                                datos,
                             )
 
-                    with x_col:
+                    with action_remove:
                         if st.button(
                             "✕",
                             key=f"remove_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
-                            help=f"Quitar {nombre_preview}",
+                            help=f"Quitar {nombre}",
                             use_container_width=True,
                         ):
                             st.session_state.archivos_ocultos_ui.add(
-                                _huella_archivo_ui(archivo_preview)
+                                _huella_archivo_ui(archivo)
                             )
                             st.rerun()
 
@@ -2709,50 +2810,6 @@ def render_carga_facturas(titulo=True):
                     )
 
     if uploaded_files:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown(f"### 2. Archivos cargados ({len(uploaded_files)})")
-
-        for f, firma, proveedor, num_fac, fecha_fac, productos in archivos_validos:
-            st.markdown(f"""
-            <div class="file-card">
-              <div>
-                <div class="file-name">📄 {f.name}</div>
-                <div class="meta">{proveedor} · Factura {num_fac} · {fecha_fac} · {len(productos)} artículo(s)</div>
-              </div>
-              <div class="ok">✓ Reconocida</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        for nombre, proveedor, num_fac in archivos_duplicados:
-            if num_fac:
-                detalle_dup = f"{proveedor} · Factura {num_fac}"
-            else:
-                detalle_dup = proveedor
-
-            st.markdown(f"""
-            <div class="file-card" style="border-color:#fecaca;background:#fff7f7;">
-              <div>
-                <div class="file-name">⚠️ {nombre}</div>
-                <div class="meta">{detalle_dup}</div>
-                <div class="meta" style="color:#b91c1c;font-weight:700;">
-                    Esta factura fue omitida y NO será agregada al inventario.
-                </div>
-              </div>
-              <div class="bad">Duplicada</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        for nombre in archivos_invalidos:
-            st.markdown(f"""
-            <div class="file-card">
-              <div>
-                <div class="file-name">📄 {nombre}</div>
-                <div class="meta">No pudo reconocerse automáticamente como una factura configurada.</div>
-              </div>
-              <div class="bad">No reconocida</div>
-            </div>
-            """, unsafe_allow_html=True)
-
         if archivos_duplicados:
             st.warning(
                 f"⚠️ Se detectaron {len(archivos_duplicados)} factura(s) duplicada(s). "
