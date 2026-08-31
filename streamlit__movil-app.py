@@ -1682,6 +1682,108 @@ div[data-testid="stCameraInput"]{
     }
 }
 
+
+/* ===== ICONOS GRANDES, CENTRADOS SOBRE EL LABEL ===== */
+
+/* Tarjetas de carga del área principal */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
+    min-height:118px !important;
+    padding:1rem .75rem !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+}
+
+/* El contenedor del texto ocupa toda la tarjeta */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label [data-testid="stMarkdownContainer"]{
+    width:100% !important;
+}
+
+/* Label en dos líneas: icono arriba + texto abajo */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
+    white-space:pre-line !important;
+    text-align:center !important;
+    line-height:1.35 !important;
+    font-size:.95rem !important;
+    font-weight:800 !important;
+}
+
+/* Icono visual grande encima usando el label seleccionado por posición */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
+    position:relative !important;
+    padding-top:3.8rem !important;
+}
+
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
+    display:flex !important;
+    position:absolute !important;
+    top:.75rem !important;
+    left:50% !important;
+    transform:translateX(-50%) !important;
+    width:46px !important;
+    height:46px !important;
+    align-items:center !important;
+    justify-content:center !important;
+    border-radius:12px !important;
+    background:#eef4ff !important;
+    font-size:1.65rem !important;
+    line-height:1 !important;
+    content:"" !important;
+}
+
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(1)::before{
+    content:"📁" !important;
+}
+
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(2)::before{
+    content:"📷" !important;
+}
+
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(3)::before{
+    content:"☁️" !important;
+}
+
+/* Como el icono ya está arriba, ocultamos solo el emoji del texto
+   reemplazando visualmente los labels con texto limpio mediante indentación.
+   Se conserva el valor real del radio para no alterar la lógica. */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
+    font-size:0 !important;
+}
+
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(1) p::after{
+    content:"Seleccionar archivos";
+    font-size:.95rem !important;
+}
+
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(2) p::after{
+    content:"Tomar foto";
+    font-size:.95rem !important;
+}
+
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(3) p::after{
+    content:"Arrastrar y soltar";
+    font-size:.95rem !important;
+}
+
+/* Seleccionado: icono más marcado */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked)::before{
+    background:#2563eb !important;
+}
+
+/* Móvil: conserva icono arriba y centrado */
+@media (max-width:720px){
+    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
+        min-height:105px !important;
+        padding:3.6rem .65rem .75rem !important;
+    }
+
+    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
+        width:42px !important;
+        height:42px !important;
+        font-size:1.45rem !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
