@@ -1980,35 +1980,54 @@ div[data-testid="stDialog"] img{
 }
 
 
-/* ===== ARCHIVOS SELECCIONADOS - VERSIÓN FINAL ===== */
-
-/* Ocultar solamente las fichas de archivos nativas.
-   El uploader y su botón de agregar archivos siguen funcionando. */
-[data-testid="stFileUploaderFile"]{
-    display:none !important;
+/* ===== PRODUCTOS REPETIDOS ENTRE FACTURAS ===== */
+.duplicados-productos-banner{
+    margin:.65rem 0 .6rem 0;
+    padding:.78rem .85rem;
+    border:1px solid #facc15;
+    border-radius:10px;
+    background:#fffbeb;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:1rem;
 }
 
-/* Compactar las filas creadas con st.container(border=True) */
-[data-testid="stMain"] div[data-testid="stVerticalBlockBorderWrapper"]{
-    border-radius:10px !important;
+.dup-title{
+    color:#92400e;
+    font-size:.9rem;
+    font-weight:850;
 }
 
-/* Botones pequeños de acción dentro de las fichas */
-[data-testid="stMain"] button[aria-label*="Vista previa"],
-[data-testid="stMain"] button[aria-label*="Quitar"]{
-    min-width:34px !important;
-    min-height:34px !important;
-    padding:.2rem !important;
-    border-radius:999px !important;
+.dup-sub{
+    margin-top:.15rem;
+    color:#a16207;
+    font-size:.74rem;
 }
 
-/* En móvil, mantener botones cómodos para tocar */
-@media (max-width:720px){
-    [data-testid="stMain"] button[aria-label*="Vista previa"],
-    [data-testid="stMain"] button[aria-label*="Quitar"]{
-        min-width:40px !important;
-        min-height:40px !important;
-    }
+.dup-badge{
+    min-width:34px;
+    height:34px;
+    padding:0 .55rem;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:999px;
+    background:#f59e0b;
+    color:#fff;
+    font-weight:850;
+    font-size:.85rem;
+}
+
+.sin-duplicados-productos{
+    margin:.65rem 0;
+    padding:.7rem .8rem;
+    border:1px solid #bbf7d0;
+    border-radius:9px;
+    background:#f0fdf4;
+    color:#15803d;
+    font-size:.78rem;
+    font-weight:700;
 }
 
 </style>
@@ -2028,6 +2047,7 @@ DEFAULTS = {
     "errores_ocr": [],
     "modo_carga_ui": "archivos",
     "archivos_ocultos_ui": set(),
+    "origen_productos_facturas": {},
 }
 
 for key, value in DEFAULTS.items():
@@ -2437,6 +2457,7 @@ def resetear_todo():
     st.session_state.errores_ocr = []
     st.session_state.uploader_key += 1
     st.session_state.archivos_ocultos_ui = set()
+    st.session_state.origen_productos_facturas = {}
     st.session_state.camera_key += 1
 
 
@@ -2474,6 +2495,26 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                 for p in productos_en_archivo:
                     codigo = str(p["codigo"]).replace("-", "").strip()
                     cantidad_comprada_unidades = p["cant"] * p["emp"]
+
+                    # -------------------------------------------------
+                    # Guardar el origen del producto por factura.
+                    # Esto permite identificar productos repetidos
+                    # entre facturas diferentes.
+                    # -------------------------------------------------
+                    if codigo not in st.session_state.origen_productos_facturas:
+                        st.session_state.origen_productos_facturas[codigo] = []
+
+                    st.session_state.origen_productos_facturas[codigo].append({
+                        "codigo": codigo,
+                        "nombre": p["nombre"],
+                        "proveedor": proveedor,
+                        "factura": str(num_fac),
+                        "fecha": fecha_fac,
+                        "cantidad": float(p["cant"]),
+                        "empaque": int(p["emp"]),
+                        "unidades": float(cantidad_comprada_unidades),
+                        "costo_total": float(p["costo_total"]),
+                    })
 
                     if codigo in st.session_state.inventario_acumulado:
                         st.session_state.articulos_repetidos_notif.append(
@@ -2690,7 +2731,7 @@ def render_carga_facturas(titulo=True):
             )
 
     # =========================================================
-    # ARCHIVOS SELECCIONADOS — una sola vista compacta
+    # ARCHIVOS SELECCIONADOS — única vista de archivos
     # =========================================================
     def _huella_archivo_ui(archivo):
         try:
@@ -2699,24 +2740,28 @@ def render_carga_facturas(titulo=True):
         except Exception:
             return f"{archivo.name}|0"
 
-    # Excluir únicamente los archivos quitados con la X personalizada.
+    # Excluir archivos quitados con la X personalizada.
     uploaded_files = [
         f for f in uploaded_files
         if _huella_archivo_ui(f) not in st.session_state.archivos_ocultos_ui
     ]
 
     if uploaded_files:
-        # No añadimos otro título "Selecciona tus facturas":
-        # el file_uploader ya muestra ese texto.
+        st.markdown(
+            '<div class="selected-files-title">Selecciona tus facturas</div>',
+            unsafe_allow_html=True,
+        )
 
-        max_cols = 3
+        # Tarjetas compactas, máximo 4 por fila.
+        max_cols = 4
 
         for fila_inicio in range(0, len(uploaded_files), max_cols):
             grupo = uploaded_files[fila_inicio:fila_inicio + max_cols]
-            columnas_archivos = st.columns(len(grupo), gap="small")
+            columnas = st.columns(len(grupo), gap="small")
 
             for offset, archivo in enumerate(grupo):
                 indice = fila_inicio + offset
+                col = columnas[offset]
 
                 try:
                     datos = archivo.getvalue()
@@ -2742,60 +2787,55 @@ def render_carga_facturas(titulo=True):
                     icono = "📎"
                     tipo = extension.upper() or "Archivo"
 
-                nombre_corto = (
-                    nombre
-                    if len(nombre) <= 24
-                    else nombre[:21] + "…"
-                )
+                nombre_corto = nombre if len(nombre) <= 28 else nombre[:25] + "…"
 
-                with columnas_archivos[offset]:
-                    with st.container(border=True):
-                        fila_info, fila_ojo, fila_x = st.columns(
-                            [6.6, 1.15, 1.15],
-                            gap="small",
-                            vertical_alignment="center",
-                        )
+                with col:
+                    st.markdown(
+                        f"""
+                        <div class="selected-file-card">
+                            <div class="selected-file-icon">{icono}</div>
 
-                        with fila_info:
-                            # Usamos controles nativos de Streamlit para evitar
-                            # que HTML termine mostrándose como texto.
-                            st.markdown(f"{icono} **{nombre_corto}**")
-                            st.caption(f"{len(datos)/1024:.1f} KB · {tipo}")
+                            <div class="selected-file-info">
+                                <div class="selected-file-name" title="{nombre}">
+                                    {nombre_corto}
+                                </div>
+                                <div class="selected-file-meta">
+                                    {len(datos)/1024:.1f} KB · {tipo}
+                                </div>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
 
-                        with fila_ojo:
-                            if st.button(
-                                "👁",
-                                key=(
-                                    f"preview_btn_{indice}_"
-                                    f"{st.session_state.uploader_key}_"
-                                    f"{st.session_state.camera_key}"
-                                ),
-                                help=f"Vista previa de {nombre}",
-                                use_container_width=True,
-                            ):
-                                mostrar_vista_previa_archivo(
-                                    nombre,
-                                    mime,
-                                    datos,
-                                )
+                    action_eye, action_remove = st.columns([1, 1], gap="small")
 
-                        with fila_x:
-                            if st.button(
-                                "✕",
-                                key=(
-                                    f"remove_btn_{indice}_"
-                                    f"{st.session_state.uploader_key}_"
-                                    f"{st.session_state.camera_key}"
-                                ),
-                                help=f"Quitar {nombre}",
-                                use_container_width=True,
-                            ):
-                                st.session_state.archivos_ocultos_ui.add(
-                                    _huella_archivo_ui(archivo)
-                                )
-                                st.rerun()
+                    with action_eye:
+                        if st.button(
+                            "👁",
+                            key=f"preview_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+                            help=f"Vista previa de {nombre}",
+                            use_container_width=True,
+                        ):
+                            mostrar_vista_previa_archivo(
+                                nombre,
+                                mime,
+                                datos,
+                            )
 
-        st.markdown("<div style='height:.2rem'></div>", unsafe_allow_html=True)
+                    with action_remove:
+                        if st.button(
+                            "✕",
+                            key=f"remove_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+                            help=f"Quitar {nombre}",
+                            use_container_width=True,
+                        ):
+                            st.session_state.archivos_ocultos_ui.add(
+                                _huella_archivo_ui(archivo)
+                            )
+                            st.rerun()
+
+        st.markdown("<div style='height:.25rem'></div>", unsafe_allow_html=True)
 
     archivos_validos = []
     archivos_duplicados = []
@@ -2876,6 +2916,59 @@ def render_carga_facturas(titulo=True):
         </div>
         """, unsafe_allow_html=True)
 
+
+
+
+def construir_df_productos_repetidos_facturas():
+    """
+    Devuelve:
+      - resumen: una fila por producto que aparece en 2+ facturas distintas.
+      - detalle: una fila por aparición del producto en cada factura.
+    """
+    resumen = []
+    detalle = []
+
+    for codigo, apariciones in st.session_state.origen_productos_facturas.items():
+        facturas_distintas = {}
+        for item in apariciones:
+            clave_factura = (
+                str(item.get("proveedor", "")),
+                str(item.get("factura", "")),
+            )
+            facturas_distintas[clave_factura] = item
+
+        if len(facturas_distintas) < 2:
+            continue
+
+        items = list(facturas_distintas.values())
+        nombre = items[0].get("nombre", "")
+        total_unidades = sum(float(x.get("unidades", 0)) for x in items)
+        total_costo = sum(float(x.get("costo_total", 0)) for x in items)
+        costo_promedio = total_costo / total_unidades if total_unidades else 0
+
+        resumen.append({
+            "Código": codigo,
+            "Producto": nombre,
+            "Facturas": len(items),
+            "Stock acumulado": int(total_unidades),
+            "Costo acumulado": round(total_costo, 2),
+            "Costo promedio": round(costo_promedio, 4),
+        })
+
+        for item in items:
+            detalle.append({
+                "Código": codigo,
+                "Producto": nombre,
+                "Proveedor": item.get("proveedor", ""),
+                "Factura": item.get("factura", ""),
+                "Fecha": item.get("fecha", ""),
+                "Cantidad": item.get("cantidad", 0),
+                "Empaque": item.get("empaque", 0),
+                "Unidades": int(item.get("unidades", 0)),
+                "Costo factura": round(float(item.get("costo_total", 0)), 2),
+            })
+
+    return pd.DataFrame(resumen), pd.DataFrame(detalle)
 
 
 # =========================================================
@@ -3031,9 +3124,60 @@ elif pagina == "🧾 Procesar facturas":
 # =========================================================
 elif pagina == "📦 Inventario acumulado":
     df_productos = construir_df_productos()
+    df_repetidos, df_repetidos_detalle = construir_df_productos_repetidos_facturas()
+
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown("### 📦 Inventario acumulado")
     st.caption("Los productos repetidos entre facturas se consolidan en una sola fila. Las líneas procesadas pueden ser mayores que los productos únicos.")
+
+    # =====================================================
+    # PRODUCTOS REPETIDOS ENTRE FACTURAS DIFERENTES
+    # =====================================================
+    if not df_repetidos.empty:
+        st.markdown(
+            f"""
+            <div class="duplicados-productos-banner">
+                <div>
+                    <div class="dup-title">🔁 Productos repetidos entre facturas</div>
+                    <div class="dup-sub">
+                        Se detectaron <b>{len(df_repetidos)}</b> producto(s) presente(s)
+                        en más de una factura diferente.
+                    </div>
+                </div>
+                <div class="dup-badge">{len(df_repetidos)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.dataframe(
+            df_repetidos,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Costo acumulado": st.column_config.NumberColumn(format="RD$ %.2f"),
+                "Costo promedio": st.column_config.NumberColumn(format="RD$ %.4f"),
+            },
+        )
+
+        with st.expander("🔎 Ver detalle por factura", expanded=True):
+            st.dataframe(
+                df_repetidos_detalle,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Costo factura": st.column_config.NumberColumn(format="RD$ %.2f"),
+                },
+            )
+    else:
+        st.markdown(
+            """
+            <div class="sin-duplicados-productos">
+                ✓ No hay productos repetidos entre facturas diferentes.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     if st.session_state.articulos_repetidos_notif:
         with st.expander("🔄 Artículos acumulados desde varias facturas"):
