@@ -2405,20 +2405,90 @@ def extraer_datos_factura(uploaded_file):
 # =========================================================
 # HELPERS DE CONSOLIDACIÓN / EXCEL
 # =========================================================
+def _codigo_producto_canonico(valor):
+    """
+    Normaliza códigos para evitar que el mismo producto termine duplicado
+    por espacios, guiones o ceros iniciales.
+    """
+    codigo = re.sub(r"[^A-Za-z0-9]", "", str(valor or "")).upper()
+
+    # Para códigos puramente numéricos, 041331027854 y 41331027854
+    # representan el mismo identificador para efectos de consolidación.
+    if codigo.isdigit():
+        codigo = codigo.lstrip("0") or "0"
+
+    return codigo
+
+
+def _nombre_producto_canonico(valor):
+    """Clave de respaldo para reconocer el mismo nombre de producto."""
+    nombre = _normalizar_ocr(str(valor or ""))
+    # Quitar espacios deja comparación estable sin afectar lo mostrado.
+    return re.sub(r"\s+", "", nombre)
+
+
 def construir_df_productos():
+    """
+    Construye SIEMPRE un consolidado final:
+    - un mismo código aparece una sola vez;
+    - si el código varía pero el nombre es exactamente el mismo normalizado,
+      también se consolida;
+    - stock y costo total se suman;
+    - el costo mostrado es promedio ponderado por unidades.
+    """
     factor_margen = 1 + (st.session_state.margen_usado / 100.0)
+
+    consolidados = {}
+    clave_nombre_a_codigo = {}
+
+    for codigo_original, data in st.session_state.inventario_acumulado.items():
+        codigo = _codigo_producto_canonico(codigo_original)
+        nombre_key = _nombre_producto_canonico(data.get("nombre", ""))
+
+        # Prioridad 1: mismo código canónico.
+        clave = codigo
+
+        # Prioridad 2: exactamente el mismo nombre normalizado.
+        if clave not in consolidados and nombre_key in clave_nombre_a_codigo:
+            clave = clave_nombre_a_codigo[nombre_key]
+
+        if clave in consolidados:
+            actual = consolidados[clave]
+            actual["stock"] += float(data.get("stock", 0))
+            actual["costo_total"] += float(data.get("costo_total", 0))
+
+            # Conservar la presentación/empaque más informativa.
+            if not actual.get("emp") and data.get("emp"):
+                actual["emp"] = data.get("emp")
+        else:
+            consolidados[clave] = {
+                "codigo_mostrar": str(codigo_original).strip(),
+                "nombre": data.get("nombre", ""),
+                "categoria": data.get("categoria", "General"),
+                "stock": float(data.get("stock", 0)),
+                "costo_total": float(data.get("costo_total", 0)),
+                "emp": data.get("emp", 1),
+                "itbis": data.get("itbis", 0.18),
+            }
+            if nombre_key:
+                clave_nombre_a_codigo[nombre_key] = clave
+
     filas = []
-    for codigo, data in st.session_state.inventario_acumulado.items():
-        costo_unitario = data["costo_total"] / data["stock"] if data["stock"] > 0 else 0
+
+    for _, data in consolidados.items():
+        stock = float(data["stock"])
+        costo_total = float(data["costo_total"])
+        costo_unitario = costo_total / stock if stock > 0 else 0
         precio_venta = round_to_nearest_5(costo_unitario * factor_margen)
+
         filas.append({
             "Nombre": data["nombre"],
-            "Código Barra": codigo,
+            "Código Barra": data["codigo_mostrar"],
             "Categoría": data["categoria"],
             "Tipo": "producto",
             "Precio Venta": precio_venta,
             "Costo": round(costo_unitario, 4),
-            "Stock": int(data["stock"]),
+            "Stock": int(round(stock)),
             "Stock Mínimo": 25,
             "ITBIS": data["itbis"],
             "Unidad Medida": "unidad",
@@ -2431,10 +2501,61 @@ def construir_df_productos():
             "Descuento Activo": "No",
             "Descuento Nota": None,
         })
-    return pd.DataFrame(filas)
+
+    df = pd.DataFrame(filas)
+
+    if not df.empty:
+        # Última barrera contra duplicados accidentales antes del Excel.
+        df["_codigo_key"] = df["Código Barra"].map(_codigo_producto_canonico)
+        df["_nombre_key"] = df["Nombre"].map(_nombre_producto_canonico)
+
+        # Si por alguna ruta excepcional entró una fila duplicada, reagrupar.
+        if df["_codigo_key"].duplicated().any() or df["_nombre_key"].duplicated().any():
+            registros = []
+
+            # Se usa nombre como fallback solo si el código no resolvió la unión.
+            grupos = {}
+            for _, row in df.iterrows():
+                key_codigo = row["_codigo_key"]
+                key_nombre = row["_nombre_key"]
+
+                key = ("c", key_codigo)
+                if key not in grupos:
+                    for existente_key, existente in grupos.items():
+                        if existente["_nombre_key"] == key_nombre and key_nombre:
+                            key = existente_key
+                            break
+
+                if key not in grupos:
+                    grupos[key] = row.to_dict()
+                else:
+                    g = grupos[key]
+                    stock_anterior = float(g["Stock"])
+                    stock_nuevo = float(row["Stock"])
+                    costo_total_anterior = float(g["Costo"]) * stock_anterior
+                    costo_total_nuevo = float(row["Costo"]) * stock_nuevo
+                    stock_total = stock_anterior + stock_nuevo
+
+                    g["Stock"] = int(round(stock_total))
+                    g["Costo"] = round(
+                        (costo_total_anterior + costo_total_nuevo) / stock_total
+                        if stock_total else 0,
+                        4,
+                    )
+                    g["Precio Venta"] = round_to_nearest_5(
+                        float(g["Costo"]) * factor_margen
+                    )
+
+            df = pd.DataFrame(grupos.values())
+
+        df = df.drop(columns=["_codigo_key", "_nombre_key"], errors="ignore")
+
+    return df.reset_index(drop=True)
 
 
 def generar_excel_wilpos(df_prod):
+    # El Excel siempre parte del consolidado final, sin duplicados.
+    df_prod = construir_df_productos()
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df_prod.to_excel(writer, index=False, sheet_name="Productos")
@@ -2534,7 +2655,7 @@ def generar_excel_wilpos(df_prod):
 
 def totales_dashboard():
     total_facturas = len(st.session_state.detalle_facturas_procesadas)
-    total_productos = len(st.session_state.inventario_acumulado)
+    total_productos = len(construir_df_productos())
     total_lineas = int(sum(
         info.get("cantidad_articulos", 0)
         for info in st.session_state.detalle_facturas_procesadas.values()
@@ -3481,10 +3602,18 @@ elif pagina == "📦 Productos consolidados":
                 key="download_excel_inventario",
             )
 
+        # Mostrar todos los productos del lote sin ocultarlos en un
+        # viewport pequeño. La altura crece según la cantidad de filas.
+        altura_productos = min(
+            max(210, 38 + (len(df_productos) * 35)),
+            1200,
+        )
+
         st.dataframe(
             df_productos,
             use_container_width=True,
             hide_index=True,
+            height=altura_productos,
             column_config={
                 "Precio Venta": st.column_config.NumberColumn(format="RD$ %.2f"),
                 "Costo": st.column_config.NumberColumn(format="RD$ %.4f"),
@@ -3492,7 +3621,7 @@ elif pagina == "📦 Productos consolidados":
             },
         )
         c1, c2, c3 = st.columns(3)
-        c1.metric("Productos únicos", len(df_productos))
+        c1.metric("Productos consolidados", len(df_productos))
         c2.metric("Unidades consolidadas", int(df_productos["Stock"].sum()))
         c3.metric("Margen aplicado", f"{st.session_state.margen_usado:g}%")
     st.markdown('</div>', unsafe_allow_html=True)
