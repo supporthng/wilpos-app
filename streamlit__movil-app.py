@@ -1563,9 +1563,19 @@ def generar_excel_wilpos(df_prod):
 def totales_dashboard():
     total_facturas = len(st.session_state.detalle_facturas_procesadas)
     total_productos = len(st.session_state.inventario_acumulado)
-    total_unidades = int(sum(x.get("stock", 0) for x in st.session_state.inventario_acumulado.values()))
-    valor_compra = float(sum(x.get("costo_total", 0) for x in st.session_state.inventario_acumulado.values()))
-    return total_facturas, total_productos, total_unidades, valor_compra
+    total_lineas = int(sum(
+        info.get("cantidad_articulos", 0)
+        for info in st.session_state.detalle_facturas_procesadas.values()
+    ))
+    total_unidades = int(sum(
+        x.get("stock", 0)
+        for x in st.session_state.inventario_acumulado.values()
+    ))
+    valor_compra = float(sum(
+        x.get("costo_total", 0)
+        for x in st.session_state.inventario_acumulado.values()
+    ))
+    return total_facturas, total_productos, total_lineas, total_unidades, valor_compra
 
 
 def resetear_todo():
@@ -1589,7 +1599,10 @@ def modal_confirmacion(validas, duplicadas_count, margen):
     c2.metric("Margen aplicado", f"{margen:g}%")
 
     if duplicadas_count:
-        st.warning(f"Se omitieron {duplicadas_count} factura(s) duplicada(s).")
+        st.warning(
+            f"⚠️ Se omitieron {duplicadas_count} factura(s) duplicada(s). "
+            "No se agregarán al inventario."
+        )
 
     b1, b2 = st.columns(2)
     with b1:
@@ -1597,6 +1610,7 @@ def modal_confirmacion(validas, duplicadas_count, margen):
             st.session_state.margen_usado = margen
             st.session_state.articulos_repetidos_notif = []
 
+            # Solo se recorren facturas válidas y únicas; los duplicados nunca llegan aquí.
             for archivo, firma, proveedor, num_fac, fecha_fac, productos_en_archivo in validas:
                 st.session_state.firmas_facturas_procesadas.add(firma)
                 st.session_state.detalle_facturas_procesadas[firma] = {
@@ -1689,16 +1703,44 @@ def render_carga_facturas(titulo=True):
 
     if uploaded_files:
         st.session_state.errores_ocr = []
-        archivos_unicos = {f.name: f for f in uploaded_files}.values()
+
+        # Evita procesar dos veces el mismo nombre de archivo dentro del lote.
+        archivos_por_nombre = {}
+        for f in uploaded_files:
+            if f.name in archivos_por_nombre:
+                archivos_duplicados.append(
+                    (f.name, "Archivo repetido en esta carga", "")
+                )
+            else:
+                archivos_por_nombre[f.name] = f
+
+        archivos_unicos = list(archivos_por_nombre.values())
+
+        # También evita duplicados por factura aunque tengan nombres de archivo distintos.
+        firmas_detectadas_en_lote = set()
+
         with st.spinner("Leyendo y reconociendo facturas..."):
             for f in archivos_unicos:
                 firma, proveedor, num_fac, fecha_fac, productos = extraer_datos_factura(f)
+
                 if not productos:
                     archivos_invalidos.append(f.name)
+
                 elif firma in st.session_state.firmas_facturas_procesadas:
-                    archivos_duplicados.append((f.name, proveedor, num_fac))
+                    archivos_duplicados.append(
+                        (f.name, proveedor, num_fac)
+                    )
+
+                elif firma in firmas_detectadas_en_lote:
+                    archivos_duplicados.append(
+                        (f.name, proveedor, num_fac)
+                    )
+
                 else:
-                    archivos_validos.append((f, firma, proveedor, num_fac, fecha_fac, productos))
+                    firmas_detectadas_en_lote.add(firma)
+                    archivos_validos.append(
+                        (f, firma, proveedor, num_fac, fecha_fac, productos)
+                    )
 
     if uploaded_files:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
@@ -1716,11 +1758,19 @@ def render_carga_facturas(titulo=True):
             """, unsafe_allow_html=True)
 
         for nombre, proveedor, num_fac in archivos_duplicados:
+            if num_fac:
+                detalle_dup = f"{proveedor} · Factura {num_fac}"
+            else:
+                detalle_dup = proveedor
+
             st.markdown(f"""
-            <div class="file-card">
+            <div class="file-card" style="border-color:#fecaca;background:#fff7f7;">
               <div>
-                <div class="file-name">📄 {nombre}</div>
-                <div class="meta">{proveedor} · Factura {num_fac}</div>
+                <div class="file-name">⚠️ {nombre}</div>
+                <div class="meta">{detalle_dup}</div>
+                <div class="meta" style="color:#b91c1c;font-weight:700;">
+                    Esta factura fue omitida y NO será agregada al inventario.
+                </div>
               </div>
               <div class="bad">Duplicada</div>
             </div>
@@ -1736,6 +1786,12 @@ def render_carga_facturas(titulo=True):
               <div class="bad">No reconocida</div>
             </div>
             """, unsafe_allow_html=True)
+
+        if archivos_duplicados:
+            st.warning(
+                f"⚠️ Se detectaron {len(archivos_duplicados)} factura(s) duplicada(s). "
+                "Fueron omitidas automáticamente y no se agregarán al inventario."
+            )
 
         if st.session_state.errores_ocr:
             with st.expander("🔎 Diagnóstico OCR"):
@@ -1769,7 +1825,7 @@ def render_carga_facturas(titulo=True):
 # =========================================================
 # SIDEBAR
 # =========================================================
-total_facturas, total_productos, total_unidades, valor_compra = totales_dashboard()
+total_facturas, total_productos, total_lineas, total_unidades, valor_compra = totales_dashboard()
 
 with st.sidebar:
     st.markdown("""
@@ -1804,7 +1860,8 @@ with st.sidebar:
     <div class="side-summary">
       <div class="s-title">RESUMEN RÁPIDO</div>
       <div class="row"><span>Facturas procesadas</span><span class="num">{total_facturas}</span></div>
-      <div class="row"><span>Artículos únicos</span><span class="num">{total_productos}</span></div>
+      <div class="row"><span>Productos únicos</span><span class="num">{total_productos}</span></div>
+      <div class="row"><span>Líneas procesadas</span><span class="num">{total_lineas}</span></div>
       <div class="row"><span>Unidades totales</span><span class="num">{total_unidades:,}</span></div>
       <div class="row"><span>Valor compra</span><span class="num">RD$ {valor_compra:,.2f}</span></div>
     </div>
@@ -1842,7 +1899,7 @@ if pagina == "🏠 Inicio":
             <div class="stat-icon">🧾</div>
           </div>
           <div class="stat purple">
-            <div class="label">Artículos únicos</div>
+            <div class="label">Productos únicos</div>
             <div class="value">{total_productos}</div>
             <div class="stat-icon">📦</div>
           </div>
@@ -1872,7 +1929,7 @@ if pagina == "🏠 Inicio":
         inv_c1, inv_c2 = st.columns([4, 1])
         with inv_c1:
             st.markdown(
-                f'<div class="inventory-title">📦 Inventario acumulado <span class="badge">{total_productos} artículos</span></div>',
+                f'<div class="inventory-title">📦 Inventario acumulado <span class="badge">{total_productos} productos únicos</span></div>',
                 unsafe_allow_html=True
             )
 
@@ -1920,7 +1977,7 @@ elif pagina == "📦 Inventario acumulado":
     df_productos = construir_df_productos()
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown("### 📦 Inventario acumulado")
-    st.caption("Productos consolidados usando la misma lógica de costo promedio y margen de la versión funcional.")
+    st.caption("Los productos repetidos entre facturas se consolidan en una sola fila. Las líneas procesadas pueden ser mayores que los productos únicos.")
 
     if st.session_state.articulos_repetidos_notif:
         with st.expander("🔄 Artículos acumulados desde varias facturas"):
