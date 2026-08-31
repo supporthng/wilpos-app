@@ -23,7 +23,7 @@ st.set_page_config(
 page_title="WilPOS Móvil | Procesador de Facturas",
     page_icon="📦",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # =========================================================
@@ -3039,6 +3039,100 @@ div[data-testid="stDialog"] img{
         max-width:150px;
     }
 }
+
+/* =========================================================
+   LOGO WILPOS DENTRO DEL HERO
+   ========================================================= */
+.hero-card{
+    position:relative !important;
+    overflow:hidden !important;
+}
+
+.hero-brand-logo{
+    position:absolute;
+    top:1.15rem;
+    right:2rem;
+    width:240px;
+    height:110px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:transparent !important;
+    border:none !important;
+    box-shadow:none !important;
+    z-index:2;
+}
+
+.hero-brand-logo img{
+    display:block;
+    width:100%;
+    height:100%;
+    object-fit:contain;
+    background:transparent !important;
+    border:none !important;
+    box-shadow:none !important;
+}
+
+/* Dar espacio al texto para que no choque con el logo */
+.hero-card h1,
+.hero-card .subtitle,
+.hero-card p{
+    max-width:58% !important;
+}
+
+/* En móvil el logo pasa arriba, centrado y más pequeño */
+@media (max-width:900px){
+    .hero-brand-logo{
+        position:static !important;
+        width:170px !important;
+        height:70px !important;
+        margin:0 auto .45rem auto !important;
+    }
+
+    .hero-card h1,
+    .hero-card .subtitle,
+    .hero-card p{
+        max-width:100% !important;
+    }
+}
+
+
+/* =========================================================
+   SIDEBAR: ESCRITORIO ABIERTO / MÓVIL CERRADO AL INICIO
+   ========================================================= */
+@media (min-width:901px){
+    [data-testid="stSidebar"]{
+        transform:none !important;
+        visibility:visible !important;
+    }
+}
+
+/* En móvil se permite el comportamiento colapsable */
+@media (max-width:900px){
+    [data-testid="stSidebar"][aria-expanded="false"]{
+        width:0 !important;
+        min-width:0 !important;
+        max-width:0 !important;
+        transform:translateX(-100%) !important;
+        overflow:hidden !important;
+        box-shadow:none !important;
+        border:none !important;
+    }
+
+    [data-testid="stSidebar"][aria-expanded="true"]{
+        position:fixed !important;
+        left:0 !important;
+        top:0 !important;
+        bottom:0 !important;
+        width:min(86vw,340px) !important;
+        min-width:min(86vw,340px) !important;
+        max-width:min(86vw,340px) !important;
+        transform:translateX(0) !important;
+        z-index:1000000 !important;
+        box-shadow:8px 0 28px rgba(15,23,42,.22) !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -4501,10 +4595,12 @@ with st.sidebar:
 # INICIO
 # =========================================================
 if pagina == "🏠 Inicio":
-    render_wilpos_header_logo()
     st.markdown(f"""
     <div class="hero-grid">
       <div class="hero-card">
+        <div class="hero-brand-logo">
+          <img src="data:image/png;base64,{WILPOS_LOGO_B64}" alt="WilPOS">
+        </div>
         <h1>¡Bienvenido! 👋</h1>
         <div class="subtitle">Procesador de Facturas para WilPOS</div>
         <p>Carga tus facturas desde tu teléfono o computadora.</p>
