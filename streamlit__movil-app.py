@@ -1330,6 +1330,79 @@ textarea{
     }
 }
 
+
+/* ===== SIDEBAR FINAL: SIN CÍRCULOS, ALINEACIÓN LIMPIA ===== */
+
+/* Oculta por completo los controles circulares del radio en el sidebar */
+[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child{
+    display:none !important;
+}
+
+/* Menú vertical compacto */
+[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"]{
+    display:flex !important;
+    flex-direction:column !important;
+    gap:.28rem !important;
+    width:100% !important;
+}
+
+/* Cada opción del menú */
+[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label{
+    width:100% !important;
+    min-height:42px !important;
+    padding:.58rem .72rem !important;
+    margin:0 !important;
+
+    display:flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+
+    border:1px solid transparent !important;
+    border-radius:8px !important;
+    background:transparent !important;
+    box-shadow:none !important;
+
+    cursor:pointer !important;
+    transition:background .15s ease,border-color .15s ease !important;
+}
+
+/* Texto/icono */
+[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label p{
+    margin:0 !important;
+    width:100% !important;
+    text-align:left !important;
+
+    color:#e5eefb !important;
+    font-size:.92rem !important;
+    font-weight:650 !important;
+    line-height:1.35 !important;
+}
+
+/* Hover */
+[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:hover{
+    background:rgba(255,255,255,.07) !important;
+    border-color:rgba(255,255,255,.05) !important;
+}
+
+/* Opción activa */
+[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){
+    background:#2563eb !important;
+    border-color:#3b82f6 !important;
+    box-shadow:0 5px 14px rgba(37,99,235,.20) !important;
+}
+
+[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) p{
+    color:#ffffff !important;
+    font-weight:800 !important;
+}
+
+/* Evita cualquier pseudo-icono residual */
+[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label::before,
+[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label::after{
+    display:none !important;
+    content:none !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
