@@ -926,6 +926,71 @@ footer{visibility:hidden;}
     }
 }
 
+
+/* ===== FIX CONTRASTE DE BOTONES ===== */
+
+/* Botones primarios azules: texto e iconos siempre blancos */
+.stButton > button[kind="primary"],
+.stDownloadButton > button[kind="primary"]{
+    background:linear-gradient(180deg,#2563eb,#1d4ed8) !important;
+    border-color:#1d4ed8 !important;
+    color:#ffffff !important;
+}
+
+.stButton > button[kind="primary"] *,
+.stDownloadButton > button[kind="primary"] *{
+    color:#ffffff !important;
+    fill:#ffffff !important;
+}
+
+/* Botones secundarios normales: texto oscuro */
+.stButton > button:not([kind="primary"]),
+.stDownloadButton > button:not([kind="primary"]){
+    color:#0f172a !important;
+}
+
+.stButton > button:not([kind="primary"]) *,
+.stDownloadButton > button:not([kind="primary"]) *{
+    color:#0f172a !important;
+}
+
+/* El botón blanco del sidebar estaba heredando texto claro del menú */
+[data-testid="stSidebar"] .stButton > button{
+    background:#ffffff !important;
+    border:1px solid #dbe3ef !important;
+    color:#0f172a !important;
+}
+
+[data-testid="stSidebar"] .stButton > button *,
+[data-testid="stSidebar"] .stButton > button p,
+[data-testid="stSidebar"] .stButton > button span{
+    color:#0f172a !important;
+}
+
+/* Hover */
+[data-testid="stSidebar"] .stButton > button:hover{
+    background:#f8fafc !important;
+    color:#0f172a !important;
+    border-color:#cbd5e1 !important;
+}
+
+/* Asegura contraste del botón principal aunque Streamlit cambie el DOM interno */
+button[data-testid="stBaseButton-primary"]{
+    color:#ffffff !important;
+}
+
+button[data-testid="stBaseButton-primary"] *{
+    color:#ffffff !important;
+}
+
+button[data-testid="stBaseButton-secondary"]{
+    color:#0f172a !important;
+}
+
+button[data-testid="stBaseButton-secondary"] *{
+    color:#0f172a !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
