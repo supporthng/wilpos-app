@@ -1612,6 +1612,153 @@ button:not(section button){
     }
 }
 
+
+/* ===== ANIMACIÓN SUAVE DEL ICONO PRINCIPAL ===== */
+.hero-visual{
+    isolation:isolate;
+}
+
+.hero-visual::before{
+    content:"";
+    position:absolute;
+    left:18px;
+    top:1px;
+    width:155px;
+    height:135px;
+    border-radius:50%;
+    background:radial-gradient(circle, rgba(37,99,235,.14) 0%, rgba(96,165,250,.07) 42%, rgba(255,255,255,0) 72%);
+    animation:wilposAura 3.8s ease-in-out infinite;
+    z-index:-1;
+}
+
+.hero-visual::after{
+    content:"✦";
+    position:absolute;
+    right:8px;
+    top:3px;
+    color:#93c5fd;
+    font-size:1rem;
+    opacity:.45;
+    animation:wilposSpark 2.6s ease-in-out infinite;
+}
+
+.hero-visual .phone{
+    animation:wilposFloat 3.4s ease-in-out infinite;
+    transform-origin:center;
+}
+
+.hero-visual .sheet{
+    animation:wilposSheet 4.1s ease-in-out infinite;
+    transform-origin:center;
+}
+
+@keyframes wilposFloat{
+    0%,100%{ transform:translateY(0) rotate(0deg); }
+    50%{ transform:translateY(-7px) rotate(-1deg); }
+}
+
+@keyframes wilposSheet{
+    0%,100%{ transform:translateY(0) rotate(2deg); }
+    50%{ transform:translateY(4px) rotate(3.5deg); }
+}
+
+@keyframes wilposAura{
+    0%,100%{ transform:scale(.92); opacity:.45; }
+    50%{ transform:scale(1.08); opacity:.9; }
+}
+
+@keyframes wilposSpark{
+    0%,100%{ transform:translateY(2px) scale(.8) rotate(0deg); opacity:.25; }
+    50%{ transform:translateY(-7px) scale(1.15) rotate(18deg); opacity:.85; }
+}
+
+@media (prefers-reduced-motion: reduce){
+    .hero-visual::before,
+    .hero-visual::after,
+    .hero-visual .phone,
+    .hero-visual .sheet{
+        animation:none !important;
+    }
+}
+
+/* ===== VISTA RÁPIDA DE ARCHIVOS ===== */
+.uploaded-preview-title{
+    margin:.55rem 0 .45rem 0;
+    font-size:.9rem;
+    font-weight:850;
+    color:#0f172a;
+}
+
+.preview-file-card{
+    min-height:190px;
+    padding:.55rem;
+    border:1px solid #dbe5f0;
+    border-radius:12px;
+    background:#fff;
+    box-shadow:0 3px 10px rgba(15,23,42,.035);
+}
+
+.preview-file-card img{
+    height:92px !important;
+    object-fit:cover !important;
+    border-radius:8px !important;
+    border:1px solid #eef2f7;
+}
+
+.preview-file-icon{
+    height:92px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:8px;
+    background:#f8fafc;
+    font-size:2.45rem;
+    border:1px solid #eef2f7;
+}
+
+.preview-file-icon.pdf{
+    background:#fff7f7;
+}
+
+.preview-file-name{
+    margin-top:.4rem;
+    color:#0f172a;
+    font-size:.73rem;
+    font-weight:750;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+
+.preview-file-size{
+    color:#64748b;
+    font-size:.66rem;
+    margin:.08rem 0 .3rem 0;
+}
+
+/* El botón Vista previa debe verse compacto */
+[data-testid="stMain"] .preview-file-card + div{
+    margin-top:0 !important;
+}
+
+/* Diálogo de vista previa */
+div[data-testid="stDialog"] img{
+    max-height:68vh !important;
+    object-fit:contain !important;
+}
+
+@media (max-width:900px){
+    .preview-file-card{
+        min-height:170px;
+    }
+}
+
+@media (max-width:640px){
+    .preview-file-card{
+        min-height:0;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -2097,6 +2244,50 @@ def modal_confirmacion(validas, duplicadas_count, margen):
 
 
 
+
+@st.dialog("👁 Vista previa del archivo", width="large")
+def mostrar_vista_previa_archivo(nombre, tipo_mime, datos):
+    """Muestra imágenes y la primera página de PDFs sin alterar el archivo."""
+    nombre_lower = nombre.lower()
+
+    st.markdown(f"**{nombre}**")
+    st.caption(f"Tamaño: {len(datos) / 1024:.1f} KB")
+
+    if nombre_lower.endswith((".jpg", ".jpeg", ".png")):
+        try:
+            imagen = Image.open(io.BytesIO(datos))
+            imagen = ImageOps.exif_transpose(imagen)
+            st.image(imagen, use_container_width=True)
+        except Exception as exc:
+            st.error(f"No se pudo mostrar la imagen: {exc}")
+
+    elif nombre_lower.endswith(".pdf"):
+        if PYMUPDF_DISPONIBLE:
+            try:
+                doc = fitz.open(stream=datos, filetype="pdf")
+                if len(doc) > 0:
+                    pagina = doc[0]
+                    pix = pagina.get_pixmap(matrix=fitz.Matrix(1.35, 1.35), alpha=False)
+                    imagen = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    st.image(imagen, caption="Primera página", use_container_width=True)
+                doc.close()
+            except Exception as exc:
+                st.error(f"No se pudo generar la vista previa del PDF: {exc}")
+        else:
+            st.info("La vista previa de PDF requiere PyMuPDF.")
+
+    else:
+        st.info("Este tipo de archivo no tiene vista previa disponible.")
+
+    st.download_button(
+        "⬇️ Descargar archivo",
+        data=datos,
+        file_name=nombre,
+        mime=tipo_mime or "application/octet-stream",
+        use_container_width=True,
+        key=f"preview_download_{abs(hash(nombre))}",
+    )
+
 def render_carga_facturas(titulo=True):
     """Carga y procesa facturas con un selector visual robusto basado en botones reales."""
 
@@ -2243,6 +2434,68 @@ def render_carga_facturas(titulo=True):
                 """,
                 unsafe_allow_html=True,
             )
+
+    # =========================================================
+    # VISTA RÁPIDA DE LOS ARCHIVOS SELECCIONADOS
+    # =========================================================
+    if uploaded_files:
+        st.markdown(
+            f'<div class="uploaded-preview-title">Archivos cargados ({len(uploaded_files)})</div>',
+            unsafe_allow_html=True,
+        )
+
+        columnas_preview = st.columns(min(len(uploaded_files), 5), gap="small")
+
+        for indice, archivo_preview in enumerate(uploaded_files):
+            columna = columnas_preview[indice % len(columnas_preview)]
+
+            try:
+                datos_preview = archivo_preview.getvalue()
+            except Exception:
+                archivo_preview.seek(0)
+                datos_preview = archivo_preview.read()
+                archivo_preview.seek(0)
+
+            nombre_preview = archivo_preview.name
+            mime_preview = getattr(archivo_preview, "type", None)
+            extension = nombre_preview.lower().rsplit(".", 1)[-1] if "." in nombre_preview else ""
+
+            with columna:
+                st.markdown('<div class="preview-file-card">', unsafe_allow_html=True)
+
+                if extension in ("jpg", "jpeg", "png"):
+                    try:
+                        thumb = Image.open(io.BytesIO(datos_preview))
+                        thumb = ImageOps.exif_transpose(thumb)
+                        thumb.thumbnail((320, 180))
+                        st.image(thumb, use_container_width=True)
+                    except Exception:
+                        st.markdown('<div class="preview-file-icon">🖼️</div>', unsafe_allow_html=True)
+
+                elif extension == "pdf":
+                    st.markdown('<div class="preview-file-icon pdf">📄</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div class="preview-file-icon">📎</div>', unsafe_allow_html=True)
+
+                nombre_corto = nombre_preview if len(nombre_preview) <= 28 else nombre_preview[:25] + "…"
+                st.markdown(
+                    f"""
+                    <div class="preview-file-name" title="{nombre_preview}">{nombre_corto}</div>
+                    <div class="preview-file-size">{len(datos_preview)/1024:.1f} KB</div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                if st.button(
+                    "👁 Vista previa",
+                    key=f"preview_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+                    use_container_width=True,
+                ):
+                    mostrar_vista_previa_archivo(nombre_preview, mime_preview, datos_preview)
+
+                st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown("<div style='height:.35rem'></div>", unsafe_allow_html=True)
 
     archivos_validos = []
     archivos_duplicados = []
