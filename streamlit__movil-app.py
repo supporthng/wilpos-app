@@ -1681,66 +1681,6 @@ button:not(section button){
     }
 }
 
-/* ===== VISTA RÁPIDA DE ARCHIVOS ===== */
-.uploaded-preview-title{
-    margin:.55rem 0 .45rem 0;
-    font-size:.9rem;
-    font-weight:850;
-    color:#0f172a;
-}
-
-.preview-file-card{
-    min-height:190px;
-    padding:.55rem;
-    border:1px solid #dbe5f0;
-    border-radius:12px;
-    background:#fff;
-    box-shadow:0 3px 10px rgba(15,23,42,.035);
-}
-
-.preview-file-card img{
-    height:92px !important;
-    object-fit:cover !important;
-    border-radius:8px !important;
-    border:1px solid #eef2f7;
-}
-
-.preview-file-icon{
-    height:92px;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    border-radius:8px;
-    background:#f8fafc;
-    font-size:2.45rem;
-    border:1px solid #eef2f7;
-}
-
-.preview-file-icon.pdf{
-    background:#fff7f7;
-}
-
-.preview-file-name{
-    margin-top:.4rem;
-    color:#0f172a;
-    font-size:.73rem;
-    font-weight:750;
-    overflow:hidden;
-    text-overflow:ellipsis;
-    white-space:nowrap;
-}
-
-.preview-file-size{
-    color:#64748b;
-    font-size:.66rem;
-    margin:.08rem 0 .3rem 0;
-}
-
-/* El botón Vista previa debe verse compacto */
-[data-testid="stMain"] .preview-file-card + div{
-    margin-top:0 !important;
-}
-
 /* Diálogo de vista previa */
 div[data-testid="stDialog"] img{
     max-height:68vh !important;
@@ -1757,6 +1697,80 @@ div[data-testid="stDialog"] img{
     .preview-file-card{
         min-height:0;
     }
+}
+
+
+/* ===== ARCHIVOS CARGADOS: COMPACTOS, SIN PREVIEW AUTOMÁTICO ===== */
+.uploaded-preview-title{
+    margin:.65rem 0 .45rem 0;
+    font-size:.92rem;
+    font-weight:850;
+    color:#0f172a;
+}
+
+.file-click-card-head{
+    min-height:76px;
+    display:flex;
+    align-items:center;
+    gap:.7rem;
+    padding:.7rem .75rem .4rem;
+    border:1px solid #dbe5f0;
+    border-bottom:none;
+    border-radius:11px 11px 0 0;
+    background:#fff;
+}
+
+.file-click-icon{
+    width:40px;
+    height:40px;
+    flex:0 0 40px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:9px;
+    background:#f1f5f9;
+    font-size:1.3rem;
+}
+
+.file-click-info{
+    min-width:0;
+    flex:1;
+}
+
+.file-click-name{
+    color:#0f172a;
+    font-size:.76rem;
+    font-weight:780;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+
+.file-click-meta{
+    margin-top:.15rem;
+    color:#64748b;
+    font-size:.66rem;
+}
+
+/* Botón unido visualmente a la tarjeta */
+[data-testid="stMain"] .file-click-card-head + div .stButton > button,
+[data-testid="stMain"] .file-click-card-head + div button{
+    border-radius:0 0 11px 11px !important;
+    border-top:none !important;
+    min-height:36px !important;
+    font-size:.78rem !important;
+    background:#f8fbff !important;
+    color:#2563eb !important;
+}
+
+[data-testid="stMain"] .file-click-card-head + div button *{
+    color:#2563eb !important;
+}
+
+/* Popup */
+div[data-testid="stDialog"] img{
+    max-height:68vh !important;
+    object-fit:contain !important;
 }
 
 </style>
@@ -2436,7 +2450,7 @@ def render_carga_facturas(titulo=True):
             )
 
     # =========================================================
-    # VISTA RÁPIDA DE LOS ARCHIVOS SELECCIONADOS
+    # ARCHIVOS SELECCIONADOS — vista previa SOLO al hacer clic
     # =========================================================
     if uploaded_files:
         st.markdown(
@@ -2444,58 +2458,77 @@ def render_carga_facturas(titulo=True):
             unsafe_allow_html=True,
         )
 
-        columnas_preview = st.columns(min(len(uploaded_files), 5), gap="small")
+        # Hasta 4 tarjetas por fila.
+        max_cols = 4
+        for fila_inicio in range(0, len(uploaded_files), max_cols):
+            grupo = uploaded_files[fila_inicio:fila_inicio + max_cols]
+            columnas_preview = st.columns(len(grupo), gap="small")
 
-        for indice, archivo_preview in enumerate(uploaded_files):
-            columna = columnas_preview[indice % len(columnas_preview)]
+            for offset, archivo_preview in enumerate(grupo):
+                indice = fila_inicio + offset
+                columna = columnas_preview[offset]
 
-            try:
-                datos_preview = archivo_preview.getvalue()
-            except Exception:
-                archivo_preview.seek(0)
-                datos_preview = archivo_preview.read()
-                archivo_preview.seek(0)
+                try:
+                    datos_preview = archivo_preview.getvalue()
+                except Exception:
+                    archivo_preview.seek(0)
+                    datos_preview = archivo_preview.read()
+                    archivo_preview.seek(0)
 
-            nombre_preview = archivo_preview.name
-            mime_preview = getattr(archivo_preview, "type", None)
-            extension = nombre_preview.lower().rsplit(".", 1)[-1] if "." in nombre_preview else ""
-
-            with columna:
-                st.markdown('<div class="preview-file-card">', unsafe_allow_html=True)
-
-                if extension in ("jpg", "jpeg", "png"):
-                    try:
-                        thumb = Image.open(io.BytesIO(datos_preview))
-                        thumb = ImageOps.exif_transpose(thumb)
-                        thumb.thumbnail((320, 180))
-                        st.image(thumb, use_container_width=True)
-                    except Exception:
-                        st.markdown('<div class="preview-file-icon">🖼️</div>', unsafe_allow_html=True)
-
-                elif extension == "pdf":
-                    st.markdown('<div class="preview-file-icon pdf">📄</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown('<div class="preview-file-icon">📎</div>', unsafe_allow_html=True)
-
-                nombre_corto = nombre_preview if len(nombre_preview) <= 28 else nombre_preview[:25] + "…"
-                st.markdown(
-                    f"""
-                    <div class="preview-file-name" title="{nombre_preview}">{nombre_corto}</div>
-                    <div class="preview-file-size">{len(datos_preview)/1024:.1f} KB</div>
-                    """,
-                    unsafe_allow_html=True,
+                nombre_preview = archivo_preview.name
+                mime_preview = getattr(archivo_preview, "type", None)
+                extension = (
+                    nombre_preview.lower().rsplit(".", 1)[-1]
+                    if "." in nombre_preview else ""
                 )
 
-                if st.button(
-                    "👁 Vista previa",
-                    key=f"preview_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
-                    use_container_width=True,
-                ):
-                    mostrar_vista_previa_archivo(nombre_preview, mime_preview, datos_preview)
+                if extension in ("jpg", "jpeg", "png"):
+                    icono_archivo = "🖼️"
+                    tipo_archivo = "Imagen"
+                elif extension == "pdf":
+                    icono_archivo = "📄"
+                    tipo_archivo = "PDF"
+                else:
+                    icono_archivo = "📎"
+                    tipo_archivo = extension.upper() or "Archivo"
 
-                st.markdown('</div>', unsafe_allow_html=True)
+                nombre_corto = (
+                    nombre_preview
+                    if len(nombre_preview) <= 32
+                    else nombre_preview[:29] + "…"
+                )
 
-        st.markdown("<div style='height:.35rem'></div>", unsafe_allow_html=True)
+                with columna:
+                    st.markdown(
+                        f"""
+                        <div class="file-click-card-head">
+                            <div class="file-click-icon">{icono_archivo}</div>
+                            <div class="file-click-info">
+                                <div class="file-click-name" title="{nombre_preview}">
+                                    {nombre_corto}
+                                </div>
+                                <div class="file-click-meta">
+                                    {tipo_archivo} · {len(datos_preview)/1024:.1f} KB
+                                </div>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+                    if st.button(
+                        "👁 Ver archivo",
+                        key=f"preview_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+                        use_container_width=True,
+                    ):
+                        mostrar_vista_previa_archivo(
+                            nombre_preview,
+                            mime_preview,
+                            datos_preview,
+                        )
+
+        st.caption("Haz clic en **Ver archivo** para abrir la vista previa.")
+        st.markdown("<div style='height:.25rem'></div>", unsafe_allow_html=True)
 
     archivos_validos = []
     archivos_duplicados = []
