@@ -855,6 +855,77 @@ footer{visibility:hidden;}
     }
 }
 
+
+/* ===== AJUSTE DE ANCHO FINAL ===== */
+
+/* Desktop: aprovechar casi todo el ancho disponible */
+.block-container,
+[data-testid="stMainBlockContainer"]{
+    width:calc(100% - 2rem) !important;
+    max-width:none !important;
+    margin:0 auto !important;
+    padding-left:.75rem !important;
+    padding-right:.75rem !important;
+    box-sizing:border-box !important;
+}
+
+/* Cuando el sidebar está abierto, el main debe usar todo su espacio restante */
+[data-testid="stAppViewContainer"] main{
+    width:100% !important;
+    max-width:none !important;
+}
+
+/* El contenido interno tampoco debe volver a limitarse */
+[data-testid="stMain"] > div{
+    width:100% !important;
+    max-width:none !important;
+}
+
+/* Mantener tarjetas proporcionadas en pantallas anchas */
+.hero-grid{
+    width:100% !important;
+    grid-template-columns:minmax(0,1.65fr) minmax(360px,.9fr) !important;
+}
+
+.main-card,
+.inventory-card,
+.section-card{
+    width:100% !important;
+    box-sizing:border-box !important;
+}
+
+/* Pantallas muy grandes: dejar un margen visual mínimo */
+@media (min-width:1800px){
+    .block-container,
+    [data-testid="stMainBlockContainer"]{
+        width:calc(100% - 3rem) !important;
+    }
+}
+
+/* Laptop */
+@media (max-width:1200px){
+    .block-container,
+    [data-testid="stMainBlockContainer"]{
+        width:calc(100% - 1rem) !important;
+        padding-left:.5rem !important;
+        padding-right:.5rem !important;
+    }
+}
+
+/* Tablet / móvil */
+@media (max-width:900px){
+    .block-container,
+    [data-testid="stMainBlockContainer"]{
+        width:100% !important;
+        padding-left:.55rem !important;
+        padding-right:.55rem !important;
+    }
+
+    .hero-grid{
+        grid-template-columns:1fr !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
