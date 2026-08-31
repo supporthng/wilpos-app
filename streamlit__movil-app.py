@@ -2213,6 +2213,13 @@ div[data-testid="stDialog"] img{
     }
 }
 
+
+.products-scroll-hint{
+    color:#2563eb;
+    font-weight:800;
+    white-space:nowrap;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -3725,7 +3732,7 @@ elif pagina == "📦 Productos consolidados":
             )
 
         # =====================================================
-        # TABLA HTML COMPLETA — SIN LÍMITE VERTICAL DE STREAMLIT
+        # PRODUCTOS CONSOLIDADOS — TABLA CON SCROLL VERTICAL
         # =====================================================
         columnas_resumen = [
             "Código Barra",
@@ -3739,35 +3746,31 @@ elif pagina == "📦 Productos consolidados":
 
         df_productos_vista = df_productos[columnas_resumen].copy()
 
-        # Formato solo visual. El Excel sigue usando los valores numéricos reales.
-        df_productos_vista["Costo"] = df_productos_vista["Costo"].map(
-            lambda x: f"{float(x):,.4f}"
-        )
-        df_productos_vista["Precio Venta"] = df_productos_vista["Precio Venta"].map(
-            lambda x: f"{float(x):,.2f}"
-        )
-
         st.markdown(
             f"""
             <div class="products-count-line">
-                <span>Mostrando <b>{len(df_productos_vista)}</b> de
-                <b>{len(df_productos)}</b> productos consolidados</span>
-                <span class="products-ok">✓ Vista completa</span>
+                <span><b>{len(df_productos_vista)}</b> productos consolidados</span>
+                <span class="products-scroll-hint">↕ Usa el scroll para ver todos</span>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-        tabla_productos_html = df_productos_vista.to_html(
-            index=False,
-            escape=True,
-            classes="wilpos-products-table",
-            border=0,
-        )
-
-        st.markdown(
-            f'<div class="wilpos-products-wrap">{tabla_productos_html}</div>',
-            unsafe_allow_html=True,
+        # Altura fija = scroll vertical interno garantizado cuando hay más filas.
+        st.dataframe(
+            df_productos_vista,
+            use_container_width=True,
+            hide_index=True,
+            height=520,
+            column_config={
+                "Código Barra": st.column_config.TextColumn("Código Barra", width="medium"),
+                "Nombre": st.column_config.TextColumn("Nombre", width="large"),
+                "Cantidad Empaque": st.column_config.NumberColumn("Cantidad Empaque", format="%d"),
+                "Stock": st.column_config.NumberColumn("Stock", format="%d"),
+                "Costo": st.column_config.NumberColumn("Costo", format="%.4f"),
+                "Precio Venta": st.column_config.NumberColumn("Precio Venta", format="%.2f"),
+                "Categoría": st.column_config.TextColumn("Categoría", width="medium"),
+            },
         )
         c1, c2, c3 = st.columns(3)
         c1.metric("Productos consolidados", len(df_productos))
