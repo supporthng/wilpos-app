@@ -645,6 +645,130 @@ footer{visibility:hidden;}
     margin-bottom:.4rem;
 }
 
+
+/* ===== Ajuste de presentación final ===== */
+.block-container{
+    width:100% !important;
+    max-width:1280px !important;
+    margin:0 auto !important;
+    padding-top:.65rem !important;
+    padding-left:1rem !important;
+    padding-right:1rem !important;
+    padding-bottom:1.4rem !important;
+}
+
+.hero-grid{
+    grid-template-columns:minmax(0,1.55fr) minmax(320px,.95fr) !important;
+    gap:.8rem !important;
+    margin-bottom:.75rem !important;
+}
+
+.hero-card{
+    min-height:150px !important;
+    padding:1rem 1.15rem !important;
+}
+
+.hero-card h1{
+    font-size:1.7rem !important;
+    margin-bottom:.25rem !important;
+}
+
+.hero-card .subtitle{
+    font-size:.9rem !important;
+    margin-bottom:.45rem !important;
+}
+
+.hero-card p{
+    font-size:.8rem !important;
+    line-height:1.4 !important;
+}
+
+.hero-visual{
+    transform:scale(.76) !important;
+    transform-origin:right top !important;
+    right:.4rem !important;
+    top:.45rem !important;
+}
+
+.stats-card{
+    padding:.72rem !important;
+}
+
+.stats-grid{
+    gap:.38rem !important;
+}
+
+.stat{
+    min-height:58px !important;
+    padding:.48rem .55rem !important;
+}
+
+.stat .label{
+    font-size:.64rem !important;
+}
+
+.stat .value{
+    font-size:.95rem !important;
+}
+
+.stat-icon{
+    width:28px !important;
+    height:28px !important;
+    font-size:.8rem !important;
+}
+
+.section-card,
+.main-card,
+.inventory-card{
+    margin-bottom:.7rem !important;
+}
+
+.section-card{
+    padding:.8rem !important;
+}
+
+.stButton>button,
+.stDownloadButton>button{
+    min-height:36px !important;
+}
+
+[data-testid="stSidebar"]{
+    min-width:205px !important;
+    max-width:205px !important;
+}
+
+@media (min-width: 1500px){
+    .block-container{
+        max-width:1360px !important;
+    }
+}
+
+@media (max-width: 1100px){
+    .block-container{
+        max-width:100% !important;
+        padding-left:.75rem !important;
+        padding-right:.75rem !important;
+    }
+    .hero-grid{
+        grid-template-columns:1fr !important;
+    }
+    .hero-visual{
+        display:none !important;
+    }
+}
+
+@media (max-width: 720px){
+    .block-container{
+        padding:.5rem !important;
+    }
+    .stats-grid{
+        grid-template-columns:1fr 1fr !important;
+    }
+    .hero-card{
+        min-height:0 !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -1350,14 +1474,41 @@ if pagina == "🏠 Inicio":
 
     if st.session_state.detalle_facturas_procesadas:
         st.markdown('<div class="inventory-card">', unsafe_allow_html=True)
-        st.markdown(
-            f'<div class="inventory-head"><div class="inventory-title">📦 Inventario acumulado <span class="badge">{total_productos} artículos</span></div></div>',
-            unsafe_allow_html=True
-        )
+
+        inv_c1, inv_c2 = st.columns([4, 1])
+        with inv_c1:
+            st.markdown(
+                f'<div class="inventory-title">📦 Inventario acumulado <span class="badge">{total_productos} artículos</span></div>',
+                unsafe_allow_html=True
+            )
+
         df_inicio = construir_df_productos()
+
+        with inv_c2:
+            if not df_inicio.empty:
+                excel_inicio = generar_excel_wilpos(df_inicio)
+                st.download_button(
+                    "📥 Descargar Excel",
+                    data=excel_inicio,
+                    file_name="Inventario_WilPOS_Acumulado.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    type="primary",
+                    key="download_excel_inicio",
+                )
+
         if not df_inicio.empty:
-            cols = [c for c in ["Código Barra","Nombre","Cantidad Empaque","Stock","Costo","Precio Venta","Categoría"] if c in df_inicio.columns]
-            st.dataframe(df_inicio[cols].head(8), use_container_width=True, hide_index=True)
+            cols = [
+                c for c in
+                ["Código Barra", "Nombre", "Cantidad Empaque", "Stock", "Costo", "Precio Venta", "Categoría"]
+                if c in df_inicio.columns
+            ]
+            st.dataframe(
+                df_inicio[cols].head(8),
+                use_container_width=True,
+                hide_index=True,
+            )
+
         st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -1385,6 +1536,19 @@ elif pagina == "📦 Inventario acumulado":
     if df_productos.empty:
         st.info("Todavía no hay productos en el inventario.")
     else:
+        top_inv1, top_inv2 = st.columns([4, 1])
+        with top_inv2:
+            excel_inventario = generar_excel_wilpos(df_productos)
+            st.download_button(
+                "📥 Descargar Excel",
+                data=excel_inventario,
+                file_name="Inventario_WilPOS_Acumulado.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                type="primary",
+                key="download_excel_inventario",
+            )
+
         st.dataframe(
             df_productos,
             use_container_width=True,
