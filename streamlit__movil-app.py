@@ -1,332 +1,760 @@
-
 import io
-import math
 import re
+import hashlib
+import unicodedata
+from datetime import datetime
+
+import numpy as np
 import pandas as pd
 import streamlit as st
-import openpyxl
-import pdfplumber
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
-# Intento de carga de pytesseract para lectura de imágenes (OCR)
 try:
     import pytesseract
     OCR_DISPONIBLE = True
-except ImportError:
+except Exception:
+    pytesseract = None
     OCR_DISPONIBLE = False
 
-# Configuración de la página
+try:
+    import cv2
+    CV2_DISPONIBLE = True
+except Exception:
+    cv2 = None
+    CV2_DISPONIBLE = False
+
+try:
+    import fitz  # PyMuPDF
+    FITZ_DISPONIBLE = True
+except Exception:
+    fitz = None
+    FITZ_DISPONIBLE = False
+
+try:
+    import pdfplumber
+    PDFPLUMBER_DISPONIBLE = True
+except Exception:
+    pdfplumber = None
+    PDFPLUMBER_DISPONIBLE = False
+
+
+# =========================================================
+# CONFIGURACIÓN
+# =========================================================
 st.set_page_config(
-    page_title="Generador de Inventario WilPOS Movil", 
-    page_icon="📦", 
-    layout="wide"
+    page_title="Procesador de Facturas WilPOS V2",
+    page_icon="📦",
+    layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
-# Estilos CSS avanzados
-st.markdown("""
+st.markdown(
+    """
     <style>
-        .main-header {
-            background: linear-gradient(135deg, #1F4E78 0%, #2E75B6 100%);
-            padding: 2.5rem 2rem;
-            border-radius: 12px;
-            color: white;
-            margin-bottom: 2rem;
-            box-shadow: 0 4px 15px rgba(31, 78, 120, 0.15);
-        }
-        .main-header h1 {
-            color: white !important;
-            font-size: 2.3rem;
-            font-weight: 700;
-            margin-bottom: 0.5rem;
-        }
-        .main-header p {
-            color: #E2EFDA;
-            font-size: 1.1rem;
-            margin-bottom: 0;
-        }
-        .card-container {
-            background-color: #ffffff;
-            border: 1px solid #E1E8ED;
-            padding: 1.5rem;
-            border-radius: 10px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-            margin-bottom: 1.5rem;
-        }
-        .stButton>button {
-            border-radius: 8px;
-            font-weight: 600;
-            width: 100%;
-        }
+      .block-container {max-width: 1200px; padding-top: .8rem; padding-bottom: 3rem;}
+      .main-header {
+        background: linear-gradient(135deg, #1F4E78 0%, #2E75B6 100%);
+        padding: 1.4rem; border-radius: 14px; color: white; margin-bottom: .8rem;
+      }
+      .main-header h1 {color:white !important; margin:0; font-size:clamp(1.55rem,5vw,2.25rem);}
+      .main-header p {color:#EAF3F8; margin:.45rem 0 0; font-size:clamp(.92rem,3vw,1.05rem);}
+      .stButton > button, .stDownloadButton > button {min-height:46px; border-radius:10px; font-weight:600;}
+      div[data-testid="stFileUploader"] {border-radius:12px;}
+      @media (max-width: 640px) {
+        .block-container {padding-left:.7rem; padding-right:.7rem;}
+        .main-header {padding:1rem;}
+        div[data-testid="stHorizontalBlock"] {gap:.45rem;}
+      }
     </style>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
-# Inicializar estados de la sesión de forma segura
-if "inventario_acumulado" not in st.session_state:
-    st.session_state.inventario_acumulado = {}
-if "firmas_facturas_procesadas" not in st.session_state:
-    st.session_state.firmas_facturas_procesadas = set()
-if "margen_usado" not in st.session_state:
-    st.session_state.margen_usado = 35.0
-if "detalle_facturas_procesadas" not in st.session_state:
-    st.session_state.detalle_facturas_procesadas = {}
-if "uploader_key" not in st.session_state:
-    st.session_state.uploader_key = 0
-if "articulos_repetidos_notif" not in st.session_state:
-    st.session_state.articulos_repetidos_notif = []
 
-# Cabecera con título a la izquierda y botón de reinicio arriba a la derecha
-col_head1, col_head2 = st.columns([3, 1], gap="medium")
+# =========================================================
+# ESTADO
+# =========================================================
+DEFAULTS = {
+    "inventario_acumulado": {},
+    "firmas_facturas_procesadas": set(),
+    "hashes_archivos_procesados": set(),
+    "detalle_facturas_procesadas": {},
+    "margen_usado": 35.0,
+    "uploader_key": 0,
+    "camera_key": 0,
+    "avisos_acumulacion": [],
+}
 
-with col_head1:
-    st.markdown("""
-        <div class="main-header" style="margin-bottom: 0rem;">
-            <h1>📦 Procesador Inteligente de Facturas WilPOS Movil</h1>
-            <p>Control automático y validación estricta de facturas y artículos.</p>
-        </div>
-    """, unsafe_allow_html=True)
+for key, value in DEFAULTS.items():
+    if key not in st.session_state:
+        st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
-with col_head2:
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("Reiniciar", type="secondary", use_container_width=True):
-        st.session_state.inventario_acumulado = {}
-        st.session_state.firmas_facturas_procesadas = set()
-        st.session_state.detalle_facturas_procesadas = {}
-        st.session_state.margen_usado = 35.0
-        st.session_state.articulos_repetidos_notif = []
-        st.session_state.uploader_key += 1
-        st.success("¡Memoria y archivos limpiados correctamente!")
-        st.rerun()
 
-st.markdown("<br>", unsafe_allow_html=True)
-
-st.markdown('<div class="card-container">', unsafe_allow_html=True)
-st.markdown("### ⚙️ Panel de Configuración y Carga de Facturas")
-col1, col2 = st.columns([1, 2], gap="large")
-
-with col1:
-    margen_porcentaje = st.number_input(
-        "💡 Digite el margen de ganancia (%)", 
-        min_value=0.0, 
-        max_value=500.0, 
-        value=st.session_state.get("margen_usado", 35.0), 
-        step=1.0,
-        help="Debe ser mayor al 15% para procesar el inventario."
+# =========================================================
+# NORMALIZACIÓN
+# =========================================================
+def sin_acentos(texto: str) -> str:
+    return "".join(
+        c for c in unicodedata.normalize("NFKD", str(texto or ""))
+        if not unicodedata.combining(c)
     )
 
-with col2:
-    uploaded_files = st.file_uploader(
-        "📂 Selecciona o arrastra tus facturas (PDF, imágenes de tus proveedores)", 
-        type=["pdf", "png", "jpg", "jpeg"], 
-        accept_multiple_files=True,
-        key=f"uploader_{st.session_state.uploader_key}"
-    )
 
-st.markdown('</div>', unsafe_allow_html=True)
+def limpiar_espacios(texto: str) -> str:
+    return re.sub(r"\s+", " ", str(texto or "")).strip()
 
-def round_to_nearest_5(val):
-    return int(round(val / 5.0) * 5)
 
-def extraer_datos_factura(uploaded_file):
-    file_name = uploaded_file.name.lower()
-    extracted_text = ""
-    
-    if file_name.endswith('.pdf'):
-        try:
-            with pdfplumber.open(uploaded_file) as pdf:
-                for page in pdf.pages:
-                    extracted_text += page.extract_text() or ""
-        except Exception:
-            pass
-    elif file_name.endswith(('.png', '.jpg', '.jpeg')):
-        try:
-            image = Image.open(uploaded_file)
-            if OCR_DISPONIBLE:
-                extracted_text = pytesseract.image_to_string(image)
-        except Exception:
-            pass
-    
-    text_lower = extracted_text.lower()
-    full_search = text_lower + " " + file_name
+def normalizar_linea(texto: str) -> str:
+    texto = str(texto or "").replace("|", " ")
+    texto = texto.replace("—", "-").replace("–", "-")
+    return limpiar_espacios(texto)
 
-    productos = []
-    proveedor = ""
-    num_factura = ""
-    fecha = "28/08/2026"
 
-    # 1. Álvarez & Sánchez
-    if "alvarez" in full_search or "sanchez" in full_search or "álvarez" in full_search or "576999" in full_search or "7501035013483" in full_search or "cristalino" in full_search or "whatsapp image 2026-08-29" in file_name:
-        proveedor = "Álvarez & Sánchez, S.A."
-        num_factura = "576999"
-        fecha = "28/08/2026"
-        productos = [
-            {"codigo": "7501035013483", "nombre": "TEQUILA RESERVA CRISTALINO 1800", "cant": 2.0, "emp": 12, "costo_total": 79012.80, "itbis": 0.18, "cat": "Licores"}
-        ]
-    # 2. Farah Group
-    elif "farah" in full_search:
-        proveedor = "Farah Group Company SRL"
-        num_factura = "2015785"
-        fecha = "27/08/2026"
-        productos = [
-            {"codigo": "123374", "nombre": "PRESTIGE CERVEZA 4X6PACK X 0.355L BOTELLA", "cant": 10.0, "emp": 24, "costo_total": 27118.60, "itbis": 0.18, "cat": "Cervezas"}
-        ]
-    # 3. CDC (Tickets 26 ago)
-    elif "2026-08-26" in file_name and ("16.52.41" in file_name or "14.30.10" in file_name):
-        proveedor = "Centro de Distribución Cristian SRL"
-        num_factura = "E31000011783"
-        fecha = "26/08/2026"
-        productos = [
-            {"codigo": "830207010706", "nombre": "BEBIDA ENERGIZANTE CICLON 250ML", "cant": 1.0, "emp": 24, "costo_total": 1699.93, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "830207000707", "nombre": "BEBIDA ENERGIZANTE CICLON 500ML", "cant": 5.0, "emp": 24, "costo_total": 11625.10, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "041331021951", "nombre": "AGUA COCO GOYA BOTELLA 13.5 OZ", "cant": 6.0, "emp": 12, "costo_total": 9449.88, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "292", "nombre": "WHISKY MACK ALBERT 700ML", "cant": 1.0, "emp": 12, "costo_total": 6750.15, "itbis": 0.18, "cat": "Licores"},
-            {"codigo": "7468572200083", "nombre": "VASO PLASTIFAR #16 UND", "cant": 2.0, "emp": 500, "costo_total": 3999.98, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "041331027854", "nombre": "AGUA COCO GOYA BOTELLA 11.8 OZ", "cant": 3.0, "emp": 24, "costo_total": 5999.76, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "041331027878", "nombre": "AGUA COCO GOYA LATA 17.6 OZ", "cant": 8.0, "emp": 24, "costo_total": 21599.12, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "07478341", "nombre": "AGUA PERRIER 330ML", "cant": 20.0, "emp": 24, "costo_total": 38500.00, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "C218", "nombre": "WHISKY MACK ALBERT 350ML", "cant": 1.0, "emp": 24, "costo_total": 6824.87, "itbis": 0.18, "cat": "Licores"}
-        ]
-    elif "2026-08-26" in file_name and "20.27.07" in file_name:
-        proveedor = "Centro de Distribución Cristian SRL"
-        num_factura = "E31000011790"
-        fecha = "26/08/2026"
-        productos = [
-            {"codigo": "P1016", "nombre": "SERVILLETA BIMGO DISPENSER 360UND", "cant": 5.0, "emp": 10, "costo_total": 4000.00, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "7501035010192", "nombre": "TEQUILA 1800 REPOSADO 750ML", "cant": 6.0, "emp": 1, "costo_total": 14850.00, "itbis": 0.18, "cat": "Licores"},
-            {"codigo": "619947000020", "nombre": "VODKA TITO'S HANDMADE 750ML", "cant": 2.0, "emp": 12, "costo_total": 31600.80, "itbis": 0.18, "cat": "Licores"},
-            {"codigo": "041331027854", "nombre": "AGUA COCO GOYA BOTELLA 11.8 OZ", "cant": 4.0, "emp": 24, "costo_total": 7999.68, "itbis": 0.18, "cat": "Bebidas"}
-        ]
-    # 4. CDC Estándar
-    elif "cdc" in full_search or "cristian" in full_search:
-        proveedor = "Centro de Distribución Cristian SRL"
-        num_factura = "E310000011806"
-        fecha = "28/08/2026"
-        productos = [
-            {"codigo": "281", "nombre": "AGUA TONICA CANADA DRY 400ML", "cant": 2.0, "emp": 12, "costo_total": 580.02, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "049000057638", "nombre": "REFRESCO COCA COLA 400ML", "cant": 2.0, "emp": 12, "costo_total": 599.96, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "1765", "nombre": "BEBIDA ENERGIZANTE MONTER 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "070847893110", "nombre": "BEBIDA ENERGIZANTE MONTER MANGO LOCO 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"},
-            {"codigo": "070847891727", "nombre": "BEBIDA ENERGIZANTE MONTER ULTRA 473ML", "cant": 1.0, "emp": 24, "costo_total": 2225.04, "itbis": 0.18, "cat": "Bebidas"}
-        ]
-    # 5. Yardow
-    elif "yardow" in full_search or "00494502" in full_search:
-        proveedor = "Comercial Yardow SRL"
-        num_factura = "00494502"
-        fecha = "27/08/2026"
-        productos = [
-            {"codigo": "1168", "nombre": "FUNDA PAPEL #2 30/100", "cant": 1.0, "emp": 3000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "1169", "nombre": "FUNDA PAPEL #4 20/100", "cant": 1.0, "emp": 2000, "costo_total": 567.80, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "746023412", "nombre": "VASO FOAM TERMO ENVASE #12 40/25", "cant": 1.0, "emp": 1000, "costo_total": 2203.39, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "746023416", "nombre": "VASO FOAM TERMO ENVASE #16 20/25", "cant": 1.0, "emp": 500, "costo_total": 1864.41, "itbis": 0.18, "cat": "Insumos"},
-            {"codigo": "7460234PL7", "nombre": "VASO PLASTICO #7 TERMO ENVASE Y CIELO 50", "cant": 1.0, "emp": 500, "costo_total": 1779.66, "itbis": 0.18, "cat": "Insumos"}
-        ]
-    
-    if not productos:
-        return None, None, None, None, []
-        
-    firma = (proveedor, str(num_factura))
-    return firma, proveedor, num_factura, fecha, productos
+def lineas_limpias(texto: str) -> list[str]:
+    return [normalizar_linea(x) for x in str(texto or "").splitlines() if normalizar_linea(x)]
 
-archivos_validos = []
-archivos_duplicados = []
-archivos_invalidos = []
 
-if uploaded_files:
-    archivos_unicos = {f.name: f for f in uploaded_files}.values()
-    
-    for f in archivos_unicos:
-        firma, proveedor, num_fac, fecha_fac, productos = extraer_datos_factura(f)
-        
-        if not productos:
-            archivos_invalidos.append(f.name)
-        elif firma in st.session_state.firmas_facturas_procesadas:
-            archivos_duplicados.append(f.name)
-            st.error(f"⚠️ **Factura Omitida (Ya Registrada):** El archivo `{f.name}` (Proveedor: **{proveedor}**, Factura No. **{num_fac}**) ya fue procesado antes.")
+def normalizar_codigo(codigo) -> str:
+    codigo = str(codigo or "").strip()
+    codigo = codigo.replace(" ", "").replace("-", "")
+    return re.sub(r"[^A-Za-z0-9]", "", codigo)
+
+
+def numero_decimal(valor, default=0.0) -> float:
+    if valor is None:
+        return default
+    if isinstance(valor, (int, float, np.number)) and not pd.isna(valor):
+        return float(valor)
+
+    s = str(valor).strip()
+    if not s:
+        return default
+    s = re.sub(r"[^0-9,.-]", "", s)
+    if not s:
+        return default
+
+    # Facturas locales suelen usar coma de miles y punto decimal.
+    if "," in s and "." in s:
+        if s.rfind(".") > s.rfind(","):
+            s = s.replace(",", "")
         else:
-            archivos_validos.append((f, firma, proveedor, num_fac, fecha_fac, productos))
+            s = s.replace(".", "").replace(",", ".")
+    elif "," in s:
+        partes = s.split(",")
+        if len(partes[-1]) == 2:
+            s = "".join(partes[:-1]) + "." + partes[-1]
+        else:
+            s = s.replace(",", "")
 
-if archivos_invalidos:
-    for inv in archivos_invalidos:
-        st.warning(f"⚠️ **Archivo Omitido:** `{inv}` no pudo ser reconocido automáticamente como una factura válida de inventario.")
+    try:
+        return float(s)
+    except ValueError:
+        return default
 
-st.markdown("<br>", unsafe_allow_html=True)
-procesar_btn = st.button("🚀 Procesar Facturas", type="primary", disabled=(len(archivos_validos) == 0))
 
-@st.dialog("📋 Confirmación de Procesamiento")
-def modal_confirmacion(validas, duplicadas_count, margen):
-    if duplicadas_count > 0:
-        st.warning(f"⚠️ Se omitieron **{duplicadas_count}** factura(s) duplicada(s).")
-    st.markdown(f"📁 Facturas **nuevas** a incorporar: **{len(validas)}**")
-    st.markdown(f"📊 Margen de ganancia a aplicar: **{margen:g}%**")
-    
-    col_btn1, col_btn2 = st.columns(2)
-    with col_btn1:
-        if st.button("✅ Confirmar y Actualizar", type="primary"):
-            st.session_state.margen_usado = margen
-            st.session_state.articulos_repetidos_notif = []
-            
-            for archivo, firma, proveedor, num_fac, fecha_fac, productos_en_archivo in validas:
-                st.session_state.firmas_facturas_procesadas.add(firma)
-                
-                st.session_state.detalle_facturas_procesadas[firma] = {
-                    "proveedor": proveedor,
-                    "num_factura": num_fac,
-                    "fecha": fecha_fac,
-                    "cantidad_articulos": len(productos_en_archivo)
-                }
-                
-                for p in productos_en_archivo:
-                    codigo = str(p["codigo"]).replace("-", "").strip()
-                    cantidad_comprada_unidades = p["cant"] * p["emp"]
-                    
-                    if codigo in st.session_state.inventario_acumulado:
-                        nombre_art = p["nombre"]
-                        st.session_state.articulos_repetidos_notif.append(
-                            f"🔄 **Artículo ya existente detectado:** `{nombre_art}` (Código: `{codigo}`) proveniente de **{proveedor}** (Factura #{num_fac}). Su stock fue acumulado y su costo promediado."
-                        )
-                        st.session_state.inventario_acumulado[codigo]["stock"] += cantidad_comprada_unidades
-                        st.session_state.inventario_acumulado[codigo]["costo_total"] += p["costo_total"]
-                    else:
-                        st.session_state.inventario_acumulado[codigo] = {
-                            "nombre": p["nombre"],
-                            "categoria": p["cat"],
-                            "stock": cantidad_comprada_unidades,
-                            "costo_total": p["costo_total"],
-                            "emp": p["emp"],
-                            "itbis": p["itbis"]
-                        }
-            st.rerun()
-            
-    with col_btn2:
-        if st.button("❌ Cerrar / Cancelar"):
-            st.rerun()
+def normalizar_itbis(valor) -> float:
+    n = numero_decimal(valor, 0.18)
+    if n > 1:
+        n /= 100.0
+    return max(0.0, min(n, 1.0))
 
-if procesar_btn:
-    if margen_porcentaje <= 15.0:
-        st.error("🚨 **Atención:** El margen de ganancia debe ser **mayor al 15%** para continuar.")
+
+def extraer_montos(linea: str) -> list[float]:
+    tokens = re.findall(r"(?<!\w)(?:RD\$\s*)?\d{1,3}(?:,\d{3})*(?:\.\d{2})|(?<!\w)\d+\.\d{2}", linea)
+    return [numero_decimal(x) for x in tokens]
+
+
+def round_to_nearest_5(valor: float) -> int:
+    return int(round(float(valor) / 5.0) * 5)
+
+
+def categoria_por_nombre(nombre: str) -> str:
+    n = sin_acentos(nombre).lower()
+    if any(x in n for x in ["whisky", "vodka", "tequila", "ron ", "rom ", "licor", "brandy", "cognac"]):
+        return "Licores"
+    if any(x in n for x in ["cerveza", "beer", "malta"]):
+        return "Cervezas"
+    if any(x in n for x in ["vaso", "funda", "servilleta", "envase", "plato", "cuchara", "tenedor", "foam"]):
+        return "Insumos"
+    if any(x in n for x in ["agua", "refresco", "coca", "energizante", "jugo", "bebida", "tonica"]):
+        return "Bebidas"
+    return "General"
+
+
+def inferir_empaque(descripcion: str, unidad: str = "", codigo: str = "") -> int:
+    d = sin_acentos(descripcion).upper()
+    u = sin_acentos(unidad).upper()
+
+    # Ej.: 4X6PACK = 24 unidades.
+    m = re.search(r"\b(\d{1,3})\s*[Xx]\s*(\d{1,3})\s*(?:PACK|PK|Paq)?\b", d)
+    if m:
+        a, b = int(m.group(1)), int(m.group(2))
+        if 1 <= a <= 200 and 1 <= b <= 500:
+            return a * b
+
+    # Ej.: 30/100, 40/25, 20/25.
+    m = re.search(r"\b(\d{1,4})\s*/\s*(\d{1,4})\b", d)
+    if m:
+        a, b = int(m.group(1)), int(m.group(2))
+        if a <= 500 and b <= 1000:
+            return a * b
+
+    # Ej.: 12/70 CL: el 12 indica unidades del empaque, no 840.
+    m = re.search(r"\b(\d{1,3})\s*/\s*(\d{1,3})\s*(?:CL|ML|L)\b", d)
+    if m:
+        return int(m.group(1))
+
+    # Caja-24 / Paquete-12.
+    m = re.search(r"\b(?:CAJA|PAQUETE|PAQ|PACK)\s*[-:]?\s*(\d{1,4})\b", d)
+    if m:
+        return int(m.group(1))
+
+    # Algunas presentaciones Yardow no muestran el multiplicador completo.
+    # Se conserva un fallback muy pequeño por código conocido; el usuario lo puede editar.
+    yardow_fallback = {
+        "7460234PL7": 500,
+    }
+    cod = normalizar_codigo(codigo).upper()
+    if cod in yardow_fallback:
+        return yardow_fallback[cod]
+
+    if any(x in u for x in ["UND", "UNIDAD", "EA"]):
+        return 1
+    return 1
+
+
+def hash_bytes(contenido: bytes) -> str:
+    return hashlib.sha256(contenido).hexdigest()
+
+
+# =========================================================
+# OCR / EXTRACCIÓN DE TEXTO
+# =========================================================
+def preparar_imagen_pil(image: Image.Image) -> Image.Image:
+    image = ImageOps.exif_transpose(image).convert("RGB")
+    max_width = 2400
+    if image.width > max_width:
+        factor = max_width / image.width
+        image = image.resize((max_width, max(1, int(image.height * factor))))
+    return image
+
+
+def imagen_para_ocr(image: Image.Image) -> Image.Image:
+    image = preparar_imagen_pil(image)
+
+    if CV2_DISPONIBLE:
+        arr = np.array(image)
+        gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+        gray = cv2.GaussianBlur(gray, (3, 3), 0)
+        # Mantiene texto fino de impresoras térmicas y ayuda con sombras de celular.
+        thr = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY, 31, 15
+        )
+        return Image.fromarray(thr)
+
+    image = image.convert("L")
+    image = ImageOps.autocontrast(image)
+    image = ImageEnhance.Contrast(image).enhance(1.7)
+    image = ImageEnhance.Sharpness(image).enhance(1.7)
+    image = image.filter(ImageFilter.MedianFilter(size=3))
+    return image
+
+
+def ejecutar_ocr(image: Image.Image) -> tuple[str, str]:
+    if not OCR_DISPONIBLE:
+        return "", "OCR no disponible: instala Tesseract y pytesseract."
+
+    preparada = imagen_para_ocr(image)
+    errores = []
+
+    # PSM 6 funciona bien en tickets/tablas; PSM 4 ayuda en documentos de columnas.
+    resultados = []
+    for lang in ("spa", "eng"):
+        for psm in (6, 4):
+            try:
+                txt = pytesseract.image_to_string(
+                    preparada,
+                    lang=lang,
+                    config=f"--oem 3 --psm {psm}",
+                )
+                if txt and txt.strip():
+                    resultados.append(txt.strip())
+            except Exception as exc:
+                errores.append(str(exc))
+
+        if resultados:
+            break
+
+    if not resultados:
+        return "", (errores[-1] if errores else "Tesseract no devolvió texto.")
+
+    # El más largo suele preservar más filas/columnas.
+    mejor = max(resultados, key=len)
+    return mejor, ""
+
+
+@st.cache_data(show_spinner=False, max_entries=40)
+def extraer_texto_desde_bytes(nombre: str, contenido: bytes) -> dict:
+    nombre_lower = nombre.lower()
+    textos = []
+    errores = []
+    paginas = 0
+
+    if nombre_lower.endswith(".pdf"):
+        # Primero intenta texto digital; si una página viene vacía, OCR de esa página.
+        texto_paginas = []
+
+        if PDFPLUMBER_DISPONIBLE:
+            try:
+                with pdfplumber.open(io.BytesIO(contenido)) as pdf:
+                    paginas = len(pdf.pages)
+                    texto_paginas = [(p.extract_text() or "").strip() for p in pdf.pages]
+            except Exception as exc:
+                errores.append(f"Lectura PDF: {exc}")
+
+        if (not texto_paginas or any(not x for x in texto_paginas)) and FITZ_DISPONIBLE:
+            try:
+                doc = fitz.open(stream=contenido, filetype="pdf")
+                paginas = max(paginas, len(doc))
+                if not texto_paginas:
+                    texto_paginas = [""] * len(doc)
+                elif len(texto_paginas) < len(doc):
+                    texto_paginas.extend([""] * (len(doc) - len(texto_paginas)))
+
+                for i, page in enumerate(doc):
+                    if texto_paginas[i].strip():
+                        continue
+                    pix = page.get_pixmap(matrix=fitz.Matrix(2.2, 2.2), alpha=False)
+                    img = Image.open(io.BytesIO(pix.tobytes("png")))
+                    txt, err = ejecutar_ocr(img)
+                    texto_paginas[i] = txt
+                    if err:
+                        errores.append(f"OCR página {i + 1}: {err}")
+            except Exception as exc:
+                errores.append(f"Render/OCR PDF: {exc}")
+        elif not FITZ_DISPONIBLE and any(not x for x in texto_paginas):
+            errores.append("PyMuPDF no está disponible para OCR de PDFs escaneados.")
+
+        textos = texto_paginas
+
+    elif nombre_lower.endswith((".png", ".jpg", ".jpeg", ".webp")):
+        paginas = 1
+        try:
+            img = Image.open(io.BytesIO(contenido))
+            txt, err = ejecutar_ocr(img)
+            textos = [txt]
+            if err:
+                errores.append(err)
+        except Exception as exc:
+            errores.append(f"Imagen: {exc}")
     else:
-        modal_confirmacion(archivos_validos, len(archivos_duplicados), margen_porcentaje)
+        errores.append("Tipo de archivo no soportado.")
 
-if len(st.session_state.inventario_acumulado) > 0:
-    if st.session_state.articulos_repetidos_notif:
-        with st.expander("🔔 **Notificación de Artículos Coincidentes en Facturas Diferentes**", expanded=True):
-            for notif in st.session_state.articulos_repetidos_notif:
-                st.info(notif)
+    return {
+        "texto": "\n\n".join(x for x in textos if x).strip(),
+        "errores": errores,
+        "paginas": paginas,
+    }
 
-    factor_margen = 1 + (st.session_state.margen_usado / 100.0)
-    
-    filas_productos = []
+
+# =========================================================
+# METADATOS
+# =========================================================
+def buscar_fecha(texto: str) -> str:
+    candidatos = re.findall(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b", texto)
+    for valor in candidatos:
+        for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(valor, fmt).strftime("%d/%m/%Y")
+            except ValueError:
+                pass
+    return ""
+
+
+def buscar_por_patrones(texto: str, patrones: list[str]) -> str:
+    for patron in patrones:
+        m = re.search(patron, texto, flags=re.I | re.M)
+        if m:
+            return limpiar_espacios(m.group(1))
+    return ""
+
+
+def detectar_proveedor(texto: str, nombre: str = "") -> str:
+    base = sin_acentos(f"{texto} {nombre}").lower()
+    if "alvarez" in base and "sanchez" in base:
+        return "Álvarez & Sánchez, S.A."
+    if "farah group" in base or "farah" in base:
+        return "Farah Group Company SRL"
+    if "centro de distribucion" in base and "cristian" in base:
+        return "Centro de Distribución Cristian SRL"
+    if "cdc" in base and ("royal" in base or "factura" in base):
+        return "Centro de Distribución Cristian SRL"
+    # Yardow en la muestra puede salir con OCR imperfecto, pero el número 00494502 ayuda.
+    if "yardow" in base or "00494502" in base or "mercasanto" in base or "merca santo" in base:
+        return "Comercial Yardow SRL"
+    return "Proveedor no identificado"
+
+
+def extraer_metadata(texto: str, proveedor: str) -> dict:
+    sinacc = sin_acentos(texto)
+
+    if proveedor == "Álvarez & Sánchez, S.A.":
+        factura = buscar_por_patrones(sinacc, [
+            r"FACTURA[^\n]{0,80}?\b(\d{5,12})\b",
+            r"FACTURA\s*(?:NO|NRO|NUMERO)?\s*[:#-]?\s*(\d{5,12})",
+        ])
+        fecha = buscar_por_patrones(sinacc, [r"FECHA\s*[:#-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{4})"]) or buscar_fecha(sinacc)
+
+    elif proveedor == "Farah Group Company SRL":
+        factura = buscar_por_patrones(sinacc, [
+            r"Factura\s*(?:No\.?|Nro\.?|Numero)?\s*[:#-]?\s*(\d{5,15})",
+        ])
+        fecha = buscar_por_patrones(sinacc, [r"FECHA\s*[:#-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{4})"]) or buscar_fecha(sinacc)
+
+    elif proveedor == "Comercial Yardow SRL":
+        factura = buscar_por_patrones(sinacc, [
+            r"No\.?\s*de\s*Factura\s*[:#-]?\s*(\d{5,15})",
+            r"Factura\s*[:#-]?\s*(\d{5,15})",
+        ])
+        fecha = buscar_por_patrones(sinacc, [
+            r"Fecha\s+de\s+Emision\s*[:#-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{4})"
+        ]) or buscar_fecha(sinacc)
+
+    elif proveedor == "Centro de Distribución Cristian SRL":
+        # Para CDC se conserva el NCF como número de factura/clave fiscal,
+        # igual que en la versión anterior.
+        factura = buscar_por_patrones(sinacc, [
+            r"\bNCF\s*[:#-]?\s*(E\d{10,15})",
+            r"\b(E31\d{8,15})\b",
+        ])
+        fecha = buscar_por_patrones(sinacc, [
+            r"\bFecha\s*[:#-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{4})"
+        ]) or buscar_fecha(sinacc)
+    else:
+        factura = buscar_por_patrones(sinacc, [
+            r"(?:Factura|No\.?\s*de\s*Factura)\s*[:#-]?\s*([A-Z0-9-]{5,20})",
+            r"\b(E31\d{8,15})\b",
+        ])
+        fecha = buscar_fecha(sinacc)
+
+    return {"num_factura": factura, "fecha": fecha}
+
+
+# =========================================================
+# PARSERS DE PRODUCTOS
+# =========================================================
+def producto(codigo, nombre, cant, emp, costo_total, itbis=0.18, cat=None):
+    codigo = normalizar_codigo(codigo)
+    nombre = limpiar_espacios(nombre)
+    return {
+        "codigo": codigo,
+        "nombre": nombre,
+        "cant": max(0.0, numero_decimal(cant, 0.0)),
+        "emp": max(1, int(round(numero_decimal(emp, 1)))),
+        "costo_total": max(0.0, numero_decimal(costo_total, 0.0)),
+        "itbis": normalizar_itbis(itbis),
+        "cat": cat or categoria_por_nombre(nombre),
+    }
+
+
+def parse_alvarez(texto: str) -> list[dict]:
+    productos = []
+    for linea in lineas_limpias(texto):
+        s = sin_acentos(linea)
+        # Cantidad | Unidad | código interno | código barras | tamaño | descripción | importes
+        m = re.match(
+            r"^\s*(\d+(?:[.,]\d+)?)\s+(CAJA|CAJ|UND|UNIDAD)\s+([A-Z0-9-]{2,12})\s+([A-Z0-9-]{6,18})\s+(.+)$",
+            s,
+            flags=re.I,
+        )
+        if not m:
+            continue
+
+        cant, unidad, _cod_interno, barcode, resto = m.groups()
+        montos = extraer_montos(resto)
+        if not montos:
+            continue
+        costo_total = montos[-1]
+
+        # Descripción termina antes del primer monto monetario.
+        pos = re.search(r"\d{1,3}(?:,\d{3})*\.\d{2}", resto)
+        cuerpo = resto[:pos.start()].strip() if pos else resto
+
+        # Tamaño típico: 12/70 CL. El primer número es el empaque.
+        mt = re.match(r"^([0-9]{1,3}/[0-9]{1,4}\s*(?:CL|ML|L\.?)?)\s+(.+)$", cuerpo, flags=re.I)
+        if mt:
+            tamano, nombre = mt.groups()
+            emp = inferir_empaque(tamano, unidad, barcode)
+        else:
+            nombre = cuerpo
+            emp = inferir_empaque(nombre, unidad, barcode)
+
+        productos.append(producto(barcode, nombre, cant, emp, costo_total, 0.18))
+
+    return productos
+
+
+def parse_farah(texto: str) -> list[dict]:
+    productos = []
+    for linea in lineas_limpias(texto):
+        s = sin_acentos(linea)
+        # Se trabaja desde el final: cantidad, UM, precio, ITBIS, total.
+        m = re.match(
+            r"^\s*([A-Z0-9-]{3,18})\s+(.+?)\s+(\d+(?:[.,]\d+)?)\s+(CAJA|CAJ|UND|UNIDAD)\s+"
+            r"([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s*$",
+            s,
+            flags=re.I,
+        )
+        if not m:
+            continue
+
+        codigo, nombre, cant, unidad, _precio, _itbis_valor, total = m.groups()
+        emp = inferir_empaque(nombre, unidad, codigo)
+        productos.append(producto(codigo, nombre, cant, emp, total, 0.18))
+
+    return productos
+
+
+def parse_yardow(texto: str) -> list[dict]:
+    productos = []
+    for linea in lineas_limpias(texto):
+        s = sin_acentos(linea)
+        m = re.match(
+            r"^\s*(\d+(?:[.,]\d+)?)\s+(PAL|CAJ|CAJA|UND|UNIDAD)\s+([A-Z0-9-]{3,18})\s+(.+)$",
+            s,
+            flags=re.I,
+        )
+        if not m:
+            continue
+
+        cant, unidad, codigo, resto = m.groups()
+        montos = extraer_montos(resto)
+        if len(montos) < 1:
+            continue
+        total = montos[-1]
+
+        pos = re.search(r"\d{1,3}(?:,\d{3})*\.\d{2}", resto)
+        nombre = resto[:pos.start()].strip() if pos else resto
+        emp = inferir_empaque(nombre, unidad, codigo)
+        productos.append(producto(codigo, nombre, cant, emp, total, 0.18))
+
+    return productos
+
+
+def _es_codigo_cdc(linea: str) -> bool:
+    s = normalizar_codigo(linea)
+    if not s or len(s) > 18:
+        return False
+    if re.fullmatch(r"\d{3,18}", s):
+        return True
+    if re.fullmatch(r"[A-Z]\d{2,10}", s.upper()):
+        return True
+    return False
+
+
+def parse_cdc(texto: str) -> list[dict]:
+    """Parser para tickets CDC: cantidad x precio, código, descripción, Caja/Paquete-N."""
+    lines = lineas_limpias(texto)
+    productos = []
+    i = 0
+
+    while i < len(lines):
+        line = sin_acentos(lines[i])
+        mq = re.search(r"\b(\d+(?:[.,]\d+)?)\s*[xX×]\s*([\d.,]+)", line)
+        if not mq:
+            i += 1
+            continue
+
+        cant = numero_decimal(mq.group(1))
+        montos_q = extraer_montos(line)
+        precio_unit = numero_decimal(mq.group(2))
+        total = 0.0
+
+        # Si Tesseract preservó columnas, el último monto suele ser el valor total.
+        if len(montos_q) >= 2:
+            candidatos = [x for x in montos_q if x > 0]
+            if candidatos:
+                total = candidatos[-1]
+        if total <= 0:
+            total = cant * precio_unit
+
+        # Busca el código en las próximas 1-2 líneas.
+        j = i + 1
+        while j < min(len(lines), i + 4) and not _es_codigo_cdc(lines[j]):
+            j += 1
+        if j >= len(lines) or not _es_codigo_cdc(lines[j]):
+            i += 1
+            continue
+
+        codigo = normalizar_codigo(lines[j])
+        nombre_parts = []
+        emp = 1
+        k = j + 1
+
+        while k < len(lines):
+            cur = sin_acentos(lines[k])
+            # Próximo producto.
+            if re.search(r"\b\d+(?:[.,]\d+)?\s*[xX×]\s*[\d.,]+", cur):
+                break
+
+            mp = re.search(r"\b(?:Caja|Paquete|Paq|Pack)\s*[-:]?\s*(\d{1,4})\b", cur, flags=re.I)
+            if mp:
+                emp = int(mp.group(1))
+                k += 1
+                break
+
+            # Evita encabezados/totales al final.
+            if re.match(r"^(Subtotal|ITBIS|TOTAL|BANR|Codigo de Seguridad|Fecha de firma)", cur, flags=re.I):
+                break
+
+            # Si la línea parece puramente de columnas monetarias, no forma parte del nombre.
+            if len(extraer_montos(cur)) >= 2 and len(cur.split()) <= 6:
+                k += 1
+                continue
+
+            if cur:
+                nombre_parts.append(cur)
+            k += 1
+
+        nombre = limpiar_espacios(" ".join(nombre_parts))
+        if nombre:
+            productos.append(producto(codigo, nombre, cant, emp, total, 0.18))
+            i = max(k, i + 1)
+        else:
+            i += 1
+
+    return productos
+
+
+def parse_generico(texto: str) -> list[dict]:
+    """Respaldo conservador para filas tabulares comunes."""
+    productos = []
+    for linea in lineas_limpias(texto):
+        s = sin_acentos(linea)
+        m = re.match(
+            r"^\s*([A-Z0-9-]{4,18})\s+(.+?)\s+(\d+(?:[.,]\d+)?)\s+(CAJA|CAJ|UND|UNIDAD)\s+(.+)$",
+            s,
+            flags=re.I,
+        )
+        if not m:
+            continue
+        codigo, nombre, cant, unidad, resto = m.groups()
+        montos = extraer_montos(resto)
+        if not montos:
+            continue
+        emp = inferir_empaque(nombre, unidad, codigo)
+        productos.append(producto(codigo, nombre, cant, emp, montos[-1], 0.18))
+    return productos
+
+
+def parsear_factura(texto: str, nombre: str) -> dict:
+    proveedor = detectar_proveedor(texto, nombre)
+    meta = extraer_metadata(texto, proveedor)
+
+    if proveedor == "Álvarez & Sánchez, S.A.":
+        productos = parse_alvarez(texto)
+    elif proveedor == "Farah Group Company SRL":
+        productos = parse_farah(texto)
+    elif proveedor == "Comercial Yardow SRL":
+        productos = parse_yardow(texto)
+    elif proveedor == "Centro de Distribución Cristian SRL":
+        productos = parse_cdc(texto)
+    else:
+        productos = parse_generico(texto)
+
+    # El fallback genérico también ayuda si OCR rompió parte de una tabla.
+    if not productos and proveedor != "Proveedor no identificado":
+        productos = parse_generico(texto)
+
+    return {
+        "proveedor": proveedor,
+        "num_factura": meta["num_factura"],
+        "fecha": meta["fecha"],
+        "productos": productos,
+    }
+
+
+@st.cache_data(show_spinner=False, max_entries=40)
+def analizar_bytes(nombre: str, contenido: bytes) -> dict:
+    extra = extraer_texto_desde_bytes(nombre, contenido)
+    factura = parsear_factura(extra["texto"], nombre)
+    return {
+        "hash": hash_bytes(contenido),
+        "texto": extra["texto"],
+        "errores": extra["errores"],
+        "paginas": extra["paginas"],
+        "factura": factura,
+    }
+
+
+# =========================================================
+# INVENTARIO / EXCEL
+# =========================================================
+def agregar_factura_al_inventario(factura: dict, archivo_hash: str):
+    proveedor = factura["proveedor"].strip() or "Proveedor no identificado"
+    num_factura = factura["num_factura"].strip() or archivo_hash[:12]
+    fecha = factura["fecha"].strip()
+    firma = (proveedor, num_factura)
+
+    st.session_state.firmas_facturas_procesadas.add(firma)
+    st.session_state.hashes_archivos_procesados.add(archivo_hash)
+    st.session_state.detalle_facturas_procesadas[firma] = {
+        "proveedor": proveedor,
+        "num_factura": num_factura,
+        "fecha": fecha,
+        "cantidad_articulos": len(factura["productos"]),
+    }
+
+    for p in factura["productos"]:
+        codigo = normalizar_codigo(p.get("codigo"))
+        if not codigo:
+            # No conviene mezclar artículos sin código bajo una llave vacía.
+            codigo = "SIN" + hashlib.sha1(p.get("nombre", "").encode("utf-8")).hexdigest()[:10].upper()
+
+        cant = max(0.0, numero_decimal(p.get("cant"), 0.0))
+        emp = max(1, int(round(numero_decimal(p.get("emp"), 1))))
+        unidades = cant * emp
+        costo_total = max(0.0, numero_decimal(p.get("costo_total"), 0.0))
+        itbis = normalizar_itbis(p.get("itbis", 0.18))
+        nombre = limpiar_espacios(p.get("nombre")) or codigo
+        categoria = limpiar_espacios(p.get("cat")) or categoria_por_nombre(nombre)
+
+        if codigo in st.session_state.inventario_acumulado:
+            art = st.session_state.inventario_acumulado[codigo]
+            art["stock"] += unidades
+            art["costo_total"] += costo_total
+            art["proveedores"].setdefault(proveedor, {"unidades": 0.0, "costo_total": 0.0})
+            art["proveedores"][proveedor]["unidades"] += unidades
+            art["proveedores"][proveedor]["costo_total"] += costo_total
+            st.session_state.avisos_acumulacion.append(f"{nombre} ({codigo}) — stock y costo acumulados.")
+        else:
+            st.session_state.inventario_acumulado[codigo] = {
+                "nombre": nombre,
+                "categoria": categoria,
+                "stock": unidades,
+                "costo_total": costo_total,
+                "emp": emp,
+                "itbis": itbis,
+                "proveedores": {
+                    proveedor: {"unidades": unidades, "costo_total": costo_total}
+                },
+            }
+
+
+def construir_df_productos() -> pd.DataFrame:
+    factor = 1 + st.session_state.margen_usado / 100.0
+    filas = []
     for codigo, data in st.session_state.inventario_acumulado.items():
-        costo_unitario = data["costo_total"] / data["stock"] if data["stock"] > 0 else 0
-        precio_venta = round_to_nearest_5(costo_unitario * factor_margen)
-        
-        filas_productos.append({
+        costo_unit = data["costo_total"] / data["stock"] if data["stock"] > 0 else 0
+        filas.append({
             "Nombre": data["nombre"],
             "Código Barra": codigo,
             "Categoría": data["categoria"],
             "Tipo": "producto",
-            "Precio Venta": precio_venta,
-            "Costo": round(costo_unitario, 4),
-            "Stock": int(data["stock"]),
+            "Precio Venta": round_to_nearest_5(costo_unit * factor),
+            "Costo": round(costo_unit, 4),
+            "Stock": int(round(data["stock"])),
             "Stock Mínimo": 25,
             "ITBIS": data["itbis"],
             "Unidad Medida": "unidad",
@@ -337,113 +765,278 @@ if len(st.session_state.inventario_acumulado) > 0:
             "Descuento Monto": 0,
             "Precio Especial": None,
             "Descuento Activo": "No",
-            "Descuento Nota": None
+            "Descuento Nota": None,
         })
+    return pd.DataFrame(filas)
 
-    df_productos = pd.DataFrame(filas_productos)
-    total_facturas = len(st.session_state.detalle_facturas_procesadas)
-    total_productos = len(df_productos)
 
-    st.markdown(f"""
-        <div style="background-color: #D9EAD3; padding: 1.2rem; border-radius: 8px; border-left: 6px solid #38761D; margin-bottom: 1.5rem;">
-            <h4 style="color: #274E13; margin: 0 0 8px 0;">✅ ¡Inventario Acumulado Actualizado!</h4>
-            <p style="color: #274E13; margin: 0 0 4px 0;">📂 <strong>Facturas únicas procesadas:</strong> {total_facturas}</p>
-            <p style="color: #274E13; margin: 0 0 4px 0;">📦 <strong>Productos únicos en inventario:</strong> {total_productos}</p>
-            <p style="color: #274E13; margin: 0;">📊 <strong>Margen aplicado:</strong> {st.session_state.margen_usado:g}%</p>
+def generar_excel_wilpos(df_prod: pd.DataFrame) -> bytes:
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df_prod.to_excel(writer, index=False, sheet_name="Productos")
+
+        pd.DataFrame({
+            "Nombre": ["Bebidas", "Insumos", "Cervezas", "Licores", "General"],
+            "Descripción": [
+                "Refrescos, agua, energizantes",
+                "Fundas, vasos y consumibles",
+                "Cervezas y maltas",
+                "Whisky, tequila, vodka y otros licores",
+                "Artículos varios",
+            ],
+        }).to_excel(writer, index=False, sheet_name="Categorías")
+
+        proveedores = sorted({
+            info["proveedor"] for info in st.session_state.detalle_facturas_procesadas.values()
+        }) or ["Proveedor General"]
+        pd.DataFrame({
+            "Nombre": proveedores,
+            "Contacto": [""] * len(proveedores),
+            "Teléfono": [""] * len(proveedores),
+            "Email": [""] * len(proveedores),
+            "Dirección": [""] * len(proveedores),
+            "RNC/Cédula": [""] * len(proveedores),
+            "Tipo Identificación": ["RNC"] * len(proveedores),
+        }).to_excel(writer, index=False, sheet_name="Proveedores")
+
+        relaciones = []
+        for codigo, data in st.session_state.inventario_acumulado.items():
+            for proveedor, info in data.get("proveedores", {}).items():
+                costo = info["costo_total"] / info["unidades"] if info["unidades"] > 0 else 0
+                relaciones.append({
+                    "Producto": data["nombre"],
+                    "Proveedor": proveedor,
+                    "Precio Costo": round(costo, 4),
+                    "Principal": "Sí" if proveedor == next(iter(data["proveedores"])) else "No",
+                })
+        pd.DataFrame(relaciones).to_excel(writer, index=False, sheet_name="Producto-Proveedor")
+
+        pd.DataFrame({
+            "Instrucciones para cargar tu inventario": [
+                "Revisa Productos y Producto-Proveedor antes de importar.",
+                "Los datos OCR fueron validados/editados previamente en la aplicación.",
+            ]
+        }).to_excel(writer, index=False, sheet_name="Instrucciones")
+
+    return output.getvalue()
+
+
+# =========================================================
+# UI
+# =========================================================
+head1, head2 = st.columns([4, 1])
+with head1:
+    st.markdown(
+        """
+        <div class="main-header">
+          <h1>📦 Procesador de Facturas WilPOS V2</h1>
+          <p>Foto desde el teléfono, PDF o galería → OCR → revisión editable → inventario → Excel.</p>
         </div>
-    """, unsafe_allow_html=True)
+        """,
+        unsafe_allow_html=True,
+    )
+with head2:
+    if st.button("🧹 Reiniciar", use_container_width=True):
+        for key, value in DEFAULTS.items():
+            st.session_state[key] = value.copy() if hasattr(value, "copy") else value
+        st.session_state.uploader_key += 1
+        st.session_state.camera_key += 1
+        st.rerun()
 
-    with st.expander("🔍 Ver Detalle de Facturas Procesadas", expanded=True):
-        tabla_facturas = []
-        for firma, info in st.session_state.detalle_facturas_procesadas.items():
-            tabla_facturas.append({
+with st.container(border=True):
+    st.subheader("1. Cargar factura")
+    col_cfg, col_upload = st.columns([1, 2])
+
+    with col_cfg:
+        margen = st.number_input(
+            "Margen de ganancia (%)",
+            min_value=0.0,
+            max_value=500.0,
+            value=float(st.session_state.margen_usado),
+            step=1.0,
+        )
+
+    with col_upload:
+        modo = st.radio(
+            "Origen",
+            ["📁 Archivo / galería", "📷 Cámara del teléfono"],
+            horizontal=True,
+        )
+
+        uploaded_files = []
+        if modo == "📁 Archivo / galería":
+            uploaded_files = st.file_uploader(
+                "PDF, JPG, JPEG o PNG",
+                type=["pdf", "png", "jpg", "jpeg", "webp"],
+                accept_multiple_files=True,
+                key=f"uploader_{st.session_state.uploader_key}",
+            ) or []
+        else:
+            foto = st.camera_input(
+                "Incluye la factura completa, con buena luz y sin reflejos",
+                key=f"camera_{st.session_state.camera_key}",
+            )
+            if foto is not None:
+                uploaded_files = [foto]
+
+    if not OCR_DISPONIBLE:
+        st.error("OCR no disponible. Instala Tesseract + pytesseract para procesar fotos/PDF escaneados.")
+
+
+revisadas = []
+if uploaded_files:
+    st.subheader("2. Revisar lectura")
+
+    for idx, archivo in enumerate(uploaded_files):
+        contenido = archivo.getvalue()
+        analisis = analizar_bytes(archivo.name, contenido)
+        f = analisis["factura"]
+        keybase = f"{analisis['hash'][:12]}_{idx}"
+
+        with st.container(border=True):
+            st.markdown(f"#### 📄 {archivo.name}")
+
+            if analisis["hash"] in st.session_state.hashes_archivos_procesados:
+                st.warning("Este archivo idéntico ya fue procesado anteriormente.")
+                continue
+
+            for error in analisis["errores"]:
+                st.caption(f"⚠️ {error}")
+
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                proveedor = st.text_input("Proveedor", value=f["proveedor"], key=f"prov_{keybase}")
+            with c2:
+                num_factura = st.text_input("No. factura / NCF", value=f["num_factura"], key=f"fac_{keybase}")
+            with c3:
+                fecha = st.text_input("Fecha", value=f["fecha"], placeholder="dd/mm/aaaa", key=f"fecha_{keybase}")
+
+            firma = (proveedor.strip(), num_factura.strip())
+            duplicada = bool(num_factura.strip()) and firma in st.session_state.firmas_facturas_procesadas
+            if duplicada:
+                st.warning("Esta combinación proveedor + factura ya fue procesada.")
+
+            df_base = pd.DataFrame(f["productos"], columns=[
+                "codigo", "nombre", "cant", "emp", "costo_total", "itbis", "cat"
+            ])
+            if df_base.empty:
+                df_base = pd.DataFrame([{
+                    "codigo": "", "nombre": "", "cant": 1.0, "emp": 1,
+                    "costo_total": 0.0, "itbis": 0.18, "cat": "General"
+                }])
+                st.warning("No pude reconstruir líneas automáticamente. Puedes agregarlas manualmente en la tabla.")
+            else:
+                st.success(f"Se detectaron {len(df_base)} línea(s). Revísalas antes de procesar.")
+
+            editado = st.data_editor(
+                df_base,
+                key=f"editor_{keybase}",
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                column_config={
+                    "codigo": st.column_config.TextColumn("Código", help="Código de barras o código del artículo"),
+                    "nombre": st.column_config.TextColumn("Descripción", width="large"),
+                    "cant": st.column_config.NumberColumn("Cantidad", min_value=0.0, step=1.0, format="%.2f"),
+                    "emp": st.column_config.NumberColumn("Empaque", min_value=1, step=1, format="%d"),
+                    "costo_total": st.column_config.NumberColumn("Costo total", min_value=0.0, step=0.01, format="%.2f"),
+                    "itbis": st.column_config.NumberColumn("ITBIS", min_value=0.0, max_value=1.0, step=0.01, format="%.2f"),
+                    "cat": st.column_config.SelectboxColumn("Categoría", options=["Bebidas", "Insumos", "Cervezas", "Licores", "General"]),
+                },
+            )
+
+            # Descarta filas totalmente vacías.
+            productos_editados = []
+            for _, row in editado.fillna("").iterrows():
+                if not str(row.get("nombre", "")).strip() and not str(row.get("codigo", "")).strip():
+                    continue
+                productos_editados.append(producto(
+                    row.get("codigo", ""),
+                    row.get("nombre", ""),
+                    row.get("cant", 0),
+                    row.get("emp", 1),
+                    row.get("costo_total", 0),
+                    row.get("itbis", 0.18),
+                    row.get("cat", "General") or "General",
+                ))
+
+            with st.expander("🔎 Ver texto OCR", expanded=False):
+                st.text_area("Texto detectado", analisis["texto"][:12000], height=240, key=f"ocr_{keybase}")
+
+            revisadas.append({
+                "hash": analisis["hash"],
+                "duplicada": duplicada,
+                "factura": {
+                    "proveedor": proveedor.strip(),
+                    "num_factura": num_factura.strip(),
+                    "fecha": fecha.strip(),
+                    "productos": productos_editados,
+                },
+            })
+
+
+if revisadas:
+    st.subheader("3. Incorporar al inventario")
+    nuevas = [x for x in revisadas if not x["duplicada"] and x["factura"]["productos"]]
+
+    if margen <= 15:
+        st.warning("El margen debe ser mayor al 15% para procesar.")
+
+    if st.button(
+        f"✅ Procesar {len(nuevas)} factura(s) revisada(s)",
+        type="primary",
+        use_container_width=True,
+        disabled=(not nuevas or margen <= 15),
+    ):
+        st.session_state.margen_usado = margen
+        st.session_state.avisos_acumulacion = []
+        for item in nuevas:
+            agregar_factura_al_inventario(item["factura"], item["hash"])
+        st.session_state.uploader_key += 1
+        st.session_state.camera_key += 1
+        st.rerun()
+
+
+# =========================================================
+# RESULTADO
+# =========================================================
+if st.session_state.inventario_acumulado:
+    st.divider()
+    st.subheader("4. Inventario consolidado")
+
+    df_productos = construir_df_productos()
+    total_facturas = len(st.session_state.detalle_facturas_procesadas)
+    st.success(
+        f"✅ {total_facturas} factura(s) procesada(s) · "
+        f"{len(df_productos)} producto(s) único(s) · margen {st.session_state.margen_usado:g}%"
+    )
+
+    if st.session_state.avisos_acumulacion:
+        with st.expander("🔄 Productos encontrados en más de una factura"):
+            for aviso in st.session_state.avisos_acumulacion:
+                st.info(aviso)
+
+    with st.expander("📋 Facturas procesadas"):
+        df_facturas = pd.DataFrame([
+            {
                 "Proveedor": info["proveedor"],
                 "No. Factura": info["num_factura"],
-                "Fecha de Compra": info["fecha"],
-                "Cantidad de Artículos": info["cantidad_articulos"]
-            })
-        df_facturas_proc = pd.DataFrame(tabla_facturas)
-        st.dataframe(df_facturas_proc, use_container_width=True)
+                "Fecha": info["fecha"],
+                "Artículos": info["cantidad_articulos"],
+            }
+            for info in st.session_state.detalle_facturas_procesadas.values()
+        ])
+        st.dataframe(df_facturas, use_container_width=True, hide_index=True)
 
-    st.markdown('<div class="card-container">', unsafe_allow_html=True)
-    col_a, col_b = st.columns([3, 1])
-    with col_a:
-        st.markdown(f"### 📊 Vista Previa Consolidada ({total_productos} productos)")
-    with col_b:
-        st.metric(label="Margen Aplicado", value=f"{st.session_state.margen_usado:g}%")
-        
-    st.dataframe(df_productos, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    def generar_excel_wilpos(df_prod):
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df_prod.to_excel(writer, index=False, sheet_name='Productos')
-            
-            df_cat = pd.DataFrame({
-                "Nombre": ["Bebidas", "Insumos", "Cervezas", "Licores", "General"],
-                "Descripción": ["Refrescos, agua, energizantes", "Fundas y vasos", "Cervezas y maltas", "Whisky, tequila, vodka", "Artículos varios"]
-            })
-            df_cat.to_excel(writer, index=False, sheet_name='Categorías')
-            
-            lista_provs = list(set([info["proveedor"] for info in st.session_state.detalle_facturas_procesadas.values()]))
-            if not lista_provs:
-                lista_provs = ["Proveedor General"]
-                
-            df_prov = pd.DataFrame({
-                "Nombre": lista_provs,
-                "Contacto": ["Ventas"] * len(lista_provs),
-                "Teléfono": ["809-000-0000"] * len(lista_provs),
-                "Email": [""] * len(lista_provs),
-                "Dirección": ["Santo Domingo"] * len(lista_provs),
-                "RNC/Cédula": ["131000000"] * len(lista_provs),
-                "Tipo Identificación": ["RNC"] * len(lista_provs)
-            })
-            df_prov.to_excel(writer, index=False, sheet_name='Proveedores')
-            
-            df_pp = pd.DataFrame({
-                "Producto": [df_prod.loc[0, "Nombre"], df_prod.loc[min(1, len(df_prod)-1), "Nombre"]],
-                "Proveedor": [lista_provs[0], lista_provs[0]],
-                "Precio Costo": [df_prod.loc[0, "Costo"], df_prod.loc[min(1, len(df_prod)-1), "Costo"]],
-                "Principal": ["Sí", "Sí"]
-            })
-            df_pp.to_excel(writer, index=False, sheet_name='Producto-Proveedor')
-            
-            df_inst = pd.DataFrame({
-                "Instrucciones para cargar tu inventario": [
-                    "Llena la hoja Productos con tus artículos.",
-                    "Generado automáticamente mediante la aplicación web WilPOS."
-                ]
-            })
-            df_inst.to_excel(writer, index=False, sheet_name='Instrucciones')
-            
-        return output.getvalue()
+    st.dataframe(df_productos, use_container_width=True, hide_index=True)
 
     excel_data = generar_excel_wilpos(df_productos)
-
-    st.markdown('<div class="card-container" style="text-align: center; background-color: #F8F9FA;">', unsafe_allow_html=True)
-    st.markdown("### 📥 ¡Todo Listo para Importar!")
-    st.markdown("Descarga tu archivo Excel consolidado y actualizado.")
-    
-    col_dl1, col_dl2 = st.columns(2)
-    with col_dl1:
-        st.download_button(
-            label="📥 Descargar Excel Acumulado (.xlsx)",
-            data=excel_data,
-            file_name="Inventario_WilPOS_Acumulado.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-    with col_dl2:
-        if st.button("🔄 Procesar más facturas (Agregar al mismo Excel)", type="secondary"):
-            st.rerun()
-            
-    st.markdown('</div>', unsafe_allow_html=True)
-
+    st.download_button(
+        "📥 Descargar Excel para WilPOS",
+        data=excel_data,
+        file_name="Inventario_WilPOS_Acumulado_V2.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
 else:
-    st.markdown("""
-        <div style="background-color: #FFF2CC; padding: 1.5rem; border-radius: 10px; border-left: 6px solid #D6B656; text-align: center; margin-top: 1rem;">
-            <h4 style="color: #8C6B00; margin-bottom: 0.5rem;">⚠️ Esperando Facturas</h4>
-            <p style="color: #555555; margin-bottom: 0;">Sube tus facturas válidas para comenzar el procesamiento.</p>
-        </div>
-    """, unsafe_allow_html=True)
+    st.info("Carga una factura para comenzar. En el teléfono puedes usar directamente la cámara.")
