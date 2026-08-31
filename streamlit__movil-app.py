@@ -1538,17 +1538,78 @@ textarea{
 }
 
 
-/* ===== FILE UPLOADER: CARGAR ARCHIVO ===== */
-[data-testid="stMain"] [data-testid="stFileUploader"] button{
-    font-size:0 !important;
-    min-width:145px !important;
+
+
+/* ===== AJUSTE FINAL SIDEBAR + UPLOADER ===== */
+
+/* Sidebar un poco más ancho para que todas las opciones entren completas */
+[data-testid="stSidebar"]{
+    width:250px !important;
+    min-width:250px !important;
+    max-width:250px !important;
 }
-[data-testid="stMain"] [data-testid="stFileUploader"] button::after{
+
+[data-testid="stSidebar"] > div:first-child{
+    width:250px !important;
+    min-width:250px !important;
+    max-width:250px !important;
+    box-sizing:border-box !important;
+}
+
+/* Texto de navegación siempre completo, en una sola línea */
+[data-testid="stSidebar"] div[data-testid="stRadio"] label p{
+    white-space:nowrap !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    font-size:.84rem !important;
+}
+
+/* =========================================================
+   FILE UPLOADER
+   El texto personalizado SOLO afecta el botón del dropzone.
+   No afecta archivos cargados, X de eliminar ni botón +.
+   ========================================================= */
+[data-testid="stMain"]
+[data-testid="stFileUploader"]
+section button{
+    min-width:150px !important;
+}
+
+/* Oculta solo el texto interno del botón de selección */
+[data-testid="stMain"]
+[data-testid="stFileUploader"]
+section button p{
+    font-size:0 !important;
+}
+
+/* Sustituye visualmente Upload/Browse files por Cargar Archivo */
+[data-testid="stMain"]
+[data-testid="stFileUploader"]
+section button p::after{
     content:"⬆  Cargar Archivo" !important;
+    display:inline-block !important;
     font-size:.88rem !important;
     font-weight:750 !important;
     color:#2563eb !important;
     white-space:nowrap !important;
+}
+
+/* Los botones de cada archivo cargado conservan su apariencia nativa */
+[data-testid="stMain"]
+[data-testid="stFileUploader"]
+button:not(section button){
+    font-size:inherit !important;
+    min-width:auto !important;
+}
+
+/* Pantallas pequeñas: sidebar vuelve al comportamiento responsivo de Streamlit */
+@media (max-width:900px){
+    [data-testid="stSidebar"],
+    [data-testid="stSidebar"] > div:first-child{
+        width:auto !important;
+        min-width:0 !important;
+        max-width:none !important;
+    }
 }
 
 </style>
