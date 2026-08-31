@@ -1168,7 +1168,7 @@ textarea{
 /* ===== CONTROLES REALES DE CARGA CON APARIENCIA DE TARJETAS ===== */
 
 /* Contenedor del selector Archivo / Cámara */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
+div[data-testid="stRadio"] [role="radiogroup"]{
     display:grid !important;
     grid-template-columns:1fr 1fr !important;
     gap:.65rem !important;
@@ -1176,7 +1176,7 @@ textarea{
 }
 
 /* Cada opción se convierte en tarjeta */
-[data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
+div[data-testid="stRadio"] [role="radiogroup"] label{
     position:relative !important;
     display:flex !important;
     align-items:center !important;
@@ -1193,12 +1193,12 @@ textarea{
 }
 
 /* Oculta el círculo nativo */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child{
+div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child{
     display:none !important;
 }
 
 /* Texto del botón */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
+div[data-testid="stRadio"] [role="radiogroup"] label p{
     margin:0 !important;
     font-size:.9rem !important;
     font-weight:750 !important;
@@ -1207,20 +1207,20 @@ textarea{
 }
 
 /* Hover */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:hover{
+div[data-testid="stRadio"] [role="radiogroup"] label:hover{
     border-color:#93c5fd !important;
     background:#f8fbff !important;
     transform:translateY(-1px);
 }
 
 /* Estado seleccionado */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){
+div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){
     border:1.5px solid #60a5fa !important;
     background:#eff6ff !important;
     box-shadow:0 0 0 2px rgba(96,165,250,.10) !important;
 }
 
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) p{
+div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) p{
     color:#1d4ed8 !important;
 }
 
@@ -1273,17 +1273,17 @@ div[data-testid="stNumberInput"]{
 
 /* Móvil */
 @media (max-width:640px){
-    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
+    div[data-testid="stRadio"] [role="radiogroup"]{
         grid-template-columns:1fr 1fr !important;
         gap:.45rem !important;
     }
 
-    [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
+    div[data-testid="stRadio"] [role="radiogroup"] label{
         min-height:68px !important;
         padding:.6rem .45rem !important;
     }
 
-    [data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
+    div[data-testid="stRadio"] [role="radiogroup"] label p{
         font-size:.82rem !important;
     }
 }
@@ -1292,7 +1292,7 @@ div[data-testid="stNumberInput"]{
 /* ===== TRES BOTONES DE CARGA CENTRADOS ===== */
 
 /* Tres opciones iguales */
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
+div[data-testid="stRadio"] [role="radiogroup"]{
     display:grid !important;
     grid-template-columns:repeat(3, minmax(0,1fr)) !important;
     gap:.75rem !important;
@@ -1303,7 +1303,7 @@ div[data-testid="stNumberInput"]{
 }
 
 /* Tarjeta */
-[data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
+div[data-testid="stRadio"] [role="radiogroup"] label{
     position:relative !important;
     display:flex !important;
     flex-direction:column !important;
@@ -1322,12 +1322,12 @@ div[data-testid="stNumberInput"]{
 }
 
 /* Oculta radio nativo */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child{
+div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child{
     display:none !important;
 }
 
 /* Iconos grandes por posición */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
+div[data-testid="stRadio"] [role="radiogroup"] label::before{
     position:absolute !important;
     top:.8rem !important;
     left:50% !important;
@@ -1344,20 +1344,20 @@ div[data-testid="stNumberInput"]{
     line-height:1 !important;
 }
 
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(1)::before{
+div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(1)::before{
     content:"📁";
 }
 
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(2)::before{
+div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(2)::before{
     content:"📷";
 }
 
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(3)::before{
+div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(3)::before{
     content:"☁️";
 }
 
 /* Texto */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
+div[data-testid="stRadio"] [role="radiogroup"] label p{
     margin:0 !important;
     color:#2563eb !important;
     font-size:.9rem !important;
@@ -1367,25 +1367,25 @@ div[data-testid="stNumberInput"]{
 }
 
 /* Hover */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:hover{
+div[data-testid="stRadio"] [role="radiogroup"] label:hover{
     background:#f8fbff !important;
     border-color:#93c5fd !important;
     transform:translateY(-2px) !important;
 }
 
 /* Seleccionado */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){
+div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){
     background:#eff6ff !important;
     border:1.5px solid #60a5fa !important;
     box-shadow:0 0 0 3px rgba(96,165,250,.10) !important;
 }
 
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked)::before{
+div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked)::before{
     background:#2563eb !important;
     color:#ffffff !important;
 }
 
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) p{
+div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) p{
     color:#1d4ed8 !important;
 }
 
@@ -1414,13 +1414,13 @@ div[data-testid="stCameraInput"]{
 
 /* Móvil */
 @media (max-width:720px){
-    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
+    div[data-testid="stRadio"] [role="radiogroup"]{
         grid-template-columns:1fr !important;
         max-width:100% !important;
         gap:.5rem !important;
     }
 
-    [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
+    div[data-testid="stRadio"] [role="radiogroup"] label{
         min-height:78px !important;
         padding:1rem .75rem 1rem 3.5rem !important;
         flex-direction:row !important;
@@ -1428,13 +1428,13 @@ div[data-testid="stCameraInput"]{
         text-align:left !important;
     }
 
-    [data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
+    div[data-testid="stRadio"] [role="radiogroup"] label::before{
         top:50% !important;
         left:1rem !important;
         transform:translateY(-50%) !important;
     }
 
-    [data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
+    div[data-testid="stRadio"] [role="radiogroup"] label p{
         text-align:left !important;
     }
 }
@@ -1443,11 +1443,11 @@ div[data-testid="stCameraInput"]{
 /* ===== AJUSTE DE BOTONES A TODO EL ANCHO ===== */
 
 /* El radio ocupa todo el ancho de su columna */
-[data-testid="stMain"] div[data-testid="stRadio"]{
+div[data-testid="stRadio"]{
     width:100% !important;
 }
 
-[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
+div[data-testid="stRadio"] [role="radiogroup"]{
     display:grid !important;
     grid-template-columns:repeat(3, minmax(0, 1fr)) !important;
     gap:.8rem !important;
@@ -1457,7 +1457,7 @@ div[data-testid="stCameraInput"]{
 }
 
 /* Tarjetas más anchas y proporcionadas */
-[data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
+div[data-testid="stRadio"] [role="radiogroup"] label{
     width:100% !important;
     min-width:0 !important;
     min-height:112px !important;
@@ -1467,14 +1467,14 @@ div[data-testid="stCameraInput"]{
 }
 
 /* Texto centrado y más visible */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
+div[data-testid="stRadio"] [role="radiogroup"] label p{
     width:100% !important;
     text-align:center !important;
     font-size:.95rem !important;
 }
 
 /* Iconos un poco más grandes */
-[data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
+div[data-testid="stRadio"] [role="radiogroup"] label::before{
     width:42px !important;
     height:42px !important;
     font-size:1.25rem !important;
@@ -1517,11 +1517,11 @@ div[data-testid="stCameraInput"]{
 
 /* Pantallas medianas */
 @media (max-width:1100px){
-    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
+    div[data-testid="stRadio"] [role="radiogroup"]{
         gap:.55rem !important;
     }
 
-    [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
+    div[data-testid="stRadio"] [role="radiogroup"] label{
         min-height:100px !important;
         padding:2.8rem .65rem .8rem .65rem !important;
     }
@@ -1529,102 +1529,27 @@ div[data-testid="stCameraInput"]{
 
 /* Móvil */
 @media (max-width:720px){
-    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
+    div[data-testid="stRadio"] [role="radiogroup"]{
         grid-template-columns:1fr !important;
         gap:.5rem !important;
     }
 
-    [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
+    div[data-testid="stRadio"] [role="radiogroup"] label{
         min-height:72px !important;
         padding:.8rem .8rem .8rem 3.8rem !important;
         justify-content:flex-start !important;
         text-align:left !important;
     }
 
-    [data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
+    div[data-testid="stRadio"] [role="radiogroup"] label::before{
         left:1rem !important;
         top:50% !important;
         transform:translateY(-50%) !important;
     }
 
-    [data-testid="stMain"] [data-testid="stMain"] [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
+    div[data-testid="stRadio"] [role="radiogroup"] label p{
         text-align:left !important;
     }
-}
-
-
-/* ===== FIX SIDEBAR: navegación compacta y sin distorsión ===== */
-
-[data-testid="stSidebar"] div[data-testid="stRadio"]{
-    width:100% !important;
-}
-
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"]{
-    display:flex !important;
-    flex-direction:column !important;
-    grid-template-columns:none !important;
-    gap:.18rem !important;
-    width:100% !important;
-    max-width:none !important;
-    margin:0 !important;
-}
-
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label{
-    position:relative !important;
-    display:flex !important;
-    flex-direction:row !important;
-    align-items:center !important;
-    justify-content:flex-start !important;
-
-    width:100% !important;
-    min-width:0 !important;
-    min-height:0 !important;
-
-    padding:.5rem .6rem !important;
-    margin:.05rem 0 !important;
-
-    border:1px solid transparent !important;
-    border-radius:8px !important;
-    background:transparent !important;
-    box-shadow:none !important;
-    transform:none !important;
-
-    text-align:left !important;
-}
-
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
-    display:none !important;
-    content:none !important;
-}
-
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child{
-    display:none !important;
-}
-
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label p{
-    margin:0 !important;
-    width:auto !important;
-    text-align:left !important;
-    color:#e5eefb !important;
-    font-size:.9rem !important;
-    font-weight:650 !important;
-}
-
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:hover{
-    background:rgba(255,255,255,.07) !important;
-    border-color:transparent !important;
-    transform:none !important;
-}
-
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){
-    background:#1d4ed8 !important;
-    border-color:#2563eb !important;
-    box-shadow:none !important;
-    transform:none !important;
-}
-
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) p{
-    color:#ffffff !important;
 }
 
 </style>
