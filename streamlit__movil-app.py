@@ -1582,11 +1582,11 @@ section button p{
     font-size:0 !important;
 }
 
-/* Sustituye visualmente Upload/Browse files por Seleccionar Archivos */
+/* Sustituye visualmente Upload/Browse files por Cargar Facturas */
 [data-testid="stMain"]
 [data-testid="stFileUploader"]
 section button p::after{
-    content:"⬆  Seleccionar Archivos" !important;
+    content:"⬆  Cargar Facturas" !important;
     display:inline-block !important;
     font-size:.88rem !important;
     font-weight:750 !important;
@@ -2368,6 +2368,59 @@ div[data-testid="stDialog"] img{
         align-items:flex-start;
         gap:.2rem;
     }
+}
+
+
+/* ===== RESUMEN DE FACTURAS VÁLIDAS / OMITIDAS ===== */
+.validation-summary{
+    padding:.78rem .85rem !important;
+}
+
+.validation-summary-body{
+    flex:1;
+    min-width:0;
+}
+
+.validation-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:1rem;
+    padding:.15rem 0;
+}
+
+.validation-label{
+    font-size:.78rem;
+    font-weight:750;
+    color:#475569;
+}
+
+.validation-value{
+    min-width:28px;
+    text-align:center;
+    padding:.12rem .48rem;
+    border-radius:999px;
+    font-size:.76rem;
+    font-weight:850;
+}
+
+.valid-row .validation-value{
+    background:#dcfce7;
+    color:#15803d;
+}
+
+.omitted-row .validation-value{
+    background:#fee2e2;
+    color:#b91c1c;
+}
+
+.validation-reason{
+    margin-top:.42rem;
+    padding-top:.42rem;
+    border-top:1px solid #dbe5f0;
+    color:#64748b;
+    font-size:.69rem;
+    line-height:1.35;
 }
 
 </style>
@@ -3291,7 +3344,7 @@ def render_carga_facturas(titulo=True):
                 unsafe_allow_html=True,
             )
             if st.button(
-                "Seleccionar archivos",
+                "Cargar Facturas",
                 use_container_width=True,
                 type="primary" if st.session_state.modo_carga_ui == "archivos" else "secondary",
                 key="modo_archivos_btn",
@@ -3638,19 +3691,78 @@ def render_carga_facturas(titulo=True):
         with margen_col:
             st.markdown('<div class="process-action-spacer"></div>', unsafe_allow_html=True)
 
-            if archivos_validos:
+            if uploaded_files:
+                # =====================================================
+                # RESUMEN DE VALIDACIÓN DEL LOTE
+                # =====================================================
+                total_validas = len(archivos_validos)
+                total_omitidas = len(archivos_duplicados) + len(archivos_invalidos)
+
+                motivos_omitidas = []
+
+                if archivos_duplicados:
+                    motivos_omitidas.append(
+                        f"{len(archivos_duplicados)} duplicada(s)"
+                    )
+
+                if archivos_invalidos:
+                    motivos_omitidas.append(
+                        f"{len(archivos_invalidos)} no reconocida(s)"
+                    )
+
+                if motivos_omitidas:
+                    texto_motivos = " · ".join(motivos_omitidas)
+                else:
+                    texto_motivos = "Sin facturas omitidas"
+
                 st.markdown(
                     f"""
-                    <div class="process-ready">
+                    <div class="process-ready validation-summary">
                         <div class="process-ready-icon">✨</div>
-                        <div>
-                            <b>{len(archivos_validos)} factura(s) lista(s)</b>
-                            <span>para consolidar y generar el Excel de WilPOS</span>
+                        <div class="validation-summary-body">
+                            <div class="validation-row valid-row">
+                                <span class="validation-label">Facturas Válidas</span>
+                                <span class="validation-value">{total_validas}</span>
+                            </div>
+
+                            <div class="validation-row omitted-row">
+                                <span class="validation-label">Facturas Omitidas</span>
+                                <span class="validation-value">{total_omitidas}</span>
+                            </div>
+
+                            <div class="validation-reason">
+                                <b>Motivo:</b> {texto_motivos}
+                            </div>
                         </div>
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
+
+            if total_omitidas > 0:
+                with st.expander(
+                    f"🔎 Ver por qué se omitieron ({total_omitidas})",
+                    expanded=False,
+                ):
+                    if archivos_duplicados:
+                        st.markdown("**Facturas duplicadas**")
+                        for nombre_archivo, proveedor_dup, num_fac_dup in archivos_duplicados:
+                            if num_fac_dup:
+                                st.write(
+                                    f"• {nombre_archivo} — {proveedor_dup} — "
+                                    f"Factura {num_fac_dup}: duplicada en esta carga."
+                                )
+                            else:
+                                st.write(
+                                    f"• {nombre_archivo}: archivo repetido en esta carga."
+                                )
+
+                    if archivos_invalidos:
+                        st.markdown("**Facturas no reconocidas**")
+                        for nombre_archivo in archivos_invalidos:
+                            st.write(
+                                f"• {nombre_archivo}: no se pudieron extraer productos válidos."
+                            )
 
             if st.button(
                 "🚀  Generar Archivo Excel",
