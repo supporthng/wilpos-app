@@ -1582,11 +1582,11 @@ section button p{
     font-size:0 !important;
 }
 
-/* Sustituye visualmente Upload/Browse files por Cargar Archivo */
+/* Sustituye visualmente Upload/Browse files por Seleccionar Archivos */
 [data-testid="stMain"]
 [data-testid="stFileUploader"]
 section button p::after{
-    content:"⬆  Cargar Archivo" !important;
+    content:"⬆  Seleccionar Archivos" !important;
     display:inline-block !important;
     font-size:.88rem !important;
     font-weight:750 !important;
@@ -2010,7 +2010,7 @@ div[data-testid="stDialog"] img{
 
 
 /* =========================================================
-   CTA PRINCIPAL — PROCESAR FACTURAS
+   CTA PRINCIPAL — GENERAR ARCHIVO EXCEL
    ========================================================= */
 .process-action-spacer{
     height: 1.15rem;
@@ -3213,7 +3213,7 @@ def render_carga_facturas(titulo=True):
                 )
 
             if st.button(
-                "🚀  Procesar Facturas",
+                "🚀  Generar Archivo Excel",
                 type="primary",
                 use_container_width=True,
                 disabled=(len(archivos_validos) == 0 or margen_porcentaje <= 15),
@@ -3242,7 +3242,7 @@ def render_carga_facturas(titulo=True):
                 <div class="process-ready process-waiting">
                     <div class="process-ready-icon">📄</div>
                     <div>
-                        <b>Procesar Facturas</b>
+                        <b>Generar Archivo Excel</b>
                         <span>Carga tus facturas para habilitar el procesamiento</span>
                     </div>
                 </div>
@@ -3250,7 +3250,7 @@ def render_carga_facturas(titulo=True):
                 unsafe_allow_html=True,
             )
             st.button(
-                "🚀  Procesar Facturas",
+                "🚀  Generar Archivo Excel",
                 type="primary",
                 use_container_width=True,
                 disabled=True,
@@ -3290,7 +3290,7 @@ with st.sidebar:
         "Navegación",
         [
             "🏠 Inicio",
-            "🧾 Procesar facturas",
+            "🧾 Generar Archivo Excel",
             "📦 Productos consolidados",
             "📋 Detalle de facturas",
             "📥 Exportar Excel",
@@ -3410,9 +3410,9 @@ if pagina == "🏠 Inicio":
 
 
 # =========================================================
-# PROCESAR FACTURAS
+# GENERAR ARCHIVO EXCEL
 # =========================================================
-elif pagina == "🧾 Procesar facturas":
+elif pagina == "🧾 Generar Archivo Excel":
     render_carga_facturas(titulo=True)
 
 
