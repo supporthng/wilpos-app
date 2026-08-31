@@ -31,412 +31,554 @@ st.set_page_config(
 # =========================================================
 st.markdown(r"""
 <style>
-:root {
-    --bg: #f4f7fb;
-    --surface: #ffffff;
-    --surface-2: #f8fafc;
-    --text: #0f172a;
-    --muted: #64748b;
-    --line: #e2e8f0;
-    --primary: #2563eb;
-    --primary-2: #1d4ed8;
-    --navy: #071a33;
-    --success: #16a34a;
-    --warning: #d97706;
-    --danger: #dc2626;
+:root{
+    --bg:#f8fafc;
+    --panel:#ffffff;
+    --border:#dfe7f1;
+    --text:#0f172a;
+    --muted:#64748b;
+    --blue:#2563eb;
+    --blue2:#1d4ed8;
+    --navy:#071a33;
+    --navy2:#0b2445;
+    --green:#16a34a;
+    --orange:#f59e0b;
+    --purple:#7c3aed;
+    --red:#ef4444;
 }
 
-html, body, [class*="css"] {
+html, body, [class*="css"]{
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-.stApp {
-    background: var(--bg);
-    color: var(--text);
+.stApp{
+    background:var(--bg);
+    color:var(--text);
 }
 
-[data-testid="stHeader"] {
-    background: rgba(244,247,251,.86);
-    backdrop-filter: blur(10px);
+[data-testid="stHeader"]{
+    background:rgba(248,250,252,.92);
+    backdrop-filter:blur(8px);
 }
 
-[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #071a33 0%, #0b2445 100%);
-    border-right: 1px solid rgba(255,255,255,.06);
+.block-container{
+    max-width:1320px;
+    padding-top:1rem;
+    padding-bottom:2rem;
 }
 
-[data-testid="stSidebar"] * {
-    color: #e5eefb;
+/* =============== SIDEBAR =============== */
+[data-testid="stSidebar"]{
+    background:linear-gradient(180deg,var(--navy) 0%, var(--navy2) 100%);
+    border-right:1px solid rgba(255,255,255,.05);
 }
 
-[data-testid="stSidebar"] .stRadio label {
-    padding: .35rem 0;
+[data-testid="stSidebar"] *{
+    color:#e5eefb;
 }
 
-[data-testid="stSidebar"] [role="radiogroup"] label {
-    border-radius: 10px;
-    padding: .42rem .6rem;
-    transition: .2s ease;
+.side-logo{
+    padding:.5rem .15rem .85rem .15rem;
 }
-
-[data-testid="stSidebar"] [role="radiogroup"] label:hover {
-    background: rgba(255,255,255,.07);
-}
-
-.block-container {
-    max-width: 1480px;
-    padding-top: 1rem;
-    padding-bottom: 3rem;
-}
-
-h1, h2, h3, h4 {
-    letter-spacing: -0.025em;
-}
-
-.hero {
-    position: relative;
-    overflow: hidden;
-    background: linear-gradient(135deg, #ffffff 0%, #f7faff 100%);
-    border: 1px solid #dbe5f0;
-    border-radius: 20px;
-    padding: 2rem 2.2rem;
-    min-height: 215px;
-    box-shadow: 0 10px 30px rgba(15, 23, 42, .05);
-}
-
-.hero:after {
-    content: "";
-    position: absolute;
-    right: -70px;
-    top: -85px;
-    width: 300px;
-    height: 300px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(37,99,235,.16), rgba(37,99,235,0));
-}
-
-.hero h1 {
-    font-size: clamp(2rem, 4vw, 3.2rem);
-    margin: 0 0 .55rem 0;
-    color: #0f172a;
-}
-
-.hero p {
-    max-width: 720px;
-    color: #64748b;
-    font-size: 1.04rem;
-    line-height: 1.7;
-    margin: .25rem 0;
-}
-
-.hero-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: .4rem;
-    padding: .38rem .68rem;
-    border-radius: 999px;
-    background: #eff6ff;
-    color: #1d4ed8;
-    font-weight: 700;
-    font-size: .82rem;
-    margin-bottom: .8rem;
-}
-
-.glass-card, .section-card {
-    background: #fff;
-    border: 1px solid #dfe7f1;
-    border-radius: 18px;
-    box-shadow: 0 8px 28px rgba(15,23,42,.045);
-}
-
-.section-card {
-    padding: 1.25rem 1.3rem;
-    margin-bottom: 1rem;
-}
-
-.section-title {
+.side-logo .brand{
     display:flex;
     align-items:center;
-    justify-content:space-between;
-    gap:1rem;
-    margin-bottom:.85rem;
+    gap:.65rem;
 }
-
-.section-title h3 {
-    margin:0;
-    font-size:1.15rem;
-}
-
-.kpi-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: .85rem;
-    margin: 1rem 0 1.25rem 0;
-}
-
-.kpi {
-    position: relative;
-    overflow:hidden;
-    background:#fff;
-    border:1px solid #dfe7f1;
-    border-radius:16px;
-    padding:1rem 1.05rem;
-    min-height:105px;
-    box-shadow:0 6px 18px rgba(15,23,42,.035);
-}
-
-.kpi .label {
-    color:#64748b;
-    font-size:.82rem;
-    font-weight:700;
-    margin-bottom:.35rem;
-}
-
-.kpi .value {
-    color:#0f172a;
-    font-size:1.55rem;
-    font-weight:800;
-}
-
-.kpi .icon {
-    position:absolute;
-    right:.9rem;
-    top:.9rem;
-    width:42px;
-    height:42px;
-    border-radius:12px;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    background:#eff6ff;
-    font-size:1.15rem;
-}
-
-.side-logo {
-    padding: .75rem .25rem 1.1rem .25rem;
-}
-.side-logo .brand {
-    display:flex;
-    align-items:center;
-    gap:.7rem;
-}
-.side-logo .mark {
-    width:42px;
-    height:42px;
-    border-radius:12px;
+.side-logo .mark{
+    width:38px;
+    height:38px;
+    border-radius:10px;
     display:flex;
     align-items:center;
     justify-content:center;
     background:linear-gradient(135deg,#3b82f6,#2563eb);
-    color:#fff;
-    font-size:1.4rem;
-    box-shadow:0 8px 20px rgba(37,99,235,.25);
+    color:white;
+    font-size:1.2rem;
+    box-shadow:0 7px 18px rgba(37,99,235,.25);
 }
-.side-logo .name {
-    font-size:1.45rem;
+.side-logo .name{
+    font-size:1.22rem;
     font-weight:850;
+    line-height:1;
     color:#fff;
-    letter-spacing:-.02em;
 }
-.side-logo .sub {
+.side-logo .sub{
     color:#60a5fa;
-    font-size:.8rem;
+    font-size:.67rem;
     font-weight:800;
-    margin-top:-2px;
+    margin-top:.18rem;
+    letter-spacing:.08em;
 }
 
-.side-summary {
-    margin-top:1.2rem;
-    padding:1rem;
-    border-radius:14px;
+[data-testid="stSidebar"] .stRadio > label{
+    display:none;
+}
+[data-testid="stSidebar"] [role="radiogroup"]{
+    gap:.18rem;
+}
+[data-testid="stSidebar"] [role="radiogroup"] label{
+    width:100%;
+    padding:.48rem .55rem !important;
+    border-radius:8px;
+    border:1px solid transparent;
+    transition:.15s ease;
+}
+[data-testid="stSidebar"] [role="radiogroup"] label:hover{
+    background:rgba(255,255,255,.07);
+}
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked){
+    background:#1d4ed8 !important;
+    border-color:#2563eb !important;
+}
+[data-testid="stSidebar"] [role="radiogroup"] label > div:first-child{
+    display:none !important;
+}
+[data-testid="stSidebar"] [role="radiogroup"] p{
+    font-size:.82rem;
+    font-weight:650;
+}
+
+.side-summary{
+    margin-top:1rem;
+    padding:.78rem;
+    border-radius:12px;
     background:rgba(255,255,255,.045);
     border:1px solid rgba(255,255,255,.08);
 }
-.side-summary .s-title {
-    font-size:.78rem;
+.side-summary .s-title{
+    font-size:.68rem;
     font-weight:800;
-    color:#cbd5e1;
-    margin-bottom:.75rem;
+    color:#94a3b8 !important;
+    margin-bottom:.45rem;
+    letter-spacing:.08em;
 }
-.side-summary .row {
+.side-summary .row{
     display:flex;
     justify-content:space-between;
-    gap:.75rem;
-    padding:.52rem 0;
-    border-bottom:1px solid rgba(255,255,255,.06);
-    font-size:.78rem;
+    gap:.6rem;
+    padding:.34rem 0;
+    border-bottom:1px solid rgba(255,255,255,.05);
+    font-size:.75rem;
 }
-.side-summary .row:last-child { border-bottom:0; }
-.side-summary .num { font-weight:800; color:#fff; }
+.side-summary .row:last-child{
+    border-bottom:none;
+}
+.side-summary .row span{
+    color:#cbd5e1 !important;
+}
+.side-summary .num{
+    color:#fff !important;
+    font-weight:800;
+}
 
-.file-card {
+/* =============== TOPBAR =============== */
+.top-actions{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:.45rem;
+    margin-bottom:.55rem;
+}
+
+.top-icon{
+    width:34px;
+    height:34px;
+    border-radius:10px;
+    border:1px solid #dbe3ef;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:#fff;
+    color:#475569;
+    font-size:.9rem;
+}
+
+/* =============== HERO =============== */
+.hero-grid{
+    display:grid;
+    grid-template-columns:minmax(0,1.65fr) minmax(320px,1fr);
+    gap:1rem;
+    margin-bottom:1rem;
+}
+
+.hero-card{
+    position:relative;
+    overflow:hidden;
+    min-height:185px;
+    background:linear-gradient(135deg,#ffffff 0%,#f8fbff 100%);
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:1.35rem 1.4rem;
+    box-shadow:0 6px 18px rgba(15,23,42,.045);
+}
+
+.hero-card h1{
+    margin:0 0 .45rem 0;
+    font-size:2rem;
+    letter-spacing:-.04em;
+}
+.hero-card .subtitle{
+    font-size:1rem;
+    color:#0f172a;
+    margin-bottom:.8rem;
+}
+.hero-card p{
+    color:var(--muted);
+    margin:.2rem 0;
+    font-size:.88rem;
+    line-height:1.55;
+    max-width:560px;
+}
+.hero-visual{
+    position:absolute;
+    right:1.15rem;
+    top:1.1rem;
+    width:220px;
+    height:145px;
+    opacity:.95;
+}
+.hero-visual .phone{
+    position:absolute;
+    left:28px;
+    top:10px;
+    width:62px;
+    height:110px;
+    border:5px solid #0f2a4d;
+    border-radius:13px;
+    background:white;
+}
+.hero-visual .phone:before{
+    content:"";
+    position:absolute;
+    left:16px;
+    top:12px;
+    width:20px;
+    height:4px;
+    background:#cbd5e1;
+    border-radius:5px;
+}
+.hero-visual .phone:after{
+    content:"";
+    position:absolute;
+    left:14px;
+    bottom:16px;
+    width:28px;
+    height:7px;
+    background:#2563eb;
+    border-radius:2px;
+}
+.hero-visual .sheet{
+    position:absolute;
+    right:22px;
+    top:13px;
+    width:96px;
+    height:116px;
+    background:linear-gradient(180deg,#e8f0ff,#dbeafe);
+    border-radius:9px;
+    transform:rotate(2deg);
+}
+.hero-visual .sheet:before,
+.hero-visual .sheet:after{
+    content:"";
+    position:absolute;
+    left:18px;
+    width:56px;
+    height:8px;
+    background:#b7cdfc;
+    border-radius:4px;
+}
+.hero-visual .sheet:before{top:26px;}
+.hero-visual .sheet:after{top:44px;}
+
+/* =============== STATS =============== */
+.stats-card{
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:.95rem;
+    box-shadow:0 6px 18px rgba(15,23,42,.045);
+}
+.stats-title{
+    font-weight:800;
+    font-size:.88rem;
+    margin-bottom:.6rem;
+}
+.stats-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:.55rem;
+}
+.stat{
+    position:relative;
+    border:1px solid #dce5f0;
+    border-radius:10px;
+    padding:.7rem .75rem;
+    min-height:72px;
+}
+.stat .label{
+    font-size:.69rem;
+    color:#64748b;
+    font-weight:700;
+}
+.stat .value{
+    margin-top:.15rem;
+    font-size:1.15rem;
+    font-weight:850;
+}
+.stat.blue{background:#f7faff;border-color:#bfdbfe;}
+.stat.purple{background:#faf7ff;border-color:#ddd6fe;}
+.stat.orange{background:#fffbeb;border-color:#fde68a;}
+.stat.green{background:#f0fdf4;border-color:#bbf7d0;}
+.stat.blue .value{color:#2563eb;}
+.stat.purple .value{color:#7c3aed;}
+.stat.orange .value{color:#d97706;}
+.stat.green .value{color:#15803d;}
+.stat-icon{
+    position:absolute;
+    right:.65rem;
+    top:.65rem;
+    width:32px;
+    height:32px;
+    border-radius:9px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:rgba(255,255,255,.8);
+}
+.stats-link{
+    margin-top:.55rem;
+    padding:.42rem;
+    border-radius:8px;
+    background:#eef4ff;
+    color:#2563eb;
+    font-size:.72rem;
+    font-weight:700;
+    text-align:center;
+}
+
+/* =============== MAIN CARDS =============== */
+.main-card{
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:14px;
+    box-shadow:0 6px 18px rgba(15,23,42,.04);
+    margin-bottom:1rem;
+    overflow:hidden;
+}
+.main-card-header{
+    padding:.85rem 1rem .65rem 1rem;
+    font-size:.92rem;
+    font-weight:850;
+}
+.main-card-body{
+    padding:.9rem 1rem 1rem 1rem;
+}
+
+.upload-grid{
+    display:grid;
+    grid-template-columns:1.15fr .55fr;
+    gap:0;
+}
+.upload-zone{
+    padding:.9rem 1rem;
+    border-right:1px solid #e5e7eb;
+}
+.margin-zone{
+    padding:.9rem 1rem;
+}
+
+.fake-upload{
+    border:1px dashed #cbd5e1;
+    border-radius:10px;
+    min-height:116px;
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    overflow:hidden;
+    background:#fbfdff;
+}
+.fake-upload-item{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    gap:.28rem;
+    border-right:1px solid #eef2f7;
+    padding:.75rem;
+}
+.fake-upload-item:last-child{
+    border-right:none;
+}
+.fake-upload-item.active{
+    background:#f7faff;
+    outline:1px solid #bfdbfe;
+    outline-offset:-1px;
+}
+.fake-upload-icon{
+    width:36px;
+    height:36px;
+    border-radius:9px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:#eef4ff;
+    color:#2563eb;
+    font-size:1rem;
+}
+.fake-upload-title{
+    color:#2563eb;
+    font-size:.75rem;
+    font-weight:750;
+}
+.fake-upload-sub{
+    font-size:.67rem;
+    color:#64748b;
+}
+
+.upload-foot{
+    margin-top:.45rem;
+    color:#94a3b8;
+    font-size:.66rem;
+}
+
+/* actual uploader */
+div[data-testid="stFileUploader"]{
+    border:1px solid #e2e8f0;
+    border-radius:10px;
+    background:#fff;
+    padding:.25rem;
+}
+div[data-testid="stFileUploader"] section{
+    padding:.55rem !important;
+}
+div[data-testid="stCameraInput"]{
+    border-radius:10px;
+}
+
+.file-strip{
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:.55rem;
+    margin:.45rem 0 .75rem 0;
+}
+.file-chip{
+    border:1px solid #dfe7f1;
+    border-radius:9px;
+    background:#fff;
+    padding:.55rem .65rem;
     display:flex;
     align-items:center;
     justify-content:space-between;
-    gap:1rem;
-    padding:.85rem .95rem;
-    border:1px solid #e2e8f0;
-    border-radius:14px;
+    gap:.5rem;
+    min-height:54px;
+}
+.file-chip .file-name{
+    font-size:.72rem;
+    font-weight:700;
+    color:#0f172a;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.file-chip .file-meta{
+    font-size:.62rem;
+    color:#64748b;
+}
+.ok{
+    color:#16a34a;
+    font-weight:850;
+}
+
+.process-wrap{
+    display:flex;
+    justify-content:center;
+    margin-top:.6rem;
+}
+.process-note{
+    text-align:center;
+    font-size:.68rem;
+    color:#dbeafe;
+}
+
+/* =============== INVENTORY =============== */
+.inventory-card{
     background:#fff;
+    border:1px solid var(--border);
+    border-radius:14px;
+    box-shadow:0 6px 18px rgba(15,23,42,.04);
+    padding:.8rem .9rem .9rem .9rem;
+    margin-top:.7rem;
+}
+.inventory-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:.6rem;
     margin-bottom:.55rem;
 }
-.file-card .file-name {
-    font-weight:750;
-    color:#0f172a;
-    word-break:break-word;
+.inventory-title{
+    display:flex;
+    align-items:center;
+    gap:.45rem;
+    font-size:.9rem;
+    font-weight:850;
 }
-.file-card .meta {
-    color:#64748b;
-    font-size:.8rem;
-    margin-top:.18rem;
-}
-.file-card .ok {
+.badge{
+    padding:.2rem .45rem;
+    border-radius:999px;
+    background:#ecfdf5;
     color:#15803d;
-    background:#f0fdf4;
-    border:1px solid #bbf7d0;
-    border-radius:999px;
-    padding:.28rem .58rem;
-    white-space:nowrap;
-    font-size:.76rem;
-    font-weight:800;
-}
-.file-card .bad {
-    color:#b91c1c;
-    background:#fef2f2;
-    border:1px solid #fecaca;
-    border-radius:999px;
-    padding:.28rem .58rem;
-    white-space:nowrap;
-    font-size:.76rem;
-    font-weight:800;
-}
-
-.info-strip {
-    border-radius:14px;
-    padding:.8rem .95rem;
-    background:#eff6ff;
-    border:1px solid #bfdbfe;
-    color:#1e40af;
-    font-size:.86rem;
-}
-
-.empty-state {
-    text-align:center;
-    background:#fff;
-    border:1px dashed #cbd5e1;
-    border-radius:18px;
-    padding:2.3rem 1rem;
-    color:#64748b;
-}
-.empty-state .big { font-size:2.2rem; margin-bottom:.4rem; }
-
-div[data-testid="stFileUploader"] section {
-    border:1.5px dashed #b8c7dc !important;
-    border-radius:16px !important;
-    background:#f8fbff !important;
-    min-height:145px;
-}
-
-div[data-testid="stFileUploader"] section:hover {
-    border-color:#60a5fa !important;
-    background:#f3f8ff !important;
-}
-
-.stButton > button,
-.stDownloadButton > button {
-    min-height:44px;
-    border-radius:11px;
+    font-size:.65rem;
     font-weight:750;
-    border-width:1px;
 }
 
-.stButton > button[kind="primary"] {
-    background:linear-gradient(135deg,#2563eb,#1d4ed8);
+/* =============== STREAMLIT CONTROLS =============== */
+.stButton>button,
+.stDownloadButton>button{
+    border-radius:8px;
+    min-height:38px;
+    font-weight:750;
+}
+.stButton>button[kind="primary"]{
+    background:linear-gradient(180deg,#2563eb,#1d4ed8);
     border-color:#1d4ed8;
-    box-shadow:0 8px 18px rgba(37,99,235,.18);
 }
-
-[data-testid="stDataFrame"] {
+div[data-testid="stDataFrame"]{
     border:1px solid #e2e8f0;
-    border-radius:14px;
+    border-radius:9px;
     overflow:hidden;
 }
-
-[data-testid="stMetric"] {
-    background:#fff;
-    border:1px solid #e2e8f0;
-    padding:.85rem 1rem;
-    border-radius:14px;
+div[data-testid="stNumberInput"] input{
+    border-radius:8px;
 }
 
-@media (max-width: 900px) {
-    .kpi-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
-    .hero { padding:1.35rem 1.2rem; min-height:0; }
+#MainMenu{visibility:hidden;}
+footer{visibility:hidden;}
+
+@media (max-width: 980px){
+    .hero-grid{grid-template-columns:1fr;}
+    .hero-visual{display:none;}
+    .upload-grid{grid-template-columns:1fr;}
+    .upload-zone{border-right:none;border-bottom:1px solid #e5e7eb;}
 }
 
-@media (max-width: 640px) {
-    .block-container {
-        padding-left:.7rem;
-        padding-right:.7rem;
-        padding-top:.55rem;
+@media (max-width: 720px){
+    .block-container{
+        padding-left:.65rem;
+        padding-right:.65rem;
+        padding-top:.7rem;
     }
-    .kpi-grid { grid-template-columns:1fr 1fr; gap:.55rem; }
-    .kpi { padding:.8rem; min-height:94px; }
-    .kpi .value { font-size:1.15rem; }
-    .kpi .icon { width:34px; height:34px; font-size:.95rem; }
-    .section-card { padding:.95rem; }
-    .file-card { align-items:flex-start; flex-direction:column; gap:.45rem; }
+    .stats-grid{grid-template-columns:1fr 1fr;}
+    .fake-upload{grid-template-columns:1fr;}
+    .fake-upload-item{
+        border-right:none;
+        border-bottom:1px solid #eef2f7;
+    }
+    .fake-upload-item:last-child{border-bottom:none;}
+    .file-strip{grid-template-columns:1fr;}
+    .hero-card h1{font-size:1.65rem;}
 }
-
-      .welcome-card {
-        background: linear-gradient(135deg, #FFFFFF 0%, #F4F8FF 100%);
-        border: 1px solid #DCE6F5;
-        border-radius: 16px;
-        padding: 1.4rem 1.5rem;
-        margin-bottom: 1rem;
-        box-shadow: 0 6px 20px rgba(31, 78, 120, 0.08);
-      }
-      .welcome-eyebrow {
-        font-size: 0.95rem;
-        font-weight: 700;
-        color: #2563EB;
-      }
-
-/* Ajustes de navegación compacta */
-[data-testid="stSidebar"] [role="radiogroup"] input {
-    display: none !important;
-}
-[data-testid="stSidebar"] [role="radiogroup"] label > div:first-child {
-    display: none !important;
-}
-[data-testid="stSidebar"] [role="radiogroup"] label {
-    width: 100%;
-    padding: .58rem .72rem !important;
-    margin: .08rem 0;
-    border: 1px solid transparent;
-    border-radius: 10px;
-}
-[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
-    background: #2563eb !important;
-    border-color: #3b82f6 !important;
-}
-[data-testid="stSidebar"] [role="radiogroup"] label p {
-    font-weight: 650;
-    font-size: .92rem;
-}
-[data-testid="stSidebar"] .side-summary .row span {
-    color: #cbd5e1 !important;
-}
-[data-testid="stSidebar"] .side-summary .row .num {
-    color: #ffffff !important;
-}
-.hero {
-    min-height: 0 !important;
-}
-.block-container {
-    max-width: 1220px !important;
-}
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -936,84 +1078,136 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
+    st.markdown("""
+    <div style="height:1px;background:rgba(255,255,255,.08);margin:.9rem 0;"></div>
+    """, unsafe_allow_html=True)
+
     st.markdown(f"""
     <div class="side-summary">
       <div class="s-title">RESUMEN RÁPIDO</div>
-      <div class="row"><span>Facturas</span><span class="num">{total_facturas}</span></div>
-      <div class="row"><span>Artículos</span><span class="num">{total_productos}</span></div>
-      <div class="row"><span>Unidades</span><span class="num">{total_unidades:,}</span></div>
-      <div class="row"><span>Compra</span><span class="num">RD$ {valor_compra:,.2f}</span></div>
+      <div class="row"><span>Facturas procesadas</span><span class="num">{total_facturas}</span></div>
+      <div class="row"><span>Artículos únicos</span><span class="num">{total_productos}</span></div>
+      <div class="row"><span>Unidades totales</span><span class="num">{total_unidades:,}</span></div>
+      <div class="row"><span>Valor compra</span><span class="num">RD$ {valor_compra:,.2f}</span></div>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("<div style='height:.7rem'></div>", unsafe_allow_html=True)
-
     if st.button("🔄 Reiniciar todo", use_container_width=True):
         resetear_todo()
         st.rerun()
 
-    st.caption("PDF · JPG · PNG · Cámara")
-
 
 # =========================================================
-# CABECERA / KPIs
+# CABECERA
 # =========================================================
-st.markdown("""
-<div style="padding:.1rem 0 .55rem 0">
-  <div style="font-size:.78rem;color:#64748b;font-weight:800;letter-spacing:.08em">WILPOS MÓVIL</div>
-  <div style="font-size:1.45rem;font-weight:850;color:#0f172a">Panel de inventario</div>
-</div>
-""", unsafe_allow_html=True)
-
-st.markdown(f"""
-<div class="kpi-grid">
-  <div class="kpi"><div class="label">Facturas procesadas</div><div class="value">{total_facturas}</div><div class="icon">🧾</div></div>
-  <div class="kpi"><div class="label">Artículos únicos</div><div class="value">{total_productos}</div><div class="icon">📦</div></div>
-  <div class="kpi"><div class="label">Unidades totales</div><div class="value">{total_unidades:,}</div><div class="icon">🛒</div></div>
-  <div class="kpi"><div class="label">Valor de compra</div><div class="value">RD$ {valor_compra:,.2f}</div><div class="icon">💰</div></div>
-</div>
-""", unsafe_allow_html=True)
+top_c1, top_c2 = st.columns([1, 5])
+with top_c2:
+    ta1, ta2, ta3 = st.columns([8, .5, 1.25])
+    with ta2:
+        st.markdown('<div class="top-icon">◐</div>', unsafe_allow_html=True)
+    with ta3:
+        if st.button("🔄 Reiniciar todo", type="secondary", use_container_width=True):
+            resetear_todo()
+            st.rerun()
 
 
 # =========================================================
 # INICIO
 # =========================================================
 if pagina == "🏠 Inicio":
-    st.markdown("""
-    <div class="hero" style="min-height:0;padding:1.35rem 1.5rem;">
-      <div class="hero-badge">👋 Bienvenido a WilPOS Móvil</div>
-      <h1 style="font-size:2rem;">Tu inventario, más simple.</h1>
-      <p>Carga tus facturas, mantén el inventario actualizado y genera tu archivo para WilPOS cuando lo necesites.</p>
+    st.markdown(f"""
+    <div class="hero-grid">
+      <div class="hero-card">
+        <h1>¡Bienvenido! 👋</h1>
+        <div class="subtitle">Procesador Inteligente de Facturas WilPOS Móvil</div>
+        <p>Carga tus facturas desde tu teléfono o computadora.</p>
+        <p>El sistema actualizará tu inventario y dejará el archivo listo para WilPOS.</p>
+        <div class="hero-visual">
+          <div class="phone"></div>
+          <div class="sheet"></div>
+        </div>
+      </div>
+
+      <div class="stats-card">
+        <div class="stats-title">Estadísticas generales</div>
+        <div class="stats-grid">
+          <div class="stat blue">
+            <div class="label">Facturas procesadas</div>
+            <div class="value">{total_facturas}</div>
+            <div class="stat-icon">🧾</div>
+          </div>
+          <div class="stat purple">
+            <div class="label">Artículos únicos</div>
+            <div class="value">{total_productos}</div>
+            <div class="stat-icon">📦</div>
+          </div>
+          <div class="stat orange">
+            <div class="label">Unidades totales</div>
+            <div class="value">{total_unidades:,}</div>
+            <div class="stat-icon">🛒</div>
+          </div>
+          <div class="stat green">
+            <div class="label">Valor total compra</div>
+            <div class="value">RD$ {valor_compra:,.2f}</div>
+            <div class="stat-icon">💰</div>
+          </div>
+        </div>
+        <div class="stats-link">Ver detalle completo →</div>
+      </div>
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("<div style='height:.75rem'></div>", unsafe_allow_html=True)
+    st.markdown("""
+    <div class="main-card">
+      <div class="main-card-header">1. Cargar facturas</div>
+      <div class="upload-grid">
+        <div class="upload-zone">
+          <div class="fake-upload">
+            <div class="fake-upload-item">
+              <div class="fake-upload-icon">📁</div>
+              <div class="fake-upload-title">Seleccionar archivos</div>
+              <div class="fake-upload-sub">PDF, JPG, JPEG o PNG</div>
+            </div>
+            <div class="fake-upload-item active">
+              <div class="fake-upload-icon">📷</div>
+              <div class="fake-upload-title">Tomar foto</div>
+              <div class="fake-upload-sub">Usar cámara del teléfono</div>
+            </div>
+            <div class="fake-upload-item">
+              <div class="fake-upload-icon">☁️</div>
+              <div class="fake-upload-title" style="color:#64748b;">Arrastra y suelta</div>
+              <div class="fake-upload-sub">tus archivos aquí</div>
+            </div>
+          </div>
+          <div class="upload-foot">Formatos soportados: PDF, JPG, JPEG, PNG · Puedes seleccionar múltiples archivos</div>
+        </div>
+        <div class="margin-zone">
+          <div style="font-size:.78rem;font-weight:750;margin-bottom:.45rem;">Margen de ganancia (%)</div>
+          <div style="padding:.75rem;border:1px solid #dbe3ef;border-radius:9px;background:#fff;">
+            <div style="font-size:1rem;font-weight:750;">{st.session_state.margen_usado:.2f}%</div>
+          </div>
+          <div style="margin-top:.55rem;padding:.65rem;border-radius:8px;background:#f0fdf4;border:1px solid #bbf7d0;color:#15803d;font-size:.7rem;">
+            ⓘ El margen debe ser mayor al 15% para procesar el inventario.
+          </div>
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    c1, c2 = st.columns([1.25, 1])
-    with c1:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("### 🚀 Comenzar")
-        st.write("Sube tus facturas desde la computadora o utiliza la cámara del teléfono.")
-        st.info("Selecciona **Procesar facturas** en el menú lateral para comenzar.")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    with c2:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("### ✅ Sistema")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.metric("OCR", "Activo" if OCR_DISPONIBLE else "No disponible")
-        with col_b:
-            st.metric("PDF escaneado", "Activo" if PYMUPDF_DISPONIBLE else "No disponible")
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.info("Usa **Procesar facturas** en el menú lateral para cargar archivos o tomar una foto.")
 
     if st.session_state.detalle_facturas_procesadas:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("### 🕘 Actividad reciente")
-        recientes = list(st.session_state.detalle_facturas_procesadas.values())[-5:][::-1]
-        st.dataframe(pd.DataFrame(recientes), use_container_width=True, hide_index=True)
+        st.markdown('<div class="inventory-card">', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="inventory-head"><div class="inventory-title">📦 Inventario acumulado <span class="badge">{total_productos} artículos</span></div></div>',
+            unsafe_allow_html=True
+        )
+        df_inicio = construir_df_productos()
+        if not df_inicio.empty:
+            cols = [c for c in ["Código Barra","Nombre","Cantidad Empaque","Stock","Costo","Precio Venta","Categoría"] if c in df_inicio.columns]
+            st.dataframe(df_inicio[cols].head(8), use_container_width=True, hide_index=True)
         st.markdown('</div>', unsafe_allow_html=True)
-
 
 
 # =========================================================
