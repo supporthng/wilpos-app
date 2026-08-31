@@ -20,10 +20,10 @@ except ImportError:
     OCR_DISPONIBLE = False
 
 st.set_page_config(
-    page_title="WilPOS Móvil | Facturas e Inventario",
+page_title="WilPOS Móvil | Procesador de Facturas",
     page_icon="📦",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # =========================================================
@@ -1538,19 +1538,1507 @@ textarea{
 }
 
 
-/* ===== FILE UPLOADER: CARGAR ARCHIVO ===== */
-[data-testid="stMain"] [data-testid="stFileUploader"] button{
-    font-size:0 !important;
-    min-width:145px !important;
+
+
+/* ===== AJUSTE FINAL SIDEBAR + UPLOADER ===== */
+
+/* Sidebar un poco más ancho para que todas las opciones entren completas */
+[data-testid="stSidebar"]{
+    width:250px !important;
+    min-width:250px !important;
+    max-width:250px !important;
 }
-[data-testid="stMain"] [data-testid="stFileUploader"] button::after{
-    content:"⬆  Cargar Archivo" !important;
+
+[data-testid="stSidebar"] > div:first-child{
+    width:250px !important;
+    min-width:250px !important;
+    max-width:250px !important;
+    box-sizing:border-box !important;
+}
+
+/* Texto de navegación siempre completo, en una sola línea */
+[data-testid="stSidebar"] div[data-testid="stRadio"] label p{
+    white-space:nowrap !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    font-size:.84rem !important;
+}
+
+/* =========================================================
+   FILE UPLOADER
+   El texto personalizado SOLO afecta el botón del dropzone.
+   No afecta archivos cargados, X de eliminar ni botón +.
+   ========================================================= */
+[data-testid="stMain"]
+[data-testid="stFileUploader"]
+section button{
+    min-width:150px !important;
+}
+
+/* Oculta solo el texto interno del botón de selección */
+[data-testid="stMain"]
+[data-testid="stFileUploader"]
+section button p{
+    font-size:0 !important;
+}
+
+/* Sustituye visualmente Upload/Browse files por Cargar Facturas */
+[data-testid="stMain"]
+[data-testid="stFileUploader"]
+section button p::after{
+    content:"⬆  Cargar Facturas" !important;
+    display:inline-block !important;
     font-size:.88rem !important;
     font-weight:750 !important;
     color:#2563eb !important;
     white-space:nowrap !important;
 }
 
+/* Los botones de cada archivo cargado conservan su apariencia nativa */
+[data-testid="stMain"]
+[data-testid="stFileUploader"]
+button:not(section button){
+    font-size:inherit !important;
+    min-width:auto !important;
+}
+
+/* Pantallas pequeñas: sidebar vuelve al comportamiento responsivo de Streamlit */
+@media (max-width:900px){
+    [data-testid="stSidebar"],
+    [data-testid="stSidebar"] > div:first-child{
+        width:auto !important;
+        min-width:0 !important;
+        max-width:none !important;
+    }
+}
+
+
+/* ===== ANIMACIÓN SUAVE DEL ICONO PRINCIPAL ===== */
+.hero-visual{
+    isolation:isolate;
+}
+
+.hero-visual::before{
+    content:"";
+    position:absolute;
+    left:18px;
+    top:1px;
+    width:155px;
+    height:135px;
+    border-radius:50%;
+    background:radial-gradient(circle, rgba(37,99,235,.14) 0%, rgba(96,165,250,.07) 42%, rgba(255,255,255,0) 72%);
+    animation:wilposAura 3.8s ease-in-out infinite;
+    z-index:-1;
+}
+
+.hero-visual::after{
+    content:"✦";
+    position:absolute;
+    right:8px;
+    top:3px;
+    color:#93c5fd;
+    font-size:1rem;
+    opacity:.45;
+    animation:wilposSpark 2.6s ease-in-out infinite;
+}
+
+.hero-visual .phone{
+    animation:wilposFloat 3.4s ease-in-out infinite;
+    transform-origin:center;
+}
+
+.hero-visual .sheet{
+    animation:wilposSheet 4.1s ease-in-out infinite;
+    transform-origin:center;
+}
+
+@keyframes wilposFloat{
+    0%,100%{ transform:translateY(0) rotate(0deg); }
+    50%{ transform:translateY(-7px) rotate(-1deg); }
+}
+
+@keyframes wilposSheet{
+    0%,100%{ transform:translateY(0) rotate(2deg); }
+    50%{ transform:translateY(4px) rotate(3.5deg); }
+}
+
+@keyframes wilposAura{
+    0%,100%{ transform:scale(.92); opacity:.45; }
+    50%{ transform:scale(1.08); opacity:.9; }
+}
+
+@keyframes wilposSpark{
+    0%,100%{ transform:translateY(2px) scale(.8) rotate(0deg); opacity:.25; }
+    50%{ transform:translateY(-7px) scale(1.15) rotate(18deg); opacity:.85; }
+}
+
+@media (prefers-reduced-motion: reduce){
+    .hero-visual::before,
+    .hero-visual::after,
+    .hero-visual .phone,
+    .hero-visual .sheet{
+        animation:none !important;
+    }
+}
+
+/* Diálogo de vista previa */
+div[data-testid="stDialog"] img{
+    max-height:68vh !important;
+    object-fit:contain !important;
+}
+
+@media (max-width:900px){
+    .preview-file-card{
+        min-height:170px;
+    }
+}
+
+@media (max-width:640px){
+    .preview-file-card{
+        min-height:0;
+    }
+}
+
+
+/* ===== ARCHIVOS CARGADOS: COMPACTOS, SIN PREVIEW AUTOMÁTICO ===== */
+.uploaded-preview-title{
+    margin:.65rem 0 .45rem 0;
+    font-size:.92rem;
+    font-weight:850;
+    color:#0f172a;
+}
+
+.file-click-card-head{
+    min-height:76px;
+    display:flex;
+    align-items:center;
+    gap:.7rem;
+    padding:.7rem .75rem .4rem;
+    border:1px solid #dbe5f0;
+    border-bottom:none;
+    border-radius:11px 11px 0 0;
+    background:#fff;
+}
+
+.file-click-icon{
+    width:40px;
+    height:40px;
+    flex:0 0 40px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:9px;
+    background:#f1f5f9;
+    font-size:1.3rem;
+}
+
+.file-click-info{
+    min-width:0;
+    flex:1;
+}
+
+.file-click-name{
+    color:#0f172a;
+    font-size:.76rem;
+    font-weight:780;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+
+.file-click-meta{
+    margin-top:.15rem;
+    color:#64748b;
+    font-size:.66rem;
+}
+
+/* Botón unido visualmente a la tarjeta */
+[data-testid="stMain"] .file-click-card-head + div .stButton > button,
+[data-testid="stMain"] .file-click-card-head + div button{
+    border-radius:0 0 11px 11px !important;
+    border-top:none !important;
+    min-height:36px !important;
+    font-size:.78rem !important;
+    background:#f8fbff !important;
+    color:#2563eb !important;
+}
+
+[data-testid="stMain"] .file-click-card-head + div button *{
+    color:#2563eb !important;
+}
+
+/* Popup */
+div[data-testid="stDialog"] img{
+    max-height:68vh !important;
+    object-fit:contain !important;
+}
+
+
+/* ===== ARCHIVOS CARGADOS: OJO JUNTO A X ===== */
+
+/* Oculta las fichas nativas de archivos del uploader.
+   La selección sigue existiendo y se procesa normalmente. */
+[data-testid="stFileUploaderFile"]{
+    display:none !important;
+}
+
+.uploaded-preview-title{
+    margin:.62rem 0 .42rem;
+    font-size:.9rem;
+    font-weight:850;
+    color:#0f172a;
+}
+
+.file-action-card{
+    min-height:64px;
+    display:flex;
+    align-items:center;
+    gap:.6rem;
+    padding:.62rem .68rem;
+    border:1px solid #dbe5f0;
+    border-radius:11px 11px 0 0;
+    background:#fff;
+}
+
+.file-action-icon{
+    width:38px;
+    height:38px;
+    flex:0 0 38px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:8px;
+    background:#f1f5f9;
+    font-size:1.2rem;
+}
+
+.file-action-info{
+    min-width:0;
+    flex:1;
+}
+
+.file-action-name{
+    color:#0f172a;
+    font-size:.73rem;
+    font-weight:780;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+
+.file-action-meta{
+    margin-top:.12rem;
+    color:#64748b;
+    font-size:.64rem;
+}
+
+/* Los dos botones de acción forman el pie de la tarjeta */
+[data-testid="stMain"] .file-action-card + div{
+    gap:0 !important;
+}
+
+[data-testid="stMain"] .file-action-card + div button{
+    min-height:34px !important;
+    border-radius:0 !important;
+    border-color:#dbe5f0 !important;
+    background:#fff !important;
+    font-size:.9rem !important;
+    padding:.2rem !important;
+}
+
+[data-testid="stMain"] .file-action-card + div > div:first-child button{
+    border-radius:0 0 0 11px !important;
+    color:#2563eb !important;
+}
+
+[data-testid="stMain"] .file-action-card + div > div:last-child button{
+    border-radius:0 0 11px 0 !important;
+    color:#ef4444 !important;
+}
+
+[data-testid="stMain"] .file-action-card + div > div:first-child button:hover{
+    background:#eff6ff !important;
+    border-color:#93c5fd !important;
+}
+
+[data-testid="stMain"] .file-action-card + div > div:last-child button:hover{
+    background:#fff1f2 !important;
+    border-color:#fca5a5 !important;
+}
+
+/* En móvil: dos tarjetas por fila se adaptan por las columnas de Streamlit */
+@media (max-width:640px){
+    .file-action-card{
+        min-height:60px;
+    }
+    .file-action-name{
+        font-size:.69rem;
+    }
+}
+
+
+/* ===== ÚNICA SECCIÓN DE ARCHIVOS SELECCIONADOS ===== */
+
+.selected-files-title{
+    margin:.55rem 0 .42rem 0;
+    font-size:.88rem;
+    font-weight:850;
+    color:#0f172a;
+}
+
+.selected-file-card{
+    min-height:66px;
+    display:flex;
+    align-items:center;
+    gap:.62rem;
+    padding:.62rem .68rem;
+
+    border:1px solid #dbe5f0;
+    border-bottom:none;
+    border-radius:11px 11px 0 0;
+    background:#fff;
+}
+
+.selected-file-icon{
+    width:40px;
+    height:40px;
+    flex:0 0 40px;
+
+    display:flex;
+    align-items:center;
+    justify-content:center;
+
+    border-radius:8px;
+    background:#f1f5f9;
+    font-size:1.2rem;
+}
+
+.selected-file-info{
+    flex:1;
+    min-width:0;
+}
+
+.selected-file-name{
+    color:#0f172a;
+    font-size:.74rem;
+    font-weight:780;
+
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+
+.selected-file-meta{
+    margin-top:.12rem;
+    color:#64748b;
+    font-size:.64rem;
+}
+
+/* Ojo y X como pie compacto de la misma tarjeta */
+[data-testid="stMain"] .selected-file-card + div{
+    gap:0 !important;
+    margin-top:0 !important;
+}
+
+[data-testid="stMain"] .selected-file-card + div button{
+    min-height:34px !important;
+    border-radius:0 !important;
+    background:#fff !important;
+    border-color:#dbe5f0 !important;
+    padding:.15rem !important;
+}
+
+[data-testid="stMain"] .selected-file-card + div > div:first-child button{
+    border-radius:0 0 0 11px !important;
+    color:#2563eb !important;
+}
+
+[data-testid="stMain"] .selected-file-card + div > div:last-child button{
+    border-radius:0 0 11px 0 !important;
+    color:#ef4444 !important;
+}
+
+[data-testid="stMain"] .selected-file-card + div > div:first-child button:hover{
+    background:#eff6ff !important;
+    border-color:#93c5fd !important;
+}
+
+[data-testid="stMain"] .selected-file-card + div > div:last-child button:hover{
+    background:#fff1f2 !important;
+    border-color:#fca5a5 !important;
+}
+
+/* Ocultar las fichas nativas del uploader para no duplicar archivos */
+[data-testid="stFileUploaderFile"]{
+    display:none !important;
+}
+
+/* Popup de vista previa */
+div[data-testid="stDialog"] img{
+    max-height:68vh !important;
+    object-fit:contain !important;
+}
+
+
+/* ===== AJUSTES PRODUCTOS REPETIDOS / ARCHIVOS ===== */
+
+/* Las fichas nativas se ocultan porque usamos una única fila compacta propia. */
+[data-testid="stFileUploaderFile"]{
+    display:none !important;
+}
+
+/* Tarjetas nativas creadas con st.container */
+[data-testid="stVerticalBlockBorderWrapper"]{
+    border-radius:10px !important;
+}
+
+/* Tablas de repetidos */
+[data-testid="stDataFrame"]{
+    margin-top:.35rem;
+    margin-bottom:.45rem;
+}
+
+
+/* ===== DETALLE DE FACTURAS DUPLICADAS ===== */
+[data-testid="stExpander"]{
+    border-radius:10px !important;
+}
+
+[data-testid="stExpander"] summary{
+    font-weight:750 !important;
+}
+
+
+/* =========================================================
+   CTA PRINCIPAL — GENERAR ARCHIVO EXCEL
+   ========================================================= */
+.process-action-spacer{
+    height: 1.15rem;
+}
+
+.process-ready{
+    display:flex;
+    align-items:center;
+    gap:.75rem;
+    width:100%;
+    box-sizing:border-box;
+    padding:.85rem .95rem;
+    margin:.2rem 0 .7rem 0;
+    border:1px solid #cfe0ff;
+    border-radius:14px;
+    background:linear-gradient(135deg,#f7faff 0%,#eef5ff 100%);
+    color:#163a70;
+}
+
+.process-ready-icon{
+    width:38px;
+    height:38px;
+    min-width:38px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:11px;
+    background:#ffffff;
+    box-shadow:0 4px 14px rgba(37,99,235,.10);
+    font-size:1.15rem;
+}
+
+.process-ready b{
+    display:block;
+    font-size:.93rem;
+    line-height:1.15;
+    margin-bottom:.18rem;
+}
+
+.process-ready span{
+    display:block;
+    font-size:.72rem;
+    line-height:1.25;
+    color:#66758d;
+}
+
+/* El botón Streamlit inmediatamente posterior al bloque informativo */
+.process-ready + div[data-testid="stButton"] > button,
+.process-ready ~ div[data-testid="stButton"] > button{
+    min-height:64px !important;
+    border-radius:15px !important;
+    font-size:1.05rem !important;
+    font-weight:800 !important;
+    letter-spacing:.01em !important;
+    box-shadow:0 10px 24px rgba(37,99,235,.22) !important;
+    transition:transform .16s ease, box-shadow .16s ease !important;
+}
+
+.process-ready + div[data-testid="stButton"] > button:hover,
+.process-ready ~ div[data-testid="stButton"] > button:hover{
+    transform:translateY(-2px);
+    box-shadow:0 14px 28px rgba(37,99,235,.28) !important;
+}
+
+/* En móvil vuelve a flujo natural sin crear huecos */
+@media (max-width: 900px){
+    .process-action-spacer{
+        height:.35rem;
+    }
+    .process-ready + div[data-testid="stButton"] > button,
+    .process-ready ~ div[data-testid="stButton"] > button{
+        min-height:58px !important;
+    }
+}
+
+
+.process-waiting{
+    opacity:.82;
+}
+
+
+/* ===== TABLA COMPLETA PRODUCTOS CONSOLIDADOS ===== */
+.products-count-line{
+    margin:.35rem 0 .5rem 0;
+    font-size:.74rem;
+    color:#64748b;
+}
+
+[data-testid="stTable"]{
+    width:100% !important;
+    overflow-x:auto !important;
+}
+
+[data-testid="stTable"] table{
+    width:100% !important;
+    font-size:.75rem !important;
+}
+
+[data-testid="stTable"] th{
+    white-space:nowrap !important;
+}
+
+[data-testid="stTable"] td{
+    vertical-align:middle !important;
+}
+
+
+/* =========================================================
+   PRODUCTOS CONSOLIDADOS — TABLA COMPLETA SIN RECORTE
+   ========================================================= */
+.products-count-line{
+    width:100%;
+    box-sizing:border-box;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:1rem;
+    margin:.45rem 0 .55rem 0;
+    padding:.55rem .7rem;
+    border:1px solid #dbe5f0;
+    border-radius:8px;
+    background:#f8fbff;
+    color:#64748b;
+    font-size:.75rem;
+}
+
+.products-ok{
+    color:#15803d;
+    font-weight:800;
+    white-space:nowrap;
+}
+
+.wilpos-products-wrap{
+    width:100% !important;
+    height:auto !important;
+    max-height:none !important;
+    overflow-x:auto !important;
+    overflow-y:visible !important;
+    border:1px solid #dbe5f0;
+    border-radius:9px;
+    background:#fff;
+}
+
+.wilpos-products-table{
+    width:100% !important;
+    min-width:900px;
+    border-collapse:collapse;
+    table-layout:auto;
+    margin:0 !important;
+    font-size:.76rem;
+}
+
+.wilpos-products-table thead th{
+    position:static !important;
+    padding:.58rem .6rem;
+    text-align:left;
+    white-space:nowrap;
+    color:#64748b;
+    font-weight:650;
+    background:#f8fafc;
+    border-bottom:1px solid #dbe5f0;
+    border-right:1px solid #e5e7eb;
+}
+
+.wilpos-products-table tbody td{
+    padding:.55rem .6rem;
+    color:#0f172a;
+    background:#fff;
+    border-bottom:1px solid #e5e7eb;
+    border-right:1px solid #e5e7eb;
+    vertical-align:middle;
+    white-space:nowrap;
+}
+
+.wilpos-products-table tbody tr:last-child td{
+    border-bottom:none;
+}
+
+.wilpos-products-table th:last-child,
+.wilpos-products-table td:last-child{
+    border-right:none;
+}
+
+/* Muy importante: ningún padre del bloque puede cortar la tabla */
+[data-testid="stMain"] .section-card,
+[data-testid="stMain"] [data-testid="stMarkdownContainer"],
+[data-testid="stMain"] [data-testid="stVerticalBlock"]{
+    max-height:none;
+}
+
+@media (max-width:720px){
+    .products-count-line{
+        align-items:flex-start;
+        flex-direction:column;
+        gap:.25rem;
+    }
+
+    .wilpos-products-table{
+        font-size:.72rem;
+    }
+}
+
+
+.products-scroll-hint{
+    color:#2563eb;
+    font-weight:800;
+    white-space:nowrap;
+}
+
+
+/* =========================================================
+   PRODUCTOS CONSOLIDADOS — SCROLL VERTICAL REAL
+   ========================================================= */
+.products-count-line{
+    width:100%;
+    box-sizing:border-box;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:1rem;
+    margin:.45rem 0 .55rem 0;
+    padding:.55rem .72rem;
+    border:1px solid #dbe5f0;
+    border-radius:9px;
+    background:#f8fbff;
+    color:#64748b;
+    font-size:.76rem;
+}
+
+.products-scroll-hint{
+    color:#2563eb;
+    font-weight:800;
+    white-space:nowrap;
+}
+
+.wilpos-scroll-container{
+    width:100% !important;
+    height:430px !important;
+    max-height:430px !important;
+    overflow-y:scroll !important;
+    overflow-x:auto !important;
+    scrollbar-gutter:stable !important;
+    border:1px solid #dbe5f0 !important;
+    border-radius:10px !important;
+    background:#ffffff !important;
+    box-sizing:border-box !important;
+}
+
+.wilpos-scroll-table{
+    width:100% !important;
+    min-width:980px !important;
+    margin:0 !important;
+    border-collapse:collapse !important;
+    table-layout:auto !important;
+    font-size:.76rem !important;
+}
+
+.wilpos-scroll-table thead th{
+    position:sticky !important;
+    top:0 !important;
+    z-index:2 !important;
+    padding:.58rem .62rem !important;
+    background:#f8fafc !important;
+    color:#64748b !important;
+    text-align:left !important;
+    white-space:nowrap !important;
+    border-bottom:1px solid #dbe5f0 !important;
+    border-right:1px solid #e5e7eb !important;
+}
+
+.wilpos-scroll-table tbody td{
+    padding:.55rem .62rem !important;
+    color:#0f172a !important;
+    background:#fff !important;
+    white-space:nowrap !important;
+    vertical-align:middle !important;
+    border-bottom:1px solid #e5e7eb !important;
+    border-right:1px solid #e5e7eb !important;
+}
+
+.wilpos-scroll-table tbody tr:hover td{
+    background:#f8fbff !important;
+}
+
+.wilpos-scroll-table th:last-child,
+.wilpos-scroll-table td:last-child{
+    border-right:none !important;
+}
+
+/* Barra de scroll claramente visible */
+.wilpos-scroll-container::-webkit-scrollbar{
+    width:14px !important;
+    height:12px !important;
+}
+
+.wilpos-scroll-container::-webkit-scrollbar-track{
+    background:#eef2f7 !important;
+    border-left:1px solid #e2e8f0 !important;
+}
+
+.wilpos-scroll-container::-webkit-scrollbar-thumb{
+    background:#94a3b8 !important;
+    border-radius:999px !important;
+    border:3px solid #eef2f7 !important;
+}
+
+.wilpos-scroll-container::-webkit-scrollbar-thumb:hover{
+    background:#64748b !important;
+}
+
+/* Firefox */
+.wilpos-scroll-container{
+    scrollbar-width:auto !important;
+    scrollbar-color:#94a3b8 #eef2f7 !important;
+}
+
+@media (max-width:720px){
+    .products-count-line{
+        flex-direction:column;
+        align-items:flex-start;
+        gap:.25rem;
+    }
+
+    .wilpos-scroll-container{
+        height:380px !important;
+        max-height:380px !important;
+    }
+}
+
+
+/* ===== PRODUCTOS CONSOLIDADOS EN INICIO ===== */
+.home-products-note{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:1rem;
+    margin:.45rem 0 .5rem 0;
+    padding:.5rem .65rem;
+    border:1px solid #dbe5f0;
+    border-radius:8px;
+    background:#f8fbff;
+    color:#64748b;
+    font-size:.74rem;
+}
+
+.home-products-note span:last-child{
+    color:#2563eb;
+    font-weight:800;
+    white-space:nowrap;
+}
+
+@media (max-width:720px){
+    .home-products-note{
+        flex-direction:column;
+        align-items:flex-start;
+        gap:.2rem;
+    }
+}
+
+
+/* ===== RESUMEN DE FACTURAS VÁLIDAS / OMITIDAS ===== */
+.validation-summary{
+    padding:.78rem .85rem !important;
+}
+
+.validation-summary-body{
+    flex:1;
+    min-width:0;
+}
+
+.validation-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:1rem;
+    padding:.15rem 0;
+}
+
+.validation-label{
+    font-size:.78rem;
+    font-weight:750;
+    color:#475569;
+}
+
+.validation-value{
+    min-width:28px;
+    text-align:center;
+    padding:.12rem .48rem;
+    border-radius:999px;
+    font-size:.76rem;
+    font-weight:850;
+}
+
+.valid-row .validation-value{
+    background:#dcfce7;
+    color:#15803d;
+}
+
+.omitted-row .validation-value{
+    background:#fee2e2;
+    color:#b91c1c;
+}
+
+.validation-reason{
+    margin-top:.42rem;
+    padding-top:.42rem;
+    border-top:1px solid #dbe5f0;
+    color:#64748b;
+    font-size:.69rem;
+    line-height:1.35;
+}
+
+
+/* =========================================================
+   WILPOS MÓVIL — RESPONSIVE FINAL
+   ========================================================= */
+
+/* Teléfonos y tablets */
+@media (max-width: 900px){
+
+    /* Contenido principal ocupa todo el ancho */
+    .block-container{
+        width:100% !important;
+        max-width:100% !important;
+        padding-top:.55rem !important;
+        padding-left:.55rem !important;
+        padding-right:.55rem !important;
+        padding-bottom:1.25rem !important;
+    }
+
+    /* Hero y estadísticas uno debajo del otro */
+    .hero-grid{
+        grid-template-columns:1fr !important;
+        gap:.65rem !important;
+    }
+
+    .hero-card,
+    .stats-card,
+    .section-card,
+    .inventory-card{
+        width:100% !important;
+        max-width:100% !important;
+        box-sizing:border-box !important;
+        border-radius:12px !important;
+    }
+
+    .hero-card{
+        min-height:auto !important;
+        padding:.9rem !important;
+    }
+
+    .hero-card h1{
+        font-size:1.55rem !important;
+        line-height:1.15 !important;
+        margin-bottom:.65rem !important;
+    }
+
+    .hero-card .subtitle{
+        font-size:.9rem !important;
+    }
+
+    .hero-card p{
+        font-size:.78rem !important;
+        line-height:1.45 !important;
+    }
+
+    /* Ocultar ilustración grande para ganar espacio */
+    .hero-visual{
+        display:none !important;
+    }
+
+    /* Estadísticas 2 x 2 */
+    .stats-grid{
+        grid-template-columns:1fr 1fr !important;
+        gap:.45rem !important;
+    }
+
+    .stat{
+        min-height:78px !important;
+        padding:.65rem !important;
+    }
+
+    .stat .label{
+        font-size:.64rem !important;
+    }
+
+    .stat .value{
+        font-size:.95rem !important;
+    }
+
+    /* Zona de carga pasa a una sola columna */
+    .upload-grid{
+        grid-template-columns:1fr !important;
+        gap:.65rem !important;
+    }
+
+    .upload-zone{
+        border-right:none !important;
+        border-bottom:1px solid #e5e7eb !important;
+        padding:.75rem !important;
+    }
+
+    .margin-zone{
+        width:100% !important;
+        padding:.75rem !important;
+        box-sizing:border-box !important;
+    }
+
+    /* Las 3 tarjetas de carga se apilan */
+    .fake-upload{
+        grid-template-columns:1fr !important;
+        min-height:auto !important;
+    }
+
+    .fake-upload-item{
+        min-height:84px !important;
+        border-right:none !important;
+        border-bottom:1px solid #eef2f7 !important;
+        padding:.65rem !important;
+    }
+
+    .fake-upload-item:last-child{
+        border-bottom:none !important;
+    }
+
+    .fake-upload-icon{
+        width:40px !important;
+        height:40px !important;
+        font-size:1.15rem !important;
+    }
+
+    .fake-upload-title{
+        font-size:.82rem !important;
+    }
+
+    .fake-upload-sub{
+        font-size:.68rem !important;
+    }
+
+    /* Uploader y cámara ocupan todo el ancho */
+    div[data-testid="stFileUploader"],
+    div[data-testid="stCameraInput"]{
+        width:100% !important;
+        max-width:100% !important;
+    }
+
+    div[data-testid="stFileUploader"] section{
+        padding:.5rem !important;
+    }
+
+    /* Archivos seleccionados: una sola columna */
+    .file-strip{
+        grid-template-columns:1fr !important;
+    }
+
+    /* Controles numéricos y botones fáciles de tocar */
+    .stButton > button,
+    .stDownloadButton > button,
+    div[data-testid="stNumberInput"] button{
+        min-height:46px !important;
+        font-size:.82rem !important;
+    }
+
+    div[data-testid="stNumberInput"] input{
+        min-height:46px !important;
+        font-size:.86rem !important;
+    }
+
+    /* Resumen válidas / omitidas */
+    .process-ready,
+    .validation-summary{
+        width:100% !important;
+        box-sizing:border-box !important;
+        padding:.72rem !important;
+        gap:.55rem !important;
+        border-radius:12px !important;
+    }
+
+    .process-ready-icon{
+        width:36px !important;
+        height:36px !important;
+        min-width:36px !important;
+    }
+
+    .validation-label{
+        font-size:.75rem !important;
+    }
+
+    .validation-value{
+        font-size:.74rem !important;
+    }
+
+    .validation-reason{
+        font-size:.67rem !important;
+        line-height:1.4 !important;
+    }
+
+    /* Botón principal */
+    .process-ready + div[data-testid="stButton"] > button,
+    .process-ready ~ div[data-testid="stButton"] > button{
+        min-height:54px !important;
+        font-size:.92rem !important;
+        border-radius:12px !important;
+    }
+
+    /* Columnas de acciones pasan a ocupar ancho razonable */
+    [data-testid="stHorizontalBlock"]{
+        gap:.45rem !important;
+    }
+
+    /* Productos consolidados */
+    .inventory-title{
+        font-size:.82rem !important;
+        flex-wrap:wrap !important;
+    }
+
+    .badge{
+        font-size:.62rem !important;
+    }
+
+    .home-products-note,
+    .products-count-line{
+        flex-direction:column !important;
+        align-items:flex-start !important;
+        gap:.18rem !important;
+        font-size:.69rem !important;
+    }
+
+    /* Dataframes: scroll horizontal natural */
+    div[data-testid="stDataFrame"]{
+        width:100% !important;
+        max-width:100% !important;
+        overflow:auto !important;
+    }
+
+    div[data-testid="stDataFrame"] > div{
+        overflow:auto !important;
+    }
+
+    /* Expander más compacto */
+    [data-testid="stExpander"] summary{
+        font-size:.76rem !important;
+        padding:.55rem !important;
+    }
+
+    /* Diálogos ocupan casi toda la pantalla */
+    div[data-testid="stDialog"] > div{
+        width:96vw !important;
+        max-width:96vw !important;
+    }
+
+    /* Sidebar cuando se abre */
+    [data-testid="stSidebar"]{
+        width:82vw !important;
+        min-width:82vw !important;
+        max-width:320px !important;
+    }
+
+    [data-testid="stSidebar"] > div:first-child{
+        width:100% !important;
+        min-width:0 !important;
+        max-width:none !important;
+    }
+
+    [data-testid="stSidebar"] div[data-testid="stRadio"] label p{
+        font-size:.82rem !important;
+        white-space:nowrap !important;
+    }
+}
+
+/* Teléfonos pequeños */
+@media (max-width: 600px){
+
+    .block-container{
+        padding-left:.4rem !important;
+        padding-right:.4rem !important;
+    }
+
+    .stats-grid{
+        grid-template-columns:1fr 1fr !important;
+    }
+
+    .stat{
+        padding:.55rem !important;
+    }
+
+    /* Forzar cualquier set de columnas de acciones a apilarse */
+    [data-testid="stHorizontalBlock"]{
+        flex-wrap:wrap !important;
+    }
+
+    /* Evitar botones demasiado estrechos */
+    [data-testid="stHorizontalBlock"] > div{
+        min-width:0 !important;
+    }
+
+    /* Tablas y contenido nunca desbordan la pantalla */
+    table{
+        max-width:none !important;
+    }
+
+    .section-card,
+    .inventory-card{
+        padding:.65rem !important;
+    }
+}
+
+
+/* =========================================================
+   WILPOS MOBILE FIX — iPhone / Android
+   ========================================================= */
+@media (max-width: 900px){
+
+    /* El contenido principal nunca queda por debajo del sidebar */
+    [data-testid="stAppViewContainer"]{
+        overflow-x:hidden !important;
+    }
+
+    /* Sidebar abierto = panel completo, no franja angosta */
+    [data-testid="stSidebar"]{
+        width:100vw !important;
+        min-width:100vw !important;
+        max-width:100vw !important;
+        z-index:999999 !important;
+    }
+
+    [data-testid="stSidebar"] > div:first-child{
+        width:100vw !important;
+        min-width:100vw !important;
+        max-width:100vw !important;
+    }
+
+    /* Contenedor principal a ancho real del teléfono */
+    [data-testid="stMain"]{
+        width:100% !important;
+        max-width:100% !important;
+        overflow-x:hidden !important;
+    }
+
+    [data-testid="stMainBlockContainer"],
+    .block-container{
+        width:100% !important;
+        max-width:100% !important;
+        margin:0 !important;
+        padding:.5rem .45rem 1.25rem .45rem !important;
+        box-sizing:border-box !important;
+    }
+
+    /* Hero y estadísticas 100% ancho */
+    .hero-grid{
+        display:block !important;
+        width:100% !important;
+    }
+
+    .hero-card,
+    .stats-card{
+        width:100% !important;
+        max-width:100% !important;
+        margin:0 0 .65rem 0 !important;
+        box-sizing:border-box !important;
+    }
+
+    .hero-visual{
+        display:none !important;
+    }
+
+    .hero-card h1{
+        font-size:1.45rem !important;
+    }
+
+    .hero-card p{
+        font-size:.78rem !important;
+        line-height:1.4 !important;
+    }
+
+    .stats-grid{
+        grid-template-columns:1fr 1fr !important;
+        gap:.42rem !important;
+    }
+
+    /* =====================================================
+       CARGA DE FACTURAS: TODO APILADO
+       ===================================================== */
+
+    /* Cualquier bloque horizontal dentro del área de carga se vuelve columna */
+    [data-testid="stMain"] .stHorizontalBlock,
+    [data-testid="stMain"] [data-testid="stHorizontalBlock"]{
+        flex-direction:column !important;
+        flex-wrap:nowrap !important;
+        width:100% !important;
+        gap:.55rem !important;
+    }
+
+    [data-testid="stMain"] .stHorizontalBlock > div,
+    [data-testid="stMain"] [data-testid="stHorizontalBlock"] > div{
+        width:100% !important;
+        flex:1 1 100% !important;
+        max-width:100% !important;
+        min-width:0 !important;
+    }
+
+    /* Excepción: estadísticas internas siguen 2x2 porque son CSS grid */
+    .stats-grid{
+        display:grid !important;
+    }
+
+    /* Opciones visuales de carga */
+    .fake-upload{
+        display:block !important;
+        width:100% !important;
+        min-height:0 !important;
+    }
+
+    .fake-upload-item{
+        width:100% !important;
+        min-height:88px !important;
+        border-right:none !important;
+        border-bottom:1px solid #eef2f7 !important;
+        box-sizing:border-box !important;
+    }
+
+    .fake-upload-item:last-child{
+        border-bottom:none !important;
+    }
+
+    /* Zona de carga y margen uno debajo del otro */
+    .upload-grid{
+        display:block !important;
+        width:100% !important;
+    }
+
+    .upload-zone,
+    .margin-zone{
+        width:100% !important;
+        max-width:100% !important;
+        box-sizing:border-box !important;
+        padding:.7rem !important;
+        border-right:none !important;
+    }
+
+    .upload-zone{
+        border-bottom:1px solid #e5e7eb !important;
+    }
+
+    /* File uploader no puede desbordarse */
+    div[data-testid="stFileUploader"]{
+        width:100% !important;
+        max-width:100% !important;
+        box-sizing:border-box !important;
+    }
+
+    div[data-testid="stFileUploader"] section{
+        width:100% !important;
+        max-width:100% !important;
+        box-sizing:border-box !important;
+    }
+
+    /* Archivos seleccionados */
+    .file-strip{
+        grid-template-columns:1fr !important;
+        width:100% !important;
+    }
+
+    /* Número / margen */
+    div[data-testid="stNumberInput"]{
+        width:100% !important;
+        max-width:100% !important;
+    }
+
+    div[data-testid="stNumberInput"] input{
+        width:100% !important;
+        min-height:48px !important;
+        font-size:.95rem !important;
+    }
+
+    /* Resumen validación */
+    .process-ready,
+    .validation-summary{
+        width:100% !important;
+        max-width:100% !important;
+        box-sizing:border-box !important;
+    }
+
+    .validation-row{
+        width:100% !important;
+    }
+
+    /* CTA grande y a ancho completo */
+    .stButton > button,
+    .stDownloadButton > button{
+        width:100% !important;
+        min-height:50px !important;
+        font-size:.88rem !important;
+    }
+
+    /* Tablas: scroll horizontal */
+    div[data-testid="stDataFrame"]{
+        width:100% !important;
+        max-width:100% !important;
+        overflow-x:auto !important;
+    }
+
+    div[data-testid="stDataFrame"] > div{
+        overflow-x:auto !important;
+    }
+
+    /* Cards generales */
+    .section-card,
+    .inventory-card{
+        width:100% !important;
+        max-width:100% !important;
+        box-sizing:border-box !important;
+        padding:.65rem !important;
+        margin-left:0 !important;
+        margin-right:0 !important;
+    }
+}
+
+@media (max-width: 600px){
+    .stats-grid{
+        grid-template-columns:1fr 1fr !important;
+    }
+
+    .stat{
+        min-height:92px !important;
+        padding:.55rem !important;
+    }
+
+    .stat .label{
+        font-size:.66rem !important;
+        line-height:1.25 !important;
+    }
+
+    .stat .value{
+        font-size:1rem !important;
+    }
+
+    .upload-foot{
+        font-size:.62rem !important;
+        line-height:1.35 !important;
+    }
+}
+
+
+/* =========================================================
+   FIX DEFINITIVO SIDEBAR MÓVIL
+   ========================================================= */
+@media (max-width: 900px){
+
+    /* Estado cerrado: no debe quedar ninguna franja azul ocupando ancho */
+    [data-testid="stSidebar"][aria-expanded="false"]{
+        width:0 !important;
+        min-width:0 !important;
+        max-width:0 !important;
+        transform:translateX(-100%) !important;
+        overflow:hidden !important;
+        border:none !important;
+        box-shadow:none !important;
+    }
+
+    [data-testid="stSidebar"][aria-expanded="false"] > div:first-child{
+        width:0 !important;
+        min-width:0 !important;
+        max-width:0 !important;
+        overflow:hidden !important;
+    }
+
+    /* Estado abierto: panel completo por encima del contenido */
+    [data-testid="stSidebar"][aria-expanded="true"]{
+        position:fixed !important;
+        left:0 !important;
+        top:0 !important;
+        bottom:0 !important;
+        width:min(86vw, 340px) !important;
+        min-width:min(86vw, 340px) !important;
+        max-width:min(86vw, 340px) !important;
+        transform:translateX(0) !important;
+        z-index:1000000 !important;
+        box-shadow:8px 0 28px rgba(15,23,42,.22) !important;
+        overflow-y:auto !important;
+    }
+
+    [data-testid="stSidebar"][aria-expanded="true"] > div:first-child{
+        width:100% !important;
+        min-width:100% !important;
+        max-width:100% !important;
+    }
+
+    /* El contenido principal siempre ocupa el 100% cuando el menú está cerrado */
+    [data-testid="stAppViewContainer"] > .main,
+    [data-testid="stMain"]{
+        margin-left:0 !important;
+        padding-left:0 !important;
+        width:100% !important;
+        max-width:100% !important;
+    }
+
+    /* Botón nativo para abrir/cerrar menú siempre visible */
+    [data-testid="stSidebarCollapsedControl"],
+    button[kind="header"]{
+        z-index:1000002 !important;
+    }
+
+    /* Si Streamlit deja un spacer/resizable handle, eliminar su ancho */
+    [data-testid="stSidebar"] + div{
+        margin-left:0 !important;
+    }
+}
+
+
+.wilpos-brand-header{
+    display:flex;
+    align-items:center;
+    margin:0 0 14px 0;
+}
+.wilpos-brand-header img{
+    height:46px;
+    width:auto;
+    max-width:180px;
+    object-fit:contain;
+}
+@media (max-width:900px){
+    .wilpos-brand-header{margin-bottom:10px;}
+    .wilpos-brand-header img{
+        height:38px;
+        max-width:150px;
+    }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1567,11 +3055,24 @@ DEFAULTS = {
     "articulos_repetidos_notif": [],
     "errores_ocr": [],
     "modo_carga_ui": "archivos",
+    "archivos_ocultos_ui": set(),
+    "origen_productos_facturas": {},
 }
 
 for key, value in DEFAULTS.items():
     if key not in st.session_state:
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
+
+
+WILPOS_LOGO_B64 = "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"
+
+def render_wilpos_header_logo():
+    st.markdown(
+        f"""<div class="wilpos-brand-header">
+        <img src="data:image/png;base64,{WILPOS_LOGO_B64}" alt="WilPOS">
+        </div>""",
+        unsafe_allow_html=True,
+    )
 
 def round_to_nearest_5(val):
     return int(round(val / 5.0) * 5)
@@ -1861,22 +3362,92 @@ def extraer_datos_factura(uploaded_file):
     return firma, proveedor, num_factura, fecha, productos
 
 # =========================================================
-# HELPERS DE INVENTARIO / EXCEL
+# HELPERS DE CONSOLIDACIÓN / EXCEL
 # =========================================================
+def _codigo_producto_canonico(valor):
+    """
+    Normaliza códigos para evitar que el mismo producto termine duplicado
+    por espacios, guiones o ceros iniciales.
+    """
+    codigo = re.sub(r"[^A-Za-z0-9]", "", str(valor or "")).upper()
+
+    # Para códigos puramente numéricos, 041331027854 y 41331027854
+    # representan el mismo identificador para efectos de consolidación.
+    if codigo.isdigit():
+        codigo = codigo.lstrip("0") or "0"
+
+    return codigo
+
+
+def _nombre_producto_canonico(valor):
+    """Clave de respaldo para reconocer el mismo nombre de producto."""
+    nombre = _normalizar_ocr(str(valor or ""))
+    # Quitar espacios deja comparación estable sin afectar lo mostrado.
+    return re.sub(r"\s+", "", nombre)
+
+
 def construir_df_productos():
+    """
+    Construye SIEMPRE un consolidado final:
+    - un mismo código aparece una sola vez;
+    - si el código varía pero el nombre es exactamente el mismo normalizado,
+      también se consolida;
+    - stock y costo total se suman;
+    - el costo mostrado es promedio ponderado por unidades.
+    """
     factor_margen = 1 + (st.session_state.margen_usado / 100.0)
+
+    consolidados = {}
+    clave_nombre_a_codigo = {}
+
+    for codigo_original, data in st.session_state.inventario_acumulado.items():
+        codigo = _codigo_producto_canonico(codigo_original)
+        nombre_key = _nombre_producto_canonico(data.get("nombre", ""))
+
+        # Prioridad 1: mismo código canónico.
+        clave = codigo
+
+        # Prioridad 2: exactamente el mismo nombre normalizado.
+        if clave not in consolidados and nombre_key in clave_nombre_a_codigo:
+            clave = clave_nombre_a_codigo[nombre_key]
+
+        if clave in consolidados:
+            actual = consolidados[clave]
+            actual["stock"] += float(data.get("stock", 0))
+            actual["costo_total"] += float(data.get("costo_total", 0))
+
+            # Conservar la presentación/empaque más informativa.
+            if not actual.get("emp") and data.get("emp"):
+                actual["emp"] = data.get("emp")
+        else:
+            consolidados[clave] = {
+                "codigo_mostrar": str(codigo_original).strip(),
+                "nombre": data.get("nombre", ""),
+                "categoria": data.get("categoria", "General"),
+                "stock": float(data.get("stock", 0)),
+                "costo_total": float(data.get("costo_total", 0)),
+                "emp": data.get("emp", 1),
+                "itbis": data.get("itbis", 0.18),
+            }
+            if nombre_key:
+                clave_nombre_a_codigo[nombre_key] = clave
+
     filas = []
-    for codigo, data in st.session_state.inventario_acumulado.items():
-        costo_unitario = data["costo_total"] / data["stock"] if data["stock"] > 0 else 0
+
+    for _, data in consolidados.items():
+        stock = float(data["stock"])
+        costo_total = float(data["costo_total"])
+        costo_unitario = costo_total / stock if stock > 0 else 0
         precio_venta = round_to_nearest_5(costo_unitario * factor_margen)
+
         filas.append({
             "Nombre": data["nombre"],
-            "Código Barra": codigo,
+            "Código Barra": data["codigo_mostrar"],
             "Categoría": data["categoria"],
             "Tipo": "producto",
             "Precio Venta": precio_venta,
             "Costo": round(costo_unitario, 4),
-            "Stock": int(data["stock"]),
+            "Stock": int(round(stock)),
             "Stock Mínimo": 25,
             "ITBIS": data["itbis"],
             "Unidad Medida": "unidad",
@@ -1889,10 +3460,61 @@ def construir_df_productos():
             "Descuento Activo": "No",
             "Descuento Nota": None,
         })
-    return pd.DataFrame(filas)
+
+    df = pd.DataFrame(filas)
+
+    if not df.empty:
+        # Última barrera contra duplicados accidentales antes del Excel.
+        df["_codigo_key"] = df["Código Barra"].map(_codigo_producto_canonico)
+        df["_nombre_key"] = df["Nombre"].map(_nombre_producto_canonico)
+
+        # Si por alguna ruta excepcional entró una fila duplicada, reagrupar.
+        if df["_codigo_key"].duplicated().any() or df["_nombre_key"].duplicated().any():
+            registros = []
+
+            # Se usa nombre como fallback solo si el código no resolvió la unión.
+            grupos = {}
+            for _, row in df.iterrows():
+                key_codigo = row["_codigo_key"]
+                key_nombre = row["_nombre_key"]
+
+                key = ("c", key_codigo)
+                if key not in grupos:
+                    for existente_key, existente in grupos.items():
+                        if existente["_nombre_key"] == key_nombre and key_nombre:
+                            key = existente_key
+                            break
+
+                if key not in grupos:
+                    grupos[key] = row.to_dict()
+                else:
+                    g = grupos[key]
+                    stock_anterior = float(g["Stock"])
+                    stock_nuevo = float(row["Stock"])
+                    costo_total_anterior = float(g["Costo"]) * stock_anterior
+                    costo_total_nuevo = float(row["Costo"]) * stock_nuevo
+                    stock_total = stock_anterior + stock_nuevo
+
+                    g["Stock"] = int(round(stock_total))
+                    g["Costo"] = round(
+                        (costo_total_anterior + costo_total_nuevo) / stock_total
+                        if stock_total else 0,
+                        4,
+                    )
+                    g["Precio Venta"] = round_to_nearest_5(
+                        float(g["Costo"]) * factor_margen
+                    )
+
+            df = pd.DataFrame(grupos.values())
+
+        df = df.drop(columns=["_codigo_key", "_nombre_key"], errors="ignore")
+
+    return df.reset_index(drop=True)
 
 
 def generar_excel_wilpos(df_prod):
+    # El Excel siempre parte del consolidado final, sin duplicados.
+    df_prod = construir_df_productos()
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df_prod.to_excel(writer, index=False, sheet_name="Productos")
@@ -1924,23 +3546,64 @@ def generar_excel_wilpos(df_prod):
         }).to_excel(writer, index=False, sheet_name="Proveedores")
 
         if not df_prod.empty:
-            # Mantiene la estructura original de Producto-Proveedor.
-            df_pp = pd.DataFrame({
-                "Producto": [
-                    df_prod.loc[0, "Nombre"],
-                    df_prod.loc[min(1, len(df_prod)-1), "Nombre"],
-                ],
-                "Proveedor": [lista_provs[0], lista_provs[0]],
-                "Precio Costo": [
-                    df_prod.loc[0, "Costo"],
-                    df_prod.loc[min(1, len(df_prod)-1), "Costo"],
-                ],
-                "Principal": ["Sí", "Sí"],
-            })
-            df_pp.to_excel(writer, index=False, sheet_name="Producto-Proveedor")
+            # =====================================================
+            # PRODUCTO-PROVEEDOR COMPLETO
+            # =====================================================
+            # Antes solo se exportaban 2 filas. Ahora se exporta
+            # cada producto con cada proveedor real del lote.
+            filas_pp = []
+
+            for codigo, apariciones in st.session_state.origen_productos_facturas.items():
+                # Agrupar por proveedor para no duplicar la relación.
+                por_proveedor = {}
+
+                for item in apariciones:
+                    proveedor_item = item.get("proveedor", "Proveedor General") or "Proveedor General"
+                    unidades_item = float(item.get("unidades", 0))
+                    costo_item = float(item.get("costo_total", 0))
+
+                    if proveedor_item not in por_proveedor:
+                        por_proveedor[proveedor_item] = {
+                            "nombre": item.get("nombre", ""),
+                            "unidades": 0.0,
+                            "costo_total": 0.0,
+                        }
+
+                    por_proveedor[proveedor_item]["unidades"] += unidades_item
+                    por_proveedor[proveedor_item]["costo_total"] += costo_item
+
+                for proveedor_item, info_pp in por_proveedor.items():
+                    costo_unitario_pp = (
+                        info_pp["costo_total"] / info_pp["unidades"]
+                        if info_pp["unidades"] > 0 else 0
+                    )
+
+                    filas_pp.append({
+                        "Producto": info_pp["nombre"],
+                        "Proveedor": proveedor_item,
+                        "Precio Costo": round(costo_unitario_pp, 4),
+                        "Principal": "Sí",
+                    })
+
+            # Fallback: si por alguna razón no hay origen registrado,
+            # al menos incluir TODOS los productos con el primer proveedor.
+            if not filas_pp:
+                for _, row in df_prod.iterrows():
+                    filas_pp.append({
+                        "Producto": row["Nombre"],
+                        "Proveedor": lista_provs[0],
+                        "Precio Costo": row["Costo"],
+                        "Principal": "Sí",
+                    })
+
+            pd.DataFrame(filas_pp).to_excel(
+                writer,
+                index=False,
+                sheet_name="Producto-Proveedor"
+            )
 
         pd.DataFrame({
-            "Instrucciones para cargar tu inventario": [
+            "Instrucciones para importar en WilPOS": [
                 "Llena la hoja Productos con tus artículos.",
                 "Generado automáticamente mediante la aplicación web WilPOS.",
             ]
@@ -1951,7 +3614,7 @@ def generar_excel_wilpos(df_prod):
 
 def totales_dashboard():
     total_facturas = len(st.session_state.detalle_facturas_procesadas)
-    total_productos = len(st.session_state.inventario_acumulado)
+    total_productos = len(construir_df_productos())
     total_lineas = int(sum(
         info.get("cantidad_articulos", 0)
         for info in st.session_state.detalle_facturas_procesadas.values()
@@ -1975,13 +3638,15 @@ def resetear_todo():
     st.session_state.articulos_repetidos_notif = []
     st.session_state.errores_ocr = []
     st.session_state.uploader_key += 1
+    st.session_state.archivos_ocultos_ui = set()
+    st.session_state.origen_productos_facturas = {}
     st.session_state.camera_key += 1
 
 
 @st.dialog("Confirmar procesamiento")
 def modal_confirmacion(validas, duplicadas_count, margen):
-    st.markdown("### 🚀 Incorporar facturas al inventario")
-    st.caption("Esta acción acumulará stock y costos usando la misma lógica de la versión funcional.")
+    st.markdown("### 🚀 Consolidar facturas para WilPOS")
+    st.caption("Esta acción consolidará productos repetidos por código y preparará los datos para el Excel de WilPOS.")
 
     c1, c2 = st.columns(2)
     c1.metric("Facturas nuevas", len(validas))
@@ -1990,16 +3655,27 @@ def modal_confirmacion(validas, duplicadas_count, margen):
     if duplicadas_count:
         st.warning(
             f"⚠️ Se omitieron {duplicadas_count} factura(s) duplicada(s). "
-            "No se agregarán al inventario."
+            "No se incluirán en el consolidado."
         )
 
     b1, b2 = st.columns(2)
     with b1:
-        if st.button("✅ Confirmar y actualizar", type="primary", use_container_width=True):
+        if st.button("✅ Confirmar y consolidar", type="primary", use_container_width=True):
             st.session_state.margen_usado = margen
+
+            # =====================================================
+            # NUEVO LOTE / NUEVO EXCEL
+            # =====================================================
+            # Este sistema genera un archivo independiente a partir
+            # de las facturas cargadas AHORA. No conserva productos
+            # ni firmas de una generación anterior.
+            st.session_state.inventario_acumulado = {}
+            st.session_state.firmas_facturas_procesadas = set()
+            st.session_state.detalle_facturas_procesadas = {}
+            st.session_state.origen_productos_facturas = {}
             st.session_state.articulos_repetidos_notif = []
 
-            # Solo se recorren facturas válidas y únicas; los duplicados nunca llegan aquí.
+            # Solo se recorren facturas válidas y únicas del lote actual.
             for archivo, firma, proveedor, num_fac, fecha_fac, productos_en_archivo in validas:
                 st.session_state.firmas_facturas_procesadas.add(firma)
                 st.session_state.detalle_facturas_procesadas[firma] = {
@@ -2010,21 +3686,40 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                 }
 
                 for p in productos_en_archivo:
-                    codigo = str(p["codigo"]).replace("-", "").strip()
-                    cantidad_comprada_unidades = p["cant"] * p["emp"]
+                    codigo = re.sub(r"[^A-Za-z0-9]", "", str(p["codigo"])).upper()
+                    cantidad_comprada_unidades = float(p["cant"]) * float(p["emp"])
 
+                    # Guardar de qué factura provino cada producto.
+                    if codigo not in st.session_state.origen_productos_facturas:
+                        st.session_state.origen_productos_facturas[codigo] = []
+
+                    st.session_state.origen_productos_facturas[codigo].append({
+                        "codigo": codigo,
+                        "nombre": p["nombre"],
+                        "proveedor": proveedor,
+                        "factura": str(num_fac),
+                        "fecha": fecha_fac,
+                        "cantidad": float(p["cant"]),
+                        "empaque": int(p["emp"]),
+                        "unidades": float(cantidad_comprada_unidades),
+                        "costo_total": float(p["costo_total"]),
+                    })
+
+                    # MISMO CÓDIGO = MISMO PRODUCTO:
+                    # suma stock y suma costo aunque venga de otra factura.
                     if codigo in st.session_state.inventario_acumulado:
                         st.session_state.articulos_repetidos_notif.append(
-                            f'**{p["nombre"]}** ({codigo}) ya existía; stock y costo fueron acumulados.'
+                            f'**{p["nombre"]}** ({codigo}) apareció en otra factura; '
+                            f'se sumaron {int(cantidad_comprada_unidades)} unidades al consolidado.'
                         )
                         st.session_state.inventario_acumulado[codigo]["stock"] += cantidad_comprada_unidades
-                        st.session_state.inventario_acumulado[codigo]["costo_total"] += p["costo_total"]
+                        st.session_state.inventario_acumulado[codigo]["costo_total"] += float(p["costo_total"])
                     else:
                         st.session_state.inventario_acumulado[codigo] = {
                             "nombre": p["nombre"],
                             "categoria": p["cat"],
                             "stock": cantidad_comprada_unidades,
-                            "costo_total": p["costo_total"],
+                            "costo_total": float(p["costo_total"]),
                             "emp": p["emp"],
                             "itbis": p["itbis"],
                         }
@@ -2036,12 +3731,228 @@ def modal_confirmacion(validas, duplicadas_count, margen):
 
 
 
+
+@st.dialog("👁 Vista previa del archivo", width="large")
+def mostrar_vista_previa_archivo(nombre, tipo_mime, datos):
+    """Muestra imágenes y la primera página de PDFs sin alterar el archivo."""
+    nombre_lower = nombre.lower()
+
+    st.markdown(f"**{nombre}**")
+    st.caption(f"Tamaño: {len(datos) / 1024:.1f} KB")
+
+    if nombre_lower.endswith((".jpg", ".jpeg", ".png")):
+        try:
+            imagen = Image.open(io.BytesIO(datos))
+            imagen = ImageOps.exif_transpose(imagen)
+            st.image(imagen, use_container_width=True)
+        except Exception as exc:
+            st.error(f"No se pudo mostrar la imagen: {exc}")
+
+    elif nombre_lower.endswith(".pdf"):
+        if PYMUPDF_DISPONIBLE:
+            try:
+                doc = fitz.open(stream=datos, filetype="pdf")
+                if len(doc) > 0:
+                    pagina = doc[0]
+                    pix = pagina.get_pixmap(matrix=fitz.Matrix(1.35, 1.35), alpha=False)
+                    imagen = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    st.image(imagen, caption="Primera página", use_container_width=True)
+                doc.close()
+            except Exception as exc:
+                st.error(f"No se pudo generar la vista previa del PDF: {exc}")
+        else:
+            st.info("La vista previa de PDF requiere PyMuPDF.")
+
+    else:
+        st.info("Este tipo de archivo no tiene vista previa disponible.")
+
+    st.download_button(
+        "⬇️ Descargar archivo",
+        data=datos,
+        file_name=nombre,
+        mime=tipo_mime or "application/octet-stream",
+        use_container_width=True,
+        key=f"preview_download_{abs(hash(nombre))}",
+    )
+
+
+def detectar_productos_repetidos_en_facturas(archivos_validos):
+    """
+    Detecta el mismo código de producto presente en dos o más
+    facturas distintas del lote actual.
+    """
+    por_codigo = {}
+
+    for archivo, firma, proveedor, num_fac, fecha_fac, productos in archivos_validos:
+        factura_key = (str(proveedor), str(num_fac))
+
+        for p in productos:
+            codigo = re.sub(r"[^A-Za-z0-9]", "", str(p["codigo"])).upper()
+            if not codigo:
+                continue
+
+            if codigo not in por_codigo:
+                por_codigo[codigo] = {
+                    "nombre": p["nombre"],
+                    "apariciones": {}
+                }
+
+            # Una sola aparición por factura.
+            if factura_key not in por_codigo[codigo]["apariciones"]:
+                por_codigo[codigo]["apariciones"][factura_key] = {
+                    "proveedor": proveedor,
+                    "factura": str(num_fac),
+                    "fecha": fecha_fac,
+                    "cantidad": float(p["cant"]),
+                    "empaque": int(p["emp"]),
+                    "unidades": float(p["cant"]) * float(p["emp"]),
+                    "costo_total": float(p["costo_total"]),
+                }
+            else:
+                # Si el mismo código se repite dentro de una misma factura,
+                # consolidarlo antes de comparar contra otras facturas.
+                item = por_codigo[codigo]["apariciones"][factura_key]
+                item["cantidad"] += float(p["cant"])
+                item["unidades"] += float(p["cant"]) * float(p["emp"])
+                item["costo_total"] += float(p["costo_total"])
+
+    resumen = []
+    detalle = []
+
+    for codigo, info in por_codigo.items():
+        apariciones = list(info["apariciones"].values())
+
+        if len(apariciones) < 2:
+            continue
+
+        unidades_total = sum(x["unidades"] for x in apariciones)
+        costo_total = sum(x["costo_total"] for x in apariciones)
+        costo_promedio = costo_total / unidades_total if unidades_total else 0
+
+        resumen.append({
+            "Código": codigo,
+            "Producto": info["nombre"],
+            "Facturas": len(apariciones),
+            "Unidades acumuladas": int(unidades_total),
+            "Costo acumulado": round(costo_total, 2),
+            "Costo promedio": round(costo_promedio, 4),
+        })
+
+        for x in apariciones:
+            detalle.append({
+                "Código": codigo,
+                "Producto": info["nombre"],
+                "Proveedor": x["proveedor"],
+                "Factura": x["factura"],
+                "Fecha": x["fecha"],
+                "Cantidad": x["cantidad"],
+                "Empaque": x["empaque"],
+                "Unidades": int(x["unidades"]),
+                "Costo factura": round(x["costo_total"], 2),
+            })
+
+    return pd.DataFrame(resumen), pd.DataFrame(detalle)
+
+
+def construir_productos_repetidos_historicos():
+    """Productos repetidos ya incorporados al consolidado."""
+    resumen = []
+    detalle = []
+
+    for codigo, apariciones in st.session_state.origen_productos_facturas.items():
+        # El mismo producto debe estar en 2+ facturas diferentes.
+        facturas = {}
+        for item in apariciones:
+            key = (str(item.get("proveedor", "")), str(item.get("factura", "")))
+
+            if key not in facturas:
+                facturas[key] = dict(item)
+            else:
+                facturas[key]["unidades"] += float(item.get("unidades", 0))
+                facturas[key]["costo_total"] += float(item.get("costo_total", 0))
+
+        items = list(facturas.values())
+        if len(items) < 2:
+            continue
+
+        unidades_total = sum(float(x.get("unidades", 0)) for x in items)
+        costo_total = sum(float(x.get("costo_total", 0)) for x in items)
+        costo_promedio = costo_total / unidades_total if unidades_total else 0
+
+        resumen.append({
+            "Código": codigo,
+            "Producto": items[0].get("nombre", ""),
+            "Facturas": len(items),
+            "Unidades acumuladas": int(unidades_total),
+            "Costo acumulado": round(costo_total, 2),
+            "Costo promedio": round(costo_promedio, 4),
+        })
+
+        for x in items:
+            detalle.append({
+                "Código": codigo,
+                "Producto": x.get("nombre", ""),
+                "Proveedor": x.get("proveedor", ""),
+                "Factura": x.get("factura", ""),
+                "Fecha": x.get("fecha", ""),
+                "Cantidad": x.get("cantidad", 0),
+                "Empaque": x.get("empaque", 0),
+                "Unidades": int(x.get("unidades", 0)),
+                "Costo factura": round(float(x.get("costo_total", 0)), 2),
+            })
+
+    return pd.DataFrame(resumen), pd.DataFrame(detalle)
+
+
+
+@st.dialog("👁 Vista previa de productos consolidados", width="large")
+def mostrar_vista_previa_productos(df_productos):
+    if df_productos is None or df_productos.empty:
+        st.info("No hay productos consolidados para mostrar.")
+        return
+
+    columnas = [
+        "Código Barra",
+        "Nombre",
+        "Cantidad Empaque",
+        "Stock",
+        "Costo",
+        "Precio Venta",
+        "Categoría",
+    ]
+
+    df_preview = df_productos[columnas].copy()
+
+    st.caption(
+        f"{len(df_preview)} producto(s) consolidados · "
+        "Los productos repetidos entre facturas aparecen en una sola fila."
+    )
+
+    st.dataframe(
+        df_preview,
+        use_container_width=True,
+        hide_index=True,
+        height=650,
+        column_config={
+            "Código Barra": st.column_config.TextColumn("Código Barra", width="medium"),
+            "Nombre": st.column_config.TextColumn("Nombre", width="large"),
+            "Cantidad Empaque": st.column_config.NumberColumn("Cantidad Empaque", format="%d"),
+            "Stock": st.column_config.NumberColumn("Stock", format="%d"),
+            "Costo": st.column_config.NumberColumn("Costo", format="%.4f"),
+            "Precio Venta": st.column_config.NumberColumn("Precio Venta", format="%.2f"),
+            "Categoría": st.column_config.TextColumn("Categoría", width="medium"),
+        },
+    )
+
 def render_carga_facturas(titulo=True):
     """Carga y procesa facturas con un selector visual robusto basado en botones reales."""
 
     st.markdown(
         '<div class="load-title">1. Cargar facturas</div>',
         unsafe_allow_html=True,
+    )
+    st.caption(
+        "Cada procesamiento genera un Excel nuevo únicamente con las facturas cargadas en este lote."
     )
 
     carga_col, margen_col = st.columns([3.2, 1], gap="medium")
@@ -2060,7 +3971,7 @@ def render_carga_facturas(titulo=True):
                 unsafe_allow_html=True,
             )
             if st.button(
-                "Seleccionar archivos",
+                "Cargar Facturas",
                 use_container_width=True,
                 type="primary" if st.session_state.modo_carga_ui == "archivos" else "secondary",
                 key="modo_archivos_btn",
@@ -2183,6 +4094,90 @@ def render_carga_facturas(titulo=True):
                 unsafe_allow_html=True,
             )
 
+    # =========================================================
+    # ARCHIVOS SELECCIONADOS — vista compacta y funcional
+    # =========================================================
+    def _huella_archivo_ui(archivo):
+        try:
+            datos = archivo.getvalue()
+            return f"{archivo.name}|{len(datos)}"
+        except Exception:
+            return f"{archivo.name}|0"
+
+    uploaded_files = [
+        f for f in uploaded_files
+        if _huella_archivo_ui(f) not in st.session_state.archivos_ocultos_ui
+    ]
+
+    if uploaded_files:
+        # El uploader ya muestra "Selecciona tus facturas", no lo repetimos.
+        max_cols = 3
+
+        for fila_inicio in range(0, len(uploaded_files), max_cols):
+            grupo = uploaded_files[fila_inicio:fila_inicio + max_cols]
+            columnas_archivos = st.columns(len(grupo), gap="small")
+
+            for offset, archivo in enumerate(grupo):
+                indice = fila_inicio + offset
+
+                try:
+                    datos = archivo.getvalue()
+                except Exception:
+                    archivo.seek(0)
+                    datos = archivo.read()
+                    archivo.seek(0)
+
+                nombre = archivo.name
+                mime = getattr(archivo, "type", None)
+                extension = nombre.lower().rsplit(".", 1)[-1] if "." in nombre else ""
+
+                if extension in ("jpg", "jpeg", "png"):
+                    icono = "🖼️"
+                    tipo = "Imagen"
+                elif extension == "pdf":
+                    icono = "📄"
+                    tipo = "PDF"
+                else:
+                    icono = "📎"
+                    tipo = extension.upper() or "Archivo"
+
+                nombre_corto = nombre if len(nombre) <= 25 else nombre[:22] + "…"
+
+                with columnas_archivos[offset]:
+                    with st.container(border=True):
+                        info_col, ojo_col, x_col = st.columns(
+                            [6.6, 1.1, 1.1],
+                            gap="small",
+                            vertical_alignment="center",
+                        )
+
+                        with info_col:
+                            st.markdown(f"{icono} **{nombre_corto}**")
+                            st.caption(f"{len(datos)/1024:.1f} KB · {tipo}")
+
+                        with ojo_col:
+                            if st.button(
+                                "👁",
+                                key=f"preview_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+                                help=f"Vista previa de {nombre}",
+                                use_container_width=True,
+                            ):
+                                mostrar_vista_previa_archivo(nombre, mime, datos)
+
+                        with x_col:
+                            if st.button(
+                                "✕",
+                                key=f"remove_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+                                help=f"Quitar {nombre}",
+                                use_container_width=True,
+                            ):
+                                st.session_state.archivos_ocultos_ui.add(
+                                    _huella_archivo_ui(archivo)
+                                )
+                                st.rerun()
+
+        st.markdown("<div style='height:.2rem'></div>", unsafe_allow_html=True)
+
     archivos_validos = []
     archivos_duplicados = []
     archivos_invalidos = []
@@ -2212,12 +4207,8 @@ def render_carga_facturas(titulo=True):
                 if not productos:
                     archivos_invalidos.append(f.name)
 
-                elif firma in st.session_state.firmas_facturas_procesadas:
-                    archivos_duplicados.append(
-                        (f.name, proveedor, num_fac)
-                    )
-
                 elif firma in firmas_detectadas_en_lote:
+                    # Duplicado REAL dentro de los archivos cargados actualmente.
                     archivos_duplicados.append(
                         (f.name, proveedor, num_fac)
                     )
@@ -2229,55 +4220,90 @@ def render_carga_facturas(titulo=True):
                     )
 
     if uploaded_files:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown(f"### 2. Archivos cargados ({len(uploaded_files)})")
+        # -----------------------------------------------------
+        # PRODUCTOS REPETIDOS EN FACTURAS DIFERENTES DEL LOTE
+        # -----------------------------------------------------
+        df_rep_lote, df_rep_lote_detalle = detectar_productos_repetidos_en_facturas(
+            archivos_validos
+        )
 
-        for f, firma, proveedor, num_fac, fecha_fac, productos in archivos_validos:
-            st.markdown(f"""
-            <div class="file-card">
-              <div>
-                <div class="file-name">📄 {f.name}</div>
-                <div class="meta">{proveedor} · Factura {num_fac} · {fecha_fac} · {len(productos)} artículo(s)</div>
-              </div>
-              <div class="ok">✓ Reconocida</div>
-            </div>
-            """, unsafe_allow_html=True)
+        if not df_rep_lote.empty:
+            st.warning(
+                f"🔁 Se detectaron {len(df_rep_lote)} producto(s) presentes "
+                "en facturas diferentes. Al procesar se sumarán automáticamente."
+            )
 
-        for nombre, proveedor, num_fac in archivos_duplicados:
-            if num_fac:
-                detalle_dup = f"{proveedor} · Factura {num_fac}"
-            else:
-                detalle_dup = proveedor
+            st.dataframe(
+                df_rep_lote,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Costo acumulado": st.column_config.NumberColumn(format="RD$ %.2f"),
+                    "Costo promedio": st.column_config.NumberColumn(format="RD$ %.4f"),
+                },
+            )
 
-            st.markdown(f"""
-            <div class="file-card" style="border-color:#fecaca;background:#fff7f7;">
-              <div>
-                <div class="file-name">⚠️ {nombre}</div>
-                <div class="meta">{detalle_dup}</div>
-                <div class="meta" style="color:#b91c1c;font-weight:700;">
-                    Esta factura fue omitida y NO será agregada al inventario.
-                </div>
-              </div>
-              <div class="bad">Duplicada</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        for nombre in archivos_invalidos:
-            st.markdown(f"""
-            <div class="file-card">
-              <div>
-                <div class="file-name">📄 {nombre}</div>
-                <div class="meta">No pudo reconocerse automáticamente como una factura configurada.</div>
-              </div>
-              <div class="bad">No reconocida</div>
-            </div>
-            """, unsafe_allow_html=True)
+            with st.expander("Ver en cuáles facturas aparece cada producto"):
+                st.dataframe(
+                    df_rep_lote_detalle,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Costo factura": st.column_config.NumberColumn(format="RD$ %.2f"),
+                    },
+                )
 
         if archivos_duplicados:
             st.warning(
                 f"⚠️ Se detectaron {len(archivos_duplicados)} factura(s) duplicada(s). "
-                "Fueron omitidas automáticamente y no se agregarán al inventario."
+                "Fueron omitidas automáticamente y no se incluirán en el consolidado ni en el Excel final."
             )
+
+            filas_duplicadas = []
+
+            for nombre_archivo, proveedor_dup, num_fac_dup in archivos_duplicados:
+                if num_fac_dup:
+                    motivo_dup = "Mismo proveedor y número de factura repetidos en esta carga"
+                    proveedor_mostrar = proveedor_dup or "No identificado"
+                    factura_mostrar = num_fac_dup
+                else:
+                    # En el caso de archivo repetido dentro del mismo lote,
+                    # proveedor_dup contiene el texto explicativo.
+                    motivo_dup = proveedor_dup or "Archivo repetido en esta carga"
+                    proveedor_mostrar = "—"
+                    factura_mostrar = "—"
+
+                filas_duplicadas.append({
+                    "Archivo": nombre_archivo,
+                    "Proveedor": proveedor_mostrar,
+                    "Factura": factura_mostrar,
+                    "Estado": "Omitida",
+                    "Motivo": motivo_dup,
+                })
+
+            df_facturas_duplicadas = pd.DataFrame(filas_duplicadas)
+
+            with st.expander(
+                f"🔎 Ver detalle de facturas duplicadas ({len(df_facturas_duplicadas)})",
+                expanded=True,
+            ):
+                st.dataframe(
+                    df_facturas_duplicadas,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Archivo": st.column_config.TextColumn(width="medium"),
+                        "Proveedor": st.column_config.TextColumn(width="medium"),
+                        "Factura": st.column_config.TextColumn(width="small"),
+                        "Estado": st.column_config.TextColumn(width="small"),
+                        "Motivo": st.column_config.TextColumn(width="large"),
+                    },
+                )
+
+                st.caption(
+                    "Estas facturas fueron excluidas automáticamente y no aportan "
+                    "productos, unidades ni costos al consolidado."
+                )
 
         if st.session_state.errores_ocr:
             with st.expander("🔎 Diagnóstico OCR"):
@@ -2287,17 +4313,129 @@ def render_carga_facturas(titulo=True):
         if margen_porcentaje <= 15:
             st.error("El margen de ganancia debe ser mayor al 15% para procesar.")
 
-        if st.button(
-            "🚀 Procesar Facturas",
-            type="primary",
-            use_container_width=True,
-            disabled=(len(archivos_validos) == 0 or margen_porcentaje <= 15),
-        ):
-            modal_confirmacion(archivos_validos, len(archivos_duplicados), margen_porcentaje)
+        # El botón principal se muestra en la columna derecha,
+        # justo debajo del margen de ganancia.
+        with margen_col:
+            st.markdown('<div class="process-action-spacer"></div>', unsafe_allow_html=True)
+
+            # =====================================================
+            # RESUMEN DE VALIDACIÓN DEL LOTE
+            # =====================================================
+            total_validas = len(archivos_validos) if uploaded_files else 0
+            total_omitidas = (
+                len(archivos_duplicados) + len(archivos_invalidos)
+                if uploaded_files else 0
+            )
+
+            if uploaded_files:
+                motivos_omitidas = []
+                if archivos_duplicados:
+                    motivos_omitidas.append(
+                        f"{len(archivos_duplicados)} factura(s) duplicada(s)"
+                    )
+                if archivos_invalidos:
+                    motivos_omitidas.append(
+                        f"{len(archivos_invalidos)} factura(s) no reconocida(s)"
+                    )
+                texto_motivos = " · ".join(motivos_omitidas) if motivos_omitidas else "Ninguna"
+            else:
+                texto_motivos = "Carga facturas para iniciar la validación"
+
+            # IMPORTANTE:
+            # Se renderiza como un único bloque HTML, sin líneas en blanco
+            # entre etiquetas, para evitar que Markdown muestre el HTML
+            # como texto dentro de la tarjeta.
+            resumen_html = (
+                '<div class="process-ready validation-summary">'
+                '<div class="process-ready-icon">✨</div>'
+                '<div class="validation-summary-body">'
+                '<div class="validation-row valid-row">'
+                '<span class="validation-label">Facturas Válidas</span>'
+                f'<span class="validation-value">{total_validas}</span>'
+                '</div>'
+                '<div class="validation-row omitted-row">'
+                '<span class="validation-label">Facturas Omitidas</span>'
+                f'<span class="validation-value">{total_omitidas}</span>'
+                '</div>'
+                '<div class="validation-reason">'
+                f'<b>Motivo:</b> {texto_motivos}'
+                '</div>'
+                '</div>'
+                '</div>'
+            )
+            st.markdown(resumen_html, unsafe_allow_html=True)
+
+            if uploaded_files and total_omitidas > 0:
+                with st.expander(
+                    f"🔎 Ver por qué se omitieron ({total_omitidas})",
+                    expanded=False,
+                ):
+                    if archivos_duplicados:
+                        st.markdown("**Facturas duplicadas**")
+                        for nombre_archivo, proveedor_dup, num_fac_dup in archivos_duplicados:
+                            if num_fac_dup:
+                                st.write(
+                                    f"• {nombre_archivo} — {proveedor_dup} — "
+                                    f"Factura {num_fac_dup}: duplicada en esta carga."
+                                )
+                            else:
+                                st.write(
+                                    f"• {nombre_archivo}: archivo repetido en esta carga."
+                                )
+
+                    if archivos_invalidos:
+                        st.markdown("**Facturas no reconocidas**")
+                        for nombre_archivo in archivos_invalidos:
+                            st.write(
+                                f"• {nombre_archivo}: no se pudieron extraer productos válidos."
+                            )
+
+            if st.button(
+                "🚀  Generar Archivo Excel",
+                type="primary",
+                use_container_width=True,
+                disabled=(len(archivos_validos) == 0 or margen_porcentaje <= 15),
+                key="procesar_facturas_principal",
+            ):
+                modal_confirmacion(
+                    archivos_validos,
+                    len(archivos_duplicados),
+                    margen_porcentaje,
+                )
+
+            st.caption(
+                "Se omiten automáticamente las facturas duplicadas antes de consolidar."
+            )
 
         st.markdown('</div>', unsafe_allow_html=True)
 
     else:
+        # Mantener visible la acción principal desde el primer momento.
+        # Se habilitará automáticamente cuando existan facturas válidas
+        # y el margen sea mayor al 15%.
+        with margen_col:
+            st.markdown('<div class="process-action-spacer"></div>', unsafe_allow_html=True)
+            st.markdown(
+                """
+                <div class="process-ready process-waiting">
+                    <div class="process-ready-icon">📄</div>
+                    <div>
+                        <b>Generar Archivo Excel</b>
+                        <span>Carga tus facturas para habilitar el procesamiento</span>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.button(
+                "🚀  Generar Archivo Excel",
+                type="primary",
+                use_container_width=True,
+                disabled=True,
+                key="procesar_facturas_principal_inactivo",
+            )
+            st.caption("Se habilita automáticamente cuando haya facturas válidas.")
+
         st.markdown("""
         <div class="empty-state">
           <div class="big">🧾</div>
@@ -2330,8 +4468,8 @@ with st.sidebar:
         "Navegación",
         [
             "🏠 Inicio",
-            "🧾 Procesar facturas",
-            "📦 Inventario acumulado",
+            "🧾 Generar Archivo Excel",
+            "📦 Productos consolidados",
             "📋 Detalle de facturas",
             "📥 Exportar Excel",
         ],
@@ -2349,7 +4487,7 @@ with st.sidebar:
       <div class="row"><span>Productos únicos</span><span class="num">{total_productos}</span></div>
       <div class="row"><span>Líneas procesadas</span><span class="num">{total_lineas}</span></div>
       <div class="row"><span>Unidades totales</span><span class="num">{total_unidades:,}</span></div>
-      <div class="row"><span>Valor compra</span><span class="num">RD$ {valor_compra:,.2f}</span></div>
+      <div class="row"><span>Total procesado</span><span class="num">RD$ {valor_compra:,.2f}</span></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -2363,13 +4501,14 @@ with st.sidebar:
 # INICIO
 # =========================================================
 if pagina == "🏠 Inicio":
+    render_wilpos_header_logo()
     st.markdown(f"""
     <div class="hero-grid">
       <div class="hero-card">
         <h1>¡Bienvenido! 👋</h1>
-        <div class="subtitle">Procesador Inteligente de Facturas WilPOS Móvil</div>
+        <div class="subtitle">Procesador de Facturas para WilPOS</div>
         <p>Carga tus facturas desde tu teléfono o computadora.</p>
-        <p>El sistema actualizará tu inventario y dejará el archivo listo para WilPOS.</p>
+        <p>El sistema consolidará los productos y generará el Excel listo para importar en WilPOS.</p>
         <div class="hero-visual">
           <div class="phone"></div>
           <div class="sheet"></div>
@@ -2395,7 +4534,7 @@ if pagina == "🏠 Inicio":
             <div class="stat-icon">🛒</div>
           </div>
           <div class="stat green">
-            <div class="label">Valor total compra</div>
+            <div class="label">Total procesado</div>
             <div class="value">RD$ {valor_compra:,.2f}</div>
             <div class="stat-icon">💰</div>
           </div>
@@ -2412,22 +4551,33 @@ if pagina == "🏠 Inicio":
     if st.session_state.detalle_facturas_procesadas:
         st.markdown('<div class="inventory-card">', unsafe_allow_html=True)
 
-        inv_c1, inv_c2 = st.columns([4, 1])
+        df_inicio = construir_df_productos()
+
+        inv_c1, inv_preview, inv_download = st.columns([3.2, 1, 1.25])
+
         with inv_c1:
             st.markdown(
-                f'<div class="inventory-title">📦 Inventario acumulado <span class="badge">{total_productos} productos únicos</span></div>',
+                f'<div class="inventory-title">📦 Productos consolidados '
+                f'<span class="badge">{len(df_inicio)} productos únicos</span></div>',
                 unsafe_allow_html=True
             )
 
-        df_inicio = construir_df_productos()
+        with inv_preview:
+            if not df_inicio.empty:
+                if st.button(
+                    "👁 Vista previa",
+                    use_container_width=True,
+                    key="preview_productos_inicio",
+                ):
+                    mostrar_vista_previa_productos(df_inicio)
 
-        with inv_c2:
+        with inv_download:
             if not df_inicio.empty:
                 excel_inicio = generar_excel_wilpos(df_inicio)
                 st.download_button(
                     "📥 Descargar Excel",
                     data=excel_inicio,
-                    file_name="Inventario_WilPOS_Acumulado.xlsx",
+                    file_name="Productos_WilPOS_Consolidados.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                     type="primary",
@@ -2436,34 +4586,114 @@ if pagina == "🏠 Inicio":
 
         if not df_inicio.empty:
             cols = [
-                c for c in
-                ["Código Barra", "Nombre", "Cantidad Empaque", "Stock", "Costo", "Precio Venta", "Categoría"]
+                c for c in [
+                    "Código Barra",
+                    "Nombre",
+                    "Cantidad Empaque",
+                    "Stock",
+                    "Costo",
+                    "Precio Venta",
+                    "Categoría",
+                ]
                 if c in df_inicio.columns
             ]
+
+            st.markdown(
+                f"""
+                <div class="home-products-note">
+                    <span><b>{len(df_inicio)}</b> productos consolidados</span>
+                    <span>↕ Desplázate para ver todos</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            # IMPORTANTE: ya no se usa .head(8).
+            # Todas las filas están dentro del dataframe y el scroll
+            # vertical aparece al superar la altura configurada.
             st.dataframe(
-                df_inicio[cols].head(8),
+                df_inicio[cols],
                 use_container_width=True,
                 hide_index=True,
+                height=500,
+                column_config={
+                    "Código Barra": st.column_config.TextColumn(
+                        "Código Barra", width="medium"
+                    ),
+                    "Nombre": st.column_config.TextColumn(
+                        "Nombre", width="large"
+                    ),
+                    "Cantidad Empaque": st.column_config.NumberColumn(
+                        "Cantidad Empaque", format="%d"
+                    ),
+                    "Stock": st.column_config.NumberColumn(
+                        "Stock", format="%d"
+                    ),
+                    "Costo": st.column_config.NumberColumn(
+                        "Costo", format="%.4f"
+                    ),
+                    "Precio Venta": st.column_config.NumberColumn(
+                        "Precio Venta", format="%.2f"
+                    ),
+                    "Categoría": st.column_config.TextColumn(
+                        "Categoría", width="medium"
+                    ),
+                },
             )
 
         st.markdown('</div>', unsafe_allow_html=True)
 
 
 # =========================================================
-# PROCESAR FACTURAS
+# GENERAR ARCHIVO EXCEL
 # =========================================================
-elif pagina == "🧾 Procesar facturas":
+elif pagina == "🧾 Generar Archivo Excel":
     render_carga_facturas(titulo=True)
 
 
 # =========================================================
-# INVENTARIO
+# PRODUCTOS CONSOLIDADOS
 # =========================================================
-elif pagina == "📦 Inventario acumulado":
+elif pagina == "📦 Productos consolidados":
     df_productos = construir_df_productos()
+    df_repetidos_hist, df_repetidos_hist_detalle = construir_productos_repetidos_historicos()
+
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown("### 📦 Inventario acumulado")
-    st.caption("Los productos repetidos entre facturas se consolidan en una sola fila. Las líneas procesadas pueden ser mayores que los productos únicos.")
+    st.markdown("### 📦 Productos consolidados")
+    st.caption(
+        "Los productos repetidos entre facturas se consolidan por código en una sola fila. "
+        "Por eso el número de productos consolidados puede ser menor que el número total de líneas leídas."
+    )
+    st.info(
+        "Vista previa del consolidado que se exportará al archivo Excel para importarlo en WilPOS."
+    )
+
+    if not df_repetidos_hist.empty:
+        st.markdown("#### 🔁 Productos repetidos entre facturas")
+        st.success(
+            "Estos productos ya fueron consolidados automáticamente: "
+            "se sumaron sus unidades y sus costos."
+        )
+
+        st.dataframe(
+            df_repetidos_hist,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Costo acumulado": st.column_config.NumberColumn(format="RD$ %.2f"),
+                "Costo promedio": st.column_config.NumberColumn(format="RD$ %.4f"),
+            },
+        )
+
+        with st.expander("📄 Ver detalle por factura"):
+            st.dataframe(
+                df_repetidos_hist_detalle,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Costo factura": st.column_config.NumberColumn(format="RD$ %.2f"),
+                },
+            )
 
     if st.session_state.articulos_repetidos_notif:
         with st.expander("🔄 Artículos acumulados desde varias facturas"):
@@ -2471,34 +4701,82 @@ elif pagina == "📦 Inventario acumulado":
                 st.info(notif)
 
     if df_productos.empty:
-        st.info("Todavía no hay productos en el inventario.")
+        st.info("Todavía no hay productos consolidados.")
     else:
-        top_inv1, top_inv2 = st.columns([4, 1])
-        with top_inv2:
+        top_inv1, top_inv_preview, top_inv_download = st.columns([3.2, 1, 1.25])
+
+        with top_inv_preview:
+            if st.button(
+                "👁 Vista previa",
+                use_container_width=True,
+                key="preview_productos_consolidados",
+            ):
+                mostrar_vista_previa_productos(df_productos)
+
+        with top_inv_download:
             excel_inventario = generar_excel_wilpos(df_productos)
             st.download_button(
                 "📥 Descargar Excel",
                 data=excel_inventario,
-                file_name="Inventario_WilPOS_Acumulado.xlsx",
+                file_name="Productos_WilPOS_Consolidados.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 type="primary",
                 key="download_excel_inventario",
             )
 
-        st.dataframe(
-            df_productos,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Precio Venta": st.column_config.NumberColumn(format="RD$ %.2f"),
-                "Costo": st.column_config.NumberColumn(format="RD$ %.4f"),
-                "ITBIS": st.column_config.NumberColumn(format="%.2f"),
-            },
+        # =====================================================
+        # PRODUCTOS CONSOLIDADOS — SCROLL VERTICAL REAL
+        # =====================================================
+        columnas_resumen = [
+            "Código Barra",
+            "Nombre",
+            "Cantidad Empaque",
+            "Stock",
+            "Costo",
+            "Precio Venta",
+            "Categoría",
+        ]
+
+        df_productos_vista = df_productos[columnas_resumen].copy()
+
+        # Formato únicamente visual.
+        df_productos_vista["Costo"] = df_productos_vista["Costo"].map(
+            lambda x: f"{float(x):,.4f}"
         )
+        df_productos_vista["Precio Venta"] = df_productos_vista["Precio Venta"].map(
+            lambda x: f"{float(x):,.2f}"
+        )
+
+        st.markdown(
+            f"""
+            <div class="products-count-line">
+                <span><b>{len(df_productos_vista)}</b> productos consolidados</span>
+                <span class="products-scroll-hint">↕ Desplázate para ver todos</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        tabla_html = df_productos_vista.to_html(
+            index=False,
+            escape=True,
+            classes="wilpos-scroll-table",
+            border=0,
+        )
+
+        st.markdown(
+            f"""
+            <div class="wilpos-scroll-container">
+                {tabla_html}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
         c1, c2, c3 = st.columns(3)
-        c1.metric("Productos únicos", len(df_productos))
-        c2.metric("Stock total", int(df_productos["Stock"].sum()))
+        c1.metric("Productos consolidados", len(df_productos))
+        c2.metric("Unidades consolidadas", int(df_productos["Stock"].sum()))
         c3.metric("Margen aplicado", f"{st.session_state.margen_usado:g}%")
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -2530,8 +4808,12 @@ elif pagina == "📋 Detalle de facturas":
 elif pagina == "📥 Exportar Excel":
     df_productos = construir_df_productos()
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown("### 📥 Exportar inventario para WilPOS")
-    st.caption("Genera el mismo archivo Excel consolidado de la versión funcional.")
+    st.markdown("### 📥 Generar Excel para WilPOS")
+    st.caption("Genera el archivo Excel consolidado y listo para importar en WilPOS.")
+    st.info(
+        "Los productos con el mismo código, aunque aparezcan en facturas diferentes, "
+        "se exportan en una sola fila con sus unidades y costos consolidados."
+    )
 
     if df_productos.empty:
         st.info("Procesa al menos una factura antes de exportar.")
@@ -2547,9 +4829,9 @@ elif pagina == "📥 Exportar Excel":
             """, unsafe_allow_html=True)
         with c2:
             st.download_button(
-                "📥 Descargar Inventario_WilPOS_Acumulado.xlsx",
+                "📥 Descargar Productos_WilPOS_Consolidados.xlsx",
                 data=excel_data,
-                file_name="Inventario_WilPOS_Acumulado.xlsx",
+                file_name="Productos_WilPOS_Consolidados.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 type="primary",
