@@ -1,5 +1,6 @@
 import io
 import re
+import html as html_lib
 import pandas as pd
 import streamlit as st
 import pdfplumber
@@ -3371,6 +3372,192 @@ div[data-testid="stDialog"] img{
     }
 }
 
+
+/* =========================================================
+   DETALLE DE FACTURAS OMITIDAS — DESKTOP + MÓVIL
+   ========================================================= */
+.duplicate-details-box{
+    width:100%;
+    margin:.55rem 0 .7rem 0;
+    border:1px solid #dbe5f0;
+    border-radius:11px;
+    background:#ffffff;
+    overflow:hidden;
+    box-sizing:border-box;
+}
+
+.duplicate-details-box > summary{
+    list-style:none;
+    cursor:pointer;
+    padding:.72rem .8rem;
+    color:#1e40af;
+    background:#f8fbff;
+    font-size:.76rem;
+    font-weight:800;
+    line-height:1.3;
+    user-select:none;
+}
+
+.duplicate-details-box > summary::-webkit-details-marker{
+    display:none;
+}
+
+.duplicate-details-box > summary::after{
+    content:"＋";
+    float:right;
+    color:#2563eb;
+    font-size:1rem;
+    font-weight:800;
+}
+
+.duplicate-details-box[open] > summary::after{
+    content:"−";
+}
+
+.duplicate-details-body{
+    padding:.55rem;
+    background:#fff;
+}
+
+.duplicate-mobile-card{
+    width:100%;
+    box-sizing:border-box;
+    margin:0 0 .55rem 0;
+    padding:.65rem;
+    border:1px solid #fecaca;
+    border-radius:9px;
+    background:#fffafa;
+}
+
+.invalid-mobile-card{
+    border-color:#fed7aa;
+    background:#fffbeb;
+}
+
+.duplicate-mobile-head{
+    display:flex;
+    justify-content:flex-end;
+    margin-bottom:.35rem;
+}
+
+.duplicate-mobile-status{
+    display:inline-flex;
+    align-items:center;
+    padding:.16rem .42rem;
+    border-radius:999px;
+    background:#fee2e2;
+    color:#b91c1c;
+    font-size:.62rem;
+    font-weight:850;
+    letter-spacing:.03em;
+}
+
+.invalid-status{
+    background:#ffedd5;
+    color:#c2410c;
+}
+
+.duplicate-mobile-row{
+    display:grid;
+    grid-template-columns:78px minmax(0,1fr);
+    gap:.5rem;
+    align-items:start;
+    padding:.22rem 0;
+    border-bottom:1px solid rgba(148,163,184,.16);
+    font-size:.69rem;
+    line-height:1.35;
+}
+
+.duplicate-mobile-row:last-child{
+    border-bottom:0;
+}
+
+.duplicate-mobile-row b{
+    color:#475569;
+    font-weight:800;
+}
+
+.duplicate-mobile-row span{
+    min-width:0;
+    color:#0f172a;
+    overflow-wrap:anywhere;
+    word-break:break-word;
+}
+
+.duplicate-mobile-reason{
+    padding-top:.35rem;
+}
+
+.duplicate-mobile-note{
+    margin-top:.2rem;
+    padding:.55rem .6rem;
+    border-radius:8px;
+    background:#f1f5f9;
+    color:#64748b;
+    font-size:.65rem;
+    line-height:1.4;
+}
+
+/* En móvil: área táctil mayor y filas verticales cuando falta ancho */
+@media (max-width:900px){
+    .duplicate-details-box{
+        margin:.55rem 0 .8rem 0 !important;
+        border-radius:10px !important;
+    }
+
+    .duplicate-details-box > summary{
+        min-height:46px !important;
+        display:flex !important;
+        align-items:center !important;
+        justify-content:space-between !important;
+        gap:.5rem !important;
+        padding:.72rem .75rem !important;
+        font-size:.76rem !important;
+        white-space:normal !important;
+    }
+
+    .duplicate-details-box > summary::after{
+        float:none !important;
+        flex:0 0 auto !important;
+    }
+
+    .duplicate-details-body{
+        padding:.5rem !important;
+    }
+
+    .duplicate-mobile-card{
+        padding:.62rem !important;
+        margin-bottom:.5rem !important;
+    }
+
+    .duplicate-mobile-row{
+        grid-template-columns:72px minmax(0,1fr) !important;
+        gap:.4rem !important;
+        font-size:.7rem !important;
+    }
+
+    .duplicate-mobile-row span{
+        overflow-wrap:anywhere !important;
+        word-break:break-word !important;
+    }
+}
+
+@media (max-width:520px){
+    .duplicate-mobile-row{
+        grid-template-columns:1fr !important;
+        gap:.08rem !important;
+    }
+
+    .duplicate-mobile-row b{
+        font-size:.64rem !important;
+        color:#64748b !important;
+    }
+
+    .duplicate-mobile-row span{
+        font-size:.72rem !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -4699,29 +4886,55 @@ def render_carga_facturas(titulo=True):
             st.markdown(resumen_html, unsafe_allow_html=True)
 
             if uploaded_files and total_omitidas > 0:
-                with st.expander(
-                    f"🔎 Ver por qué se omitieron ({total_omitidas})",
-                    expanded=False,
-                ):
-                    if archivos_duplicados:
-                        st.markdown("**Facturas duplicadas**")
-                        for nombre_archivo, proveedor_dup, num_fac_dup in archivos_duplicados:
-                            if num_fac_dup:
-                                st.write(
-                                    f"• {nombre_archivo} — {proveedor_dup} — "
-                                    f"Factura {num_fac_dup}: duplicada en esta carga."
-                                )
-                            else:
-                                st.write(
-                                    f"• {nombre_archivo}: archivo repetido en esta carga."
-                                )
+                detalle_items = []
 
-                    if archivos_invalidos:
-                        st.markdown("**Facturas no reconocidas**")
-                        for nombre_archivo in archivos_invalidos:
-                            st.write(
-                                f"• {nombre_archivo}: no se pudieron extraer productos válidos."
-                            )
+                for nombre_archivo, proveedor_dup, num_fac_dup in archivos_duplicados:
+                    if num_fac_dup:
+                        proveedor_mostrar = proveedor_dup or "No identificado"
+                        factura_mostrar = num_fac_dup
+                        motivo_mostrar = "Mismo proveedor y número de factura repetidos en esta carga"
+                    else:
+                        proveedor_mostrar = "—"
+                        factura_mostrar = "—"
+                        motivo_mostrar = proveedor_dup or "Archivo repetido en esta carga"
+
+                    detalle_items.append(
+                        '<div class="duplicate-mobile-card">'
+                        '<div class="duplicate-mobile-head">'
+                        '<span class="duplicate-mobile-status">OMITIDA</span>'
+                        '</div>'
+                        f'<div class="duplicate-mobile-row"><b>Archivo</b><span>{html_lib.escape(str(nombre_archivo))}</span></div>'
+                        f'<div class="duplicate-mobile-row"><b>Proveedor</b><span>{html_lib.escape(str(proveedor_mostrar))}</span></div>'
+                        f'<div class="duplicate-mobile-row"><b>Factura</b><span>{html_lib.escape(str(factura_mostrar))}</span></div>'
+                        f'<div class="duplicate-mobile-row duplicate-mobile-reason"><b>Motivo</b><span>{html_lib.escape(str(motivo_mostrar))}</span></div>'
+                        '</div>'
+                    )
+
+                for nombre_archivo in archivos_invalidos:
+                    detalle_items.append(
+                        '<div class="duplicate-mobile-card invalid-mobile-card">'
+                        '<div class="duplicate-mobile-head">'
+                        '<span class="duplicate-mobile-status invalid-status">NO RECONOCIDA</span>'
+                        '</div>'
+                        f'<div class="duplicate-mobile-row"><b>Archivo</b><span>{html_lib.escape(str(nombre_archivo))}</span></div>'
+                        '<div class="duplicate-mobile-row"><b>Proveedor</b><span>—</span></div>'
+                        '<div class="duplicate-mobile-row"><b>Factura</b><span>—</span></div>'
+                        '<div class="duplicate-mobile-row duplicate-mobile-reason"><b>Motivo</b><span>No se pudieron extraer productos válidos.</span></div>'
+                        '</div>'
+                    )
+
+                detalle_html = (
+                    '<details class="duplicate-details-box">'
+                    f'<summary>🔎 Ver detalle de facturas omitidas ({total_omitidas})</summary>'
+                    '<div class="duplicate-details-body">'
+                    + ''.join(detalle_items) +
+                    '<div class="duplicate-mobile-note">'
+                    'Las facturas omitidas no aportan productos, unidades ni costos al consolidado.'
+                    '</div>'
+                    '</div>'
+                    '</details>'
+                )
+                st.markdown(detalle_html, unsafe_allow_html=True)
 
             if st.button(
                 "🚀  Generar Archivo Excel",
