@@ -906,34 +906,34 @@ st.markdown(
 )
 
 
-    pagina = st.radio(
-        "Navegación",
-        [
-            "🏠 Inicio",
-            "🧾 Procesar facturas",
-            "📦 Inventario acumulado",
-            "📋 Detalle de facturas",
-            "📥 Exportar Excel",
-        ],
-        label_visibility="collapsed",
-    )
+pagina = st.radio(
+    "Navegación",
+    [
+        "🏠 Inicio",
+        "🧾 Procesar facturas",
+        "📦 Inventario acumulado",
+        "📋 Detalle de facturas",
+        "📥 Exportar Excel",
+    ],
+    label_visibility="collapsed",
+)
 
-    st.markdown(f"""
-    <div class="side-summary">
-      <div class="s-title">RESUMEN RÁPIDO</div>
-      <div class="row"><span>Facturas procesadas</span><span class="num">{total_facturas}</span></div>
-      <div class="row"><span>Artículos únicos</span><span class="num">{total_productos}</span></div>
-      <div class="row"><span>Unidades totales</span><span class="num">{total_unidades:,}</span></div>
-      <div class="row"><span>Valor compra</span><span class="num">RD$ {valor_compra:,.2f}</span></div>
-    </div>
-    """, unsafe_allow_html=True)
+st.markdown(f"""
+<div class="side-summary">
+  <div class="s-title">RESUMEN RÁPIDO</div>
+  <div class="row"><span>Facturas procesadas</span><span class="num">{total_facturas}</span></div>
+  <div class="row"><span>Artículos únicos</span><span class="num">{total_productos}</span></div>
+  <div class="row"><span>Unidades totales</span><span class="num">{total_unidades:,}</span></div>
+  <div class="row"><span>Valor compra</span><span class="num">RD$ {valor_compra:,.2f}</span></div>
+</div>
+""", unsafe_allow_html=True)
 
-    st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
-    if st.button("🔄 Reiniciar todo", use_container_width=True):
-        resetear_todo()
-        st.rerun()
+st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
+if st.button("🔄 Reiniciar todo", use_container_width=True):
+    resetear_todo()
+    st.rerun()
 
-    st.caption("OCR automático · PDF · JPG · PNG · Cámara")
+st.caption("OCR automático · PDF · JPG · PNG · Cámara")
 
 
 # =========================================================
