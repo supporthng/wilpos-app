@@ -2005,6 +2005,102 @@ div[data-testid="stCameraInput"]{
     }
 }
 
+
+/* ===== AJUSTE FINAL BLOQUE CARGA ===== */
+
+/* Ocultar definitivamente el control circular nativo */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label
+div[data-testid="stMarkdownContainer"] ~ div,
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child{
+    display:none !important;
+}
+
+/* Tres tarjetas ocupan TODO el ancho izquierdo */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
+    width:100% !important;
+    max-width:none !important;
+    display:grid !important;
+    grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+    gap:0 !important;
+}
+
+/* Tarjeta proporcional */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
+    min-width:0 !important;
+    width:100% !important;
+    min-height:128px !important;
+    padding:3.5rem .65rem 2.35rem !important;
+}
+
+/* Los subtítulos se colocan visualmente dentro del borde de las tarjetas */
+.load-card-subtitles{
+    display:grid !important;
+    grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+    width:100% !important;
+    margin-top:-2.25rem !important;
+    margin-bottom:.25rem !important;
+    position:relative !important;
+    z-index:10 !important;
+    pointer-events:none !important;
+}
+
+.load-card-subtitles > div{
+    min-width:0 !important;
+    padding:0 .45rem .65rem !important;
+    text-align:center !important;
+    color:#64748b !important;
+    font-size:.67rem !important;
+    line-height:1.25 !important;
+    white-space:normal !important;
+}
+
+/* Iconos */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
+    width:40px !important;
+    height:40px !important;
+    top:.8rem !important;
+    font-size:1.3rem !important;
+}
+
+/* Título de cada tarjeta */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p::after{
+    font-size:.82rem !important;
+    font-weight:800 !important;
+}
+
+/* Formatos inmediatamente debajo del bloque */
+.load-formats{
+    margin-top:.15rem !important;
+    font-size:.65rem !important;
+}
+
+/* Margen: alineado arriba con las tarjetas */
+.margin-title{
+    margin-top:.05rem !important;
+    margin-bottom:.55rem !important;
+}
+
+[data-testid="stMain"] div[data-testid="stNumberInput"] input{
+    min-height:42px !important;
+}
+
+.margin-ok,.margin-bad{
+    margin-top:.55rem !important;
+    min-height:42px !important;
+    display:flex !important;
+    align-items:center !important;
+}
+
+/* En móvil, subtítulos ocultos porque las tarjetas se apilan */
+@media (max-width:720px){
+    .load-card-subtitles{
+        display:none !important;
+    }
+    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
+        grid-template-columns:1fr !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
