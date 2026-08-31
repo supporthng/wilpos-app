@@ -1574,7 +1574,7 @@ def render_carga_facturas(titulo=True):
             st.error("El margen de ganancia debe ser mayor al 15% para procesar.")
 
         if st.button(
-            "🚀 Procesar facturas automáticamente",
+            "🚀 Procesar Facturas",
             type="primary",
             use_container_width=True,
             disabled=(len(archivos_validos) == 0 or margen_porcentaje <= 15),
