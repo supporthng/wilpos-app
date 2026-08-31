@@ -2086,6 +2086,11 @@ div[data-testid="stDialog"] img{
     }
 }
 
+
+.process-waiting{
+    opacity:.82;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -3176,6 +3181,32 @@ def render_carga_facturas(titulo=True):
         st.markdown('</div>', unsafe_allow_html=True)
 
     else:
+        # Mantener visible la acción principal desde el primer momento.
+        # Se habilitará automáticamente cuando existan facturas válidas
+        # y el margen sea mayor al 15%.
+        with margen_col:
+            st.markdown('<div class="process-action-spacer"></div>', unsafe_allow_html=True)
+            st.markdown(
+                """
+                <div class="process-ready process-waiting">
+                    <div class="process-ready-icon">📄</div>
+                    <div>
+                        <b>Procesar Facturas</b>
+                        <span>Carga tus facturas para habilitar el procesamiento</span>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.button(
+                "🚀  Procesar Facturas",
+                type="primary",
+                use_container_width=True,
+                disabled=True,
+                key="procesar_facturas_principal_inactivo",
+            )
+            st.caption("El botón se habilitará cuando haya facturas válidas para procesar.")
+
         st.markdown("""
         <div class="empty-state">
           <div class="big">🧾</div>
