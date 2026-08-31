@@ -464,10 +464,11 @@ archivos_duplicados = []
 archivos_invalidos = []
 
 if uploaded_files:
+    st.session_state.errores_ocr = []
     archivos_unicos = {f.name: f for f in uploaded_files}.values()
     
     for f in archivos_unicos:
-        firma, proveedor, num_fac, fecha_fac, productos = extraer_datos_factura(f, plantilla_manual)
+        firma, proveedor, num_fac, fecha_fac, productos = extraer_datos_factura(f)
         
         if not productos:
             archivos_invalidos.append(f.name)
