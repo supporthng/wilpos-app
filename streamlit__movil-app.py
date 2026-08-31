@@ -80,7 +80,7 @@ col_head1, col_head2 = st.columns([3, 1], gap="medium")
 with col_head1:
     st.markdown("""
         <div class="main-header" style="margin-bottom: 0rem;">
-            <h1>📦 Procesador Inteligente de Facturas WilPOS</h1>
+            <h1>📦 Procesador Inteligente de Facturas WilPOS Movil</h1>
             <p>Control automático y validación estricta de facturas y artículos.</p>
         </div>
     """, unsafe_allow_html=True)
