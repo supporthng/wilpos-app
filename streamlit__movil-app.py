@@ -2423,6 +2423,301 @@ div[data-testid="stDialog"] img{
     line-height:1.35;
 }
 
+
+/* =========================================================
+   WILPOS MÓVIL — RESPONSIVE FINAL
+   ========================================================= */
+
+/* Teléfonos y tablets */
+@media (max-width: 900px){
+
+    /* Contenido principal ocupa todo el ancho */
+    .block-container{
+        width:100% !important;
+        max-width:100% !important;
+        padding-top:.55rem !important;
+        padding-left:.55rem !important;
+        padding-right:.55rem !important;
+        padding-bottom:1.25rem !important;
+    }
+
+    /* Hero y estadísticas uno debajo del otro */
+    .hero-grid{
+        grid-template-columns:1fr !important;
+        gap:.65rem !important;
+    }
+
+    .hero-card,
+    .stats-card,
+    .section-card,
+    .inventory-card{
+        width:100% !important;
+        max-width:100% !important;
+        box-sizing:border-box !important;
+        border-radius:12px !important;
+    }
+
+    .hero-card{
+        min-height:auto !important;
+        padding:.9rem !important;
+    }
+
+    .hero-card h1{
+        font-size:1.55rem !important;
+        line-height:1.15 !important;
+        margin-bottom:.65rem !important;
+    }
+
+    .hero-card .subtitle{
+        font-size:.9rem !important;
+    }
+
+    .hero-card p{
+        font-size:.78rem !important;
+        line-height:1.45 !important;
+    }
+
+    /* Ocultar ilustración grande para ganar espacio */
+    .hero-visual{
+        display:none !important;
+    }
+
+    /* Estadísticas 2 x 2 */
+    .stats-grid{
+        grid-template-columns:1fr 1fr !important;
+        gap:.45rem !important;
+    }
+
+    .stat{
+        min-height:78px !important;
+        padding:.65rem !important;
+    }
+
+    .stat .label{
+        font-size:.64rem !important;
+    }
+
+    .stat .value{
+        font-size:.95rem !important;
+    }
+
+    /* Zona de carga pasa a una sola columna */
+    .upload-grid{
+        grid-template-columns:1fr !important;
+        gap:.65rem !important;
+    }
+
+    .upload-zone{
+        border-right:none !important;
+        border-bottom:1px solid #e5e7eb !important;
+        padding:.75rem !important;
+    }
+
+    .margin-zone{
+        width:100% !important;
+        padding:.75rem !important;
+        box-sizing:border-box !important;
+    }
+
+    /* Las 3 tarjetas de carga se apilan */
+    .fake-upload{
+        grid-template-columns:1fr !important;
+        min-height:auto !important;
+    }
+
+    .fake-upload-item{
+        min-height:84px !important;
+        border-right:none !important;
+        border-bottom:1px solid #eef2f7 !important;
+        padding:.65rem !important;
+    }
+
+    .fake-upload-item:last-child{
+        border-bottom:none !important;
+    }
+
+    .fake-upload-icon{
+        width:40px !important;
+        height:40px !important;
+        font-size:1.15rem !important;
+    }
+
+    .fake-upload-title{
+        font-size:.82rem !important;
+    }
+
+    .fake-upload-sub{
+        font-size:.68rem !important;
+    }
+
+    /* Uploader y cámara ocupan todo el ancho */
+    div[data-testid="stFileUploader"],
+    div[data-testid="stCameraInput"]{
+        width:100% !important;
+        max-width:100% !important;
+    }
+
+    div[data-testid="stFileUploader"] section{
+        padding:.5rem !important;
+    }
+
+    /* Archivos seleccionados: una sola columna */
+    .file-strip{
+        grid-template-columns:1fr !important;
+    }
+
+    /* Controles numéricos y botones fáciles de tocar */
+    .stButton > button,
+    .stDownloadButton > button,
+    div[data-testid="stNumberInput"] button{
+        min-height:46px !important;
+        font-size:.82rem !important;
+    }
+
+    div[data-testid="stNumberInput"] input{
+        min-height:46px !important;
+        font-size:.86rem !important;
+    }
+
+    /* Resumen válidas / omitidas */
+    .process-ready,
+    .validation-summary{
+        width:100% !important;
+        box-sizing:border-box !important;
+        padding:.72rem !important;
+        gap:.55rem !important;
+        border-radius:12px !important;
+    }
+
+    .process-ready-icon{
+        width:36px !important;
+        height:36px !important;
+        min-width:36px !important;
+    }
+
+    .validation-label{
+        font-size:.75rem !important;
+    }
+
+    .validation-value{
+        font-size:.74rem !important;
+    }
+
+    .validation-reason{
+        font-size:.67rem !important;
+        line-height:1.4 !important;
+    }
+
+    /* Botón principal */
+    .process-ready + div[data-testid="stButton"] > button,
+    .process-ready ~ div[data-testid="stButton"] > button{
+        min-height:54px !important;
+        font-size:.92rem !important;
+        border-radius:12px !important;
+    }
+
+    /* Columnas de acciones pasan a ocupar ancho razonable */
+    [data-testid="stHorizontalBlock"]{
+        gap:.45rem !important;
+    }
+
+    /* Productos consolidados */
+    .inventory-title{
+        font-size:.82rem !important;
+        flex-wrap:wrap !important;
+    }
+
+    .badge{
+        font-size:.62rem !important;
+    }
+
+    .home-products-note,
+    .products-count-line{
+        flex-direction:column !important;
+        align-items:flex-start !important;
+        gap:.18rem !important;
+        font-size:.69rem !important;
+    }
+
+    /* Dataframes: scroll horizontal natural */
+    div[data-testid="stDataFrame"]{
+        width:100% !important;
+        max-width:100% !important;
+        overflow:auto !important;
+    }
+
+    div[data-testid="stDataFrame"] > div{
+        overflow:auto !important;
+    }
+
+    /* Expander más compacto */
+    [data-testid="stExpander"] summary{
+        font-size:.76rem !important;
+        padding:.55rem !important;
+    }
+
+    /* Diálogos ocupan casi toda la pantalla */
+    div[data-testid="stDialog"] > div{
+        width:96vw !important;
+        max-width:96vw !important;
+    }
+
+    /* Sidebar cuando se abre */
+    [data-testid="stSidebar"]{
+        width:82vw !important;
+        min-width:82vw !important;
+        max-width:320px !important;
+    }
+
+    [data-testid="stSidebar"] > div:first-child{
+        width:100% !important;
+        min-width:0 !important;
+        max-width:none !important;
+    }
+
+    [data-testid="stSidebar"] div[data-testid="stRadio"] label p{
+        font-size:.82rem !important;
+        white-space:nowrap !important;
+    }
+}
+
+/* Teléfonos pequeños */
+@media (max-width: 600px){
+
+    .block-container{
+        padding-left:.4rem !important;
+        padding-right:.4rem !important;
+    }
+
+    .stats-grid{
+        grid-template-columns:1fr 1fr !important;
+    }
+
+    .stat{
+        padding:.55rem !important;
+    }
+
+    /* Forzar cualquier set de columnas de acciones a apilarse */
+    [data-testid="stHorizontalBlock"]{
+        flex-wrap:wrap !important;
+    }
+
+    /* Evitar botones demasiado estrechos */
+    [data-testid="stHorizontalBlock"] > div{
+        min-width:0 !important;
+    }
+
+    /* Tablas y contenido nunca desbordan la pantalla */
+    table{
+        max-width:none !important;
+    }
+
+    .section-card,
+    .inventory-card{
+        padding:.65rem !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -3807,7 +4102,7 @@ def render_carga_facturas(titulo=True):
                 disabled=True,
                 key="procesar_facturas_principal_inactivo",
             )
-            st.caption("El botón se habilitará cuando haya facturas válidas para procesar.")
+            st.caption("Se habilita automáticamente cuando haya facturas válidas.")
 
         st.markdown("""
         <div class="empty-state">
