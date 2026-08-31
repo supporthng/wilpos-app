@@ -401,6 +401,42 @@ div[data-testid="stFileUploader"] section:hover {
         font-weight: 700;
         color: #2563EB;
       }
+
+/* Ajustes de navegación compacta */
+[data-testid="stSidebar"] [role="radiogroup"] input {
+    display: none !important;
+}
+[data-testid="stSidebar"] [role="radiogroup"] label > div:first-child {
+    display: none !important;
+}
+[data-testid="stSidebar"] [role="radiogroup"] label {
+    width: 100%;
+    padding: .58rem .72rem !important;
+    margin: .08rem 0;
+    border: 1px solid transparent;
+    border-radius: 10px;
+}
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
+    background: #2563eb !important;
+    border-color: #3b82f6 !important;
+}
+[data-testid="stSidebar"] [role="radiogroup"] label p {
+    font-weight: 650;
+    font-size: .92rem;
+}
+[data-testid="stSidebar"] .side-summary .row span {
+    color: #cbd5e1 !important;
+}
+[data-testid="stSidebar"] .side-summary .row .num {
+    color: #ffffff !important;
+}
+.hero {
+    min-height: 0 !important;
+}
+.block-container {
+    max-width: 1220px !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -888,76 +924,53 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-st.markdown(
-    """
-    <div class="welcome-card">
-        <div class="welcome-eyebrow">👋 ¡Bienvenido a WilPOS Móvil!</div>
-        <h2 style="margin:0.35rem 0 0.55rem 0;">Gestiona tus facturas e inventario de forma rápida y sencilla.</h2>
-        <p style="margin:0; font-size:1.02rem; line-height:1.65; color:#5B6472;">
-            Carga tus facturas y deja que WilPOS haga el resto. Consulta tu inventario actualizado,
-            revisa tus productos y genera tu archivo de importación cuando lo necesites.
-        </p>
-        <div style="margin-top:0.8rem; font-weight:600; color:#1F4E78;">
-            Todo tu proceso de inventario, en un solo lugar.
-        </div>
+    pagina = st.radio(
+        "Navegación",
+        [
+            "🏠 Inicio",
+            "🧾 Procesar facturas",
+            "📦 Inventario acumulado",
+            "📋 Detalle de facturas",
+            "📥 Exportar Excel",
+        ],
+        label_visibility="collapsed",
+    )
+
+    st.markdown(f"""
+    <div class="side-summary">
+      <div class="s-title">RESUMEN RÁPIDO</div>
+      <div class="row"><span>Facturas</span><span class="num">{total_facturas}</span></div>
+      <div class="row"><span>Artículos</span><span class="num">{total_productos}</span></div>
+      <div class="row"><span>Unidades</span><span class="num">{total_unidades:,}</span></div>
+      <div class="row"><span>Compra</span><span class="num">RD$ {valor_compra:,.2f}</span></div>
     </div>
-    """,
-    unsafe_allow_html=True,
-)
+    """, unsafe_allow_html=True)
 
+    st.markdown("<div style='height:.7rem'></div>", unsafe_allow_html=True)
 
-pagina = st.radio(
-    "Navegación",
-    [
-        "🏠 Inicio",
-        "🧾 Procesar facturas",
-        "📦 Inventario acumulado",
-        "📋 Detalle de facturas",
-        "📥 Exportar Excel",
-    ],
-    label_visibility="collapsed",
-)
+    if st.button("🔄 Reiniciar todo", use_container_width=True):
+        resetear_todo()
+        st.rerun()
 
-st.markdown(f"""
-<div class="side-summary">
-  <div class="s-title">RESUMEN RÁPIDO</div>
-  <div class="row"><span>Facturas procesadas</span><span class="num">{total_facturas}</span></div>
-  <div class="row"><span>Artículos únicos</span><span class="num">{total_productos}</span></div>
-  <div class="row"><span>Unidades totales</span><span class="num">{total_unidades:,}</span></div>
-  <div class="row"><span>Valor compra</span><span class="num">RD$ {valor_compra:,.2f}</span></div>
-</div>
-""", unsafe_allow_html=True)
-
-st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
-if st.button("🔄 Reiniciar todo", use_container_width=True):
-    resetear_todo()
-    st.rerun()
-
-st.caption("OCR automático · PDF · JPG · PNG · Cámara")
+    st.caption("PDF · JPG · PNG · Cámara")
 
 
 # =========================================================
 # CABECERA / KPIs
 # =========================================================
-header_left, header_right = st.columns([4, 1])
-with header_left:
-    st.markdown("""
-    <div style="padding:.15rem 0 .45rem 0">
-      <div style="font-size:.82rem;color:#64748b;font-weight:750">PANEL DE CONTROL</div>
-      <div style="font-size:1.35rem;font-weight:850;color:#0f172a">Procesador Inteligente de Facturas</div>
-    </div>
-    """, unsafe_allow_html=True)
-with header_right:
-    if st.button("↻ Reiniciar", use_container_width=True):
-        resetear_todo()
-        st.rerun()
+st.markdown("""
+<div style="padding:.1rem 0 .55rem 0">
+  <div style="font-size:.78rem;color:#64748b;font-weight:800;letter-spacing:.08em">WILPOS MÓVIL</div>
+  <div style="font-size:1.45rem;font-weight:850;color:#0f172a">Panel de inventario</div>
+</div>
+""", unsafe_allow_html=True)
 
 st.markdown(f"""
 <div class="kpi-grid">
   <div class="kpi"><div class="label">Facturas procesadas</div><div class="value">{total_facturas}</div><div class="icon">🧾</div></div>
   <div class="kpi"><div class="label">Artículos únicos</div><div class="value">{total_productos}</div><div class="icon">📦</div></div>
   <div class="kpi"><div class="label">Unidades totales</div><div class="value">{total_unidades:,}</div><div class="icon">🛒</div></div>
-  <div class="kpi"><div class="label">Valor total compra</div><div class="value">RD$ {valor_compra:,.2f}</div><div class="icon">💰</div></div>
+  <div class="kpi"><div class="label">Valor de compra</div><div class="value">RD$ {valor_compra:,.2f}</div><div class="icon">💰</div></div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -967,41 +980,40 @@ st.markdown(f"""
 # =========================================================
 if pagina == "🏠 Inicio":
     st.markdown("""
-    <div class="hero">
-      <div class="hero-badge">✨ WilPOS Móvil · Automatización de inventario</div>
-      <h1>¡Bienvenido! 👋</h1>
-      <p></p>
-      <p><b>Flujo:</b> cargar factura → reconocimiento automático → confirmar → inventario acumulado → exportar Excel.</p>
+    <div class="hero" style="min-height:0;padding:1.35rem 1.5rem;">
+      <div class="hero-badge">👋 Bienvenido a WilPOS Móvil</div>
+      <h1 style="font-size:2rem;">Tu inventario, más simple.</h1>
+      <p>Carga tus facturas, mantén el inventario actualizado y genera tu archivo para WilPOS cuando lo necesites.</p>
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
-    c1, c2 = st.columns([1.35, 1])
+    st.markdown("<div style='height:.75rem'></div>", unsafe_allow_html=True)
+
+    c1, c2 = st.columns([1.25, 1])
     with c1:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("### ⚡ Inicio rápido")
-        st.markdown("1. Abre **Procesar facturas** en el menú lateral.\n2. Selecciona archivos o usa la cámara.\n3. Revisa las facturas reconocidas.\n4. Confirma el procesamiento.\n5. Exporta el Excel cuando termines.")
+        st.markdown("### 🚀 Comenzar")
+        st.write("Sube tus facturas desde la computadora o utiliza la cámara del teléfono.")
+        st.info("Selecciona **Procesar facturas** en el menú lateral para comenzar.")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with c2:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("### ✅ Estado del sistema")
-        if OCR_DISPONIBLE:
-            st.success("OCR disponible")
-        else:
-            st.error("OCR no disponible")
-        if PYMUPDF_DISPONIBLE:
-            st.success("PDF escaneado compatible")
-        else:
-            st.warning("PyMuPDF no disponible")
+        st.markdown("### ✅ Sistema")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.metric("OCR", "Activo" if OCR_DISPONIBLE else "No disponible")
+        with col_b:
+            st.metric("PDF escaneado", "Activo" if PYMUPDF_DISPONIBLE else "No disponible")
         st.markdown('</div>', unsafe_allow_html=True)
 
     if st.session_state.detalle_facturas_procesadas:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("### 🕘 Facturas procesadas recientemente")
+        st.markdown("### 🕘 Actividad reciente")
         recientes = list(st.session_state.detalle_facturas_procesadas.values())[-5:][::-1]
         st.dataframe(pd.DataFrame(recientes), use_container_width=True, hide_index=True)
         st.markdown('</div>', unsafe_allow_html=True)
+
 
 
 # =========================================================
