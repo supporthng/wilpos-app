@@ -2008,6 +2008,84 @@ div[data-testid="stDialog"] img{
     font-weight:750 !important;
 }
 
+
+/* =========================================================
+   CTA PRINCIPAL — PROCESAR FACTURAS
+   ========================================================= */
+.process-action-spacer{
+    height: 1.15rem;
+}
+
+.process-ready{
+    display:flex;
+    align-items:center;
+    gap:.75rem;
+    width:100%;
+    box-sizing:border-box;
+    padding:.85rem .95rem;
+    margin:.2rem 0 .7rem 0;
+    border:1px solid #cfe0ff;
+    border-radius:14px;
+    background:linear-gradient(135deg,#f7faff 0%,#eef5ff 100%);
+    color:#163a70;
+}
+
+.process-ready-icon{
+    width:38px;
+    height:38px;
+    min-width:38px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:11px;
+    background:#ffffff;
+    box-shadow:0 4px 14px rgba(37,99,235,.10);
+    font-size:1.15rem;
+}
+
+.process-ready b{
+    display:block;
+    font-size:.93rem;
+    line-height:1.15;
+    margin-bottom:.18rem;
+}
+
+.process-ready span{
+    display:block;
+    font-size:.72rem;
+    line-height:1.25;
+    color:#66758d;
+}
+
+/* El botón Streamlit inmediatamente posterior al bloque informativo */
+.process-ready + div[data-testid="stButton"] > button,
+.process-ready ~ div[data-testid="stButton"] > button{
+    min-height:64px !important;
+    border-radius:15px !important;
+    font-size:1.05rem !important;
+    font-weight:800 !important;
+    letter-spacing:.01em !important;
+    box-shadow:0 10px 24px rgba(37,99,235,.22) !important;
+    transition:transform .16s ease, box-shadow .16s ease !important;
+}
+
+.process-ready + div[data-testid="stButton"] > button:hover,
+.process-ready ~ div[data-testid="stButton"] > button:hover{
+    transform:translateY(-2px);
+    box-shadow:0 14px 28px rgba(37,99,235,.28) !important;
+}
+
+/* En móvil vuelve a flujo natural sin crear huecos */
+@media (max-width: 900px){
+    .process-action-spacer{
+        height:.35rem;
+    }
+    .process-ready + div[data-testid="stButton"] > button,
+    .process-ready ~ div[data-testid="stButton"] > button{
+        min-height:58px !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -3059,13 +3137,41 @@ def render_carga_facturas(titulo=True):
         if margen_porcentaje <= 15:
             st.error("El margen de ganancia debe ser mayor al 15% para procesar.")
 
-        if st.button(
-            "🚀 Procesar Facturas",
-            type="primary",
-            use_container_width=True,
-            disabled=(len(archivos_validos) == 0 or margen_porcentaje <= 15),
-        ):
-            modal_confirmacion(archivos_validos, len(archivos_duplicados), margen_porcentaje)
+        # El botón principal se muestra en la columna derecha,
+        # justo debajo del margen de ganancia.
+        with margen_col:
+            st.markdown('<div class="process-action-spacer"></div>', unsafe_allow_html=True)
+
+            if archivos_validos:
+                st.markdown(
+                    f"""
+                    <div class="process-ready">
+                        <div class="process-ready-icon">✨</div>
+                        <div>
+                            <b>{len(archivos_validos)} factura(s) lista(s)</b>
+                            <span>para consolidar y generar el Excel de WilPOS</span>
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            if st.button(
+                "🚀  Procesar Facturas",
+                type="primary",
+                use_container_width=True,
+                disabled=(len(archivos_validos) == 0 or margen_porcentaje <= 15),
+                key="procesar_facturas_principal",
+            ):
+                modal_confirmacion(
+                    archivos_validos,
+                    len(archivos_duplicados),
+                    margen_porcentaje,
+                )
+
+            st.caption(
+                "Se omiten automáticamente las facturas duplicadas antes de consolidar."
+            )
 
         st.markdown('</div>', unsafe_allow_html=True)
 
