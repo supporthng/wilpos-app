@@ -1784,6 +1784,227 @@ div[data-testid="stCameraInput"]{
     }
 }
 
+
+/* ===== BLOQUE CARGA - REFERENCIA FINAL ===== */
+
+.load-section-title{
+    font-size:1rem;
+    font-weight:850;
+    color:#0f172a;
+    margin:0 0 .55rem 0;
+}
+
+.margin-title{
+    font-size:.82rem;
+    font-weight:800;
+    color:#0f172a;
+    margin:.2rem 0 .5rem 0;
+}
+
+/* Solo el radio de carga en el MAIN */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
+    display:grid !important;
+    grid-template-columns:repeat(3, minmax(0,1fr)) !important;
+    gap:0 !important;
+    width:100% !important;
+    border:1px dashed #cbd5e1 !important;
+    border-radius:10px !important;
+    overflow:hidden !important;
+    background:#fbfdff !important;
+}
+
+/* Cada opción = una tarjeta */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
+    position:relative !important;
+    width:100% !important;
+    min-height:112px !important;
+    margin:0 !important;
+    padding:3.35rem .7rem 1.75rem .7rem !important;
+
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+
+    border:none !important;
+    border-right:1px solid #e7edf5 !important;
+    border-radius:0 !important;
+    background:#ffffff !important;
+    box-shadow:none !important;
+    transform:none !important;
+    box-sizing:border-box !important;
+}
+
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:last-child{
+    border-right:none !important;
+}
+
+/* Ocultar círculo real SOLO en main */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child{
+    display:none !important;
+}
+
+/* Icono arriba, grande y centrado */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label::before{
+    position:absolute !important;
+    top:.85rem !important;
+    left:50% !important;
+    transform:translateX(-50%) !important;
+
+    width:38px !important;
+    height:38px !important;
+    border-radius:9px !important;
+
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+
+    background:#eef4ff !important;
+    font-size:1.22rem !important;
+    line-height:1 !important;
+    content:"" !important;
+}
+
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(1)::before{
+    content:"📁" !important;
+}
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(2)::before{
+    content:"📷" !important;
+}
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(3)::before{
+    content:"☁️" !important;
+}
+
+/* Ocultar emoji del texto original y pintar label limpio */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label p{
+    margin:0 !important;
+    width:100% !important;
+    text-align:center !important;
+    font-size:0 !important;
+    color:#2563eb !important;
+    font-weight:800 !important;
+}
+
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(1) p::after{
+    content:"Seleccionar archivos";
+    font-size:.82rem !important;
+}
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(2) p::after{
+    content:"Tomar foto";
+    font-size:.82rem !important;
+}
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:nth-child(3) p::after{
+    content:"Arrastrar y soltar";
+    font-size:.82rem !important;
+}
+
+/* Seleccionado */
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked){
+    background:#f3f7ff !important;
+    outline:1px solid #93c5fd !important;
+    outline-offset:-1px !important;
+}
+
+[data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked)::before{
+    background:#dbeafe !important;
+}
+
+/* Subtítulos bajo cada botón */
+.load-card-subtitles{
+    display:grid;
+    grid-template-columns:repeat(3, minmax(0,1fr));
+    margin-top:-1.55rem;
+    position:relative;
+    z-index:2;
+    pointer-events:none;
+}
+
+.load-card-subtitles > div{
+    text-align:center;
+    color:#64748b;
+    font-size:.66rem;
+    line-height:1.25;
+    padding:0 .4rem .55rem .4rem;
+}
+
+.load-formats{
+    color:#94a3b8;
+    font-size:.65rem;
+    margin-top:.35rem;
+}
+
+/* Number input como en la referencia */
+[data-testid="stMain"] div[data-testid="stNumberInput"]{
+    width:100% !important;
+}
+
+[data-testid="stMain"] div[data-testid="stNumberInput"] > div{
+    width:100% !important;
+}
+
+[data-testid="stMain"] div[data-testid="stNumberInput"] input{
+    min-height:48px !important;
+    font-size:.9rem !important;
+    background:#fff !important;
+    border-color:#d7e0ec !important;
+}
+
+.margin-ok,
+.margin-bad{
+    margin-top:.55rem;
+    padding:.7rem .75rem;
+    border-radius:8px;
+    font-size:.7rem;
+    line-height:1.4;
+}
+
+.margin-ok{
+    background:#f0fdf4;
+    border:1px solid #bbf7d0;
+    color:#15803d;
+}
+
+.margin-bad{
+    background:#fff7ed;
+    border:1px solid #fed7aa;
+    color:#c2410c;
+}
+
+/* Uploader/cámara REAL debajo, limpio */
+[data-testid="stMain"] div[data-testid="stFileUploader"],
+[data-testid="stMain"] div[data-testid="stCameraInput"]{
+    width:100% !important;
+    max-width:none !important;
+    margin:.6rem 0 0 0 !important;
+}
+
+[data-testid="stMain"] div[data-testid="stFileUploader"] section{
+    min-height:74px !important;
+    border:1px dashed #cbd5e1 !important;
+    border-radius:9px !important;
+    background:#fbfdff !important;
+}
+
+/* Móvil */
+@media (max-width:720px){
+    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"]{
+        grid-template-columns:1fr !important;
+    }
+
+    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label{
+        min-height:92px !important;
+        border-right:none !important;
+        border-bottom:1px solid #e7edf5 !important;
+    }
+
+    [data-testid="stMain"] div[data-testid="stRadio"] [role="radiogroup"] label:last-child{
+        border-bottom:none !important;
+    }
+
+    .load-card-subtitles{
+        display:none !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -2269,27 +2490,48 @@ def modal_confirmacion(validas, duplicadas_count, margen):
 
 
 def render_carga_facturas(titulo=True):
-    """Carga y procesa facturas usando una única lógica para Inicio y Procesar facturas."""
+    """Carga y procesa facturas con controles reales y layout tipo dashboard."""
 
-    # Controles reales
-    carga_col, margen_col = st.columns([2.25, 1], gap="large")
+    # Título superior
+    st.markdown('<div class="load-section-title">1. Cargar facturas</div>', unsafe_allow_html=True)
 
-    with margen_col:
-        margen_porcentaje = st.number_input(
-            "Margen (%)",
-            min_value=0.0,
-            max_value=500.0,
-            value=float(st.session_state.margen_usado),
-            step=1.0,
-            label_visibility="collapsed",
-        )
+    carga_col, margen_col = st.columns([3.15, 1], gap="medium")
 
+    # -------------------------------------------------------------
+    # IZQUIERDA: tres opciones reales
+    # -------------------------------------------------------------
     with carga_col:
         modo_carga = st.radio(
             "Origen",
-            ["📁 Seleccionar archivos", "📷 Tomar foto", "☁️ Arrastrar y soltar"],
+            [
+                "📁 Seleccionar archivos",
+                "📷 Tomar foto",
+                "☁️ Arrastrar y soltar",
+            ],
             horizontal=True,
             label_visibility="collapsed",
+            key=f"modo_carga_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+        )
+
+        # Subtexto visual, alineado con las tres tarjetas.
+        st.markdown(
+            """
+            <div class="load-card-subtitles">
+              <div>PDF, JPG, JPEG o PNG</div>
+              <div>Usar cámara del teléfono</div>
+              <div>tus archivos aquí</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            """
+            <div class="load-formats">
+              Formatos soportados: PDF, JPG, JPEG, PNG · Puedes seleccionar múltiples archivos
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
         uploaded_files = []
@@ -2300,13 +2542,14 @@ def render_carga_facturas(titulo=True):
                 type=["pdf", "png", "jpg", "jpeg"],
                 accept_multiple_files=True,
                 key=f"uploader_{st.session_state.uploader_key}",
-                help="Puedes seleccionar varios archivos a la vez.",
+                label_visibility="collapsed",
             ) or []
 
         elif modo_carga == "📷 Tomar foto":
             foto = st.camera_input(
                 "Toma la foto completa de la factura",
                 key=f"camera_{st.session_state.camera_key}",
+                label_visibility="collapsed",
             )
             if foto is not None:
                 uploaded_files = [foto]
@@ -2317,12 +2560,47 @@ def render_carga_facturas(titulo=True):
                 type=["pdf", "png", "jpg", "jpeg"],
                 accept_multiple_files=True,
                 key=f"drag_uploader_{st.session_state.uploader_key}",
-                help="Arrastra uno o varios archivos PDF, JPG, JPEG o PNG.",
+                label_visibility="collapsed",
             ) or []
 
-    # Aviso breve: los controles funcionales están arriba.
-    if margen_porcentaje <= 15:
-        st.warning("El margen de ganancia debe ser mayor al 15% para procesar.")
+    # -------------------------------------------------------------
+    # DERECHA: margen REAL, igual al diseño de referencia
+    # -------------------------------------------------------------
+    with margen_col:
+        st.markdown(
+            '<div class="margin-title">Margen de ganancia (%)</div>',
+            unsafe_allow_html=True,
+        )
+
+        margen_porcentaje = st.number_input(
+            "Margen (%)",
+            min_value=0.0,
+            max_value=500.0,
+            value=float(st.session_state.margen_usado),
+            step=1.0,
+            format="%.2f",
+            label_visibility="collapsed",
+            key=f"margen_input_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+        )
+
+        if margen_porcentaje > 15:
+            st.markdown(
+                """
+                <div class="margin-ok">
+                  ⓘ Margen válido para procesar el inventario.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                """
+                <div class="margin-bad">
+                  ⓘ El margen debe ser mayor al 15% para procesar el inventario.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
     archivos_validos = []
     archivos_duplicados = []
