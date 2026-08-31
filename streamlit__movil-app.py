@@ -2340,6 +2340,36 @@ div[data-testid="stDialog"] img{
     }
 }
 
+
+/* ===== PRODUCTOS CONSOLIDADOS EN INICIO ===== */
+.home-products-note{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:1rem;
+    margin:.45rem 0 .5rem 0;
+    padding:.5rem .65rem;
+    border:1px solid #dbe5f0;
+    border-radius:8px;
+    background:#f8fbff;
+    color:#64748b;
+    font-size:.74rem;
+}
+
+.home-products-note span:last-child{
+    color:#2563eb;
+    font-weight:800;
+    white-space:nowrap;
+}
+
+@media (max-width:720px){
+    .home-products-note{
+        flex-direction:column;
+        align-items:flex-start;
+        gap:.2rem;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -3782,16 +3812,27 @@ if pagina == "🏠 Inicio":
     if st.session_state.detalle_facturas_procesadas:
         st.markdown('<div class="inventory-card">', unsafe_allow_html=True)
 
-        inv_c1, inv_c2 = st.columns([4, 1])
+        df_inicio = construir_df_productos()
+
+        inv_c1, inv_preview, inv_download = st.columns([3.2, 1, 1.25])
+
         with inv_c1:
             st.markdown(
-                f'<div class="inventory-title">📦 Productos consolidados <span class="badge">{total_productos} productos únicos</span></div>',
+                f'<div class="inventory-title">📦 Productos consolidados '
+                f'<span class="badge">{len(df_inicio)} productos únicos</span></div>',
                 unsafe_allow_html=True
             )
 
-        df_inicio = construir_df_productos()
+        with inv_preview:
+            if not df_inicio.empty:
+                if st.button(
+                    "👁 Vista previa",
+                    use_container_width=True,
+                    key="preview_productos_inicio",
+                ):
+                    mostrar_vista_previa_productos(df_inicio)
 
-        with inv_c2:
+        with inv_download:
             if not df_inicio.empty:
                 excel_inicio = generar_excel_wilpos(df_inicio)
                 st.download_button(
@@ -3806,14 +3847,59 @@ if pagina == "🏠 Inicio":
 
         if not df_inicio.empty:
             cols = [
-                c for c in
-                ["Código Barra", "Nombre", "Cantidad Empaque", "Stock", "Costo", "Precio Venta", "Categoría"]
+                c for c in [
+                    "Código Barra",
+                    "Nombre",
+                    "Cantidad Empaque",
+                    "Stock",
+                    "Costo",
+                    "Precio Venta",
+                    "Categoría",
+                ]
                 if c in df_inicio.columns
             ]
+
+            st.markdown(
+                f"""
+                <div class="home-products-note">
+                    <span><b>{len(df_inicio)}</b> productos consolidados</span>
+                    <span>↕ Desplázate para ver todos</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            # IMPORTANTE: ya no se usa .head(8).
+            # Todas las filas están dentro del dataframe y el scroll
+            # vertical aparece al superar la altura configurada.
             st.dataframe(
-                df_inicio[cols].head(8),
+                df_inicio[cols],
                 use_container_width=True,
                 hide_index=True,
+                height=500,
+                column_config={
+                    "Código Barra": st.column_config.TextColumn(
+                        "Código Barra", width="medium"
+                    ),
+                    "Nombre": st.column_config.TextColumn(
+                        "Nombre", width="large"
+                    ),
+                    "Cantidad Empaque": st.column_config.NumberColumn(
+                        "Cantidad Empaque", format="%d"
+                    ),
+                    "Stock": st.column_config.NumberColumn(
+                        "Stock", format="%d"
+                    ),
+                    "Costo": st.column_config.NumberColumn(
+                        "Costo", format="%.4f"
+                    ),
+                    "Precio Venta": st.column_config.NumberColumn(
+                        "Precio Venta", format="%.2f"
+                    ),
+                    "Categoría": st.column_config.TextColumn(
+                        "Categoría", width="medium"
+                    ),
+                },
             )
 
         st.markdown('</div>', unsafe_allow_html=True)
