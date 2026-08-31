@@ -2466,20 +2466,61 @@ def generar_excel_wilpos(df_prod):
         }).to_excel(writer, index=False, sheet_name="Proveedores")
 
         if not df_prod.empty:
-            # Mantiene la estructura original de Producto-Proveedor.
-            df_pp = pd.DataFrame({
-                "Producto": [
-                    df_prod.loc[0, "Nombre"],
-                    df_prod.loc[min(1, len(df_prod)-1), "Nombre"],
-                ],
-                "Proveedor": [lista_provs[0], lista_provs[0]],
-                "Precio Costo": [
-                    df_prod.loc[0, "Costo"],
-                    df_prod.loc[min(1, len(df_prod)-1), "Costo"],
-                ],
-                "Principal": ["Sí", "Sí"],
-            })
-            df_pp.to_excel(writer, index=False, sheet_name="Producto-Proveedor")
+            # =====================================================
+            # PRODUCTO-PROVEEDOR COMPLETO
+            # =====================================================
+            # Antes solo se exportaban 2 filas. Ahora se exporta
+            # cada producto con cada proveedor real del lote.
+            filas_pp = []
+
+            for codigo, apariciones in st.session_state.origen_productos_facturas.items():
+                # Agrupar por proveedor para no duplicar la relación.
+                por_proveedor = {}
+
+                for item in apariciones:
+                    proveedor_item = item.get("proveedor", "Proveedor General") or "Proveedor General"
+                    unidades_item = float(item.get("unidades", 0))
+                    costo_item = float(item.get("costo_total", 0))
+
+                    if proveedor_item not in por_proveedor:
+                        por_proveedor[proveedor_item] = {
+                            "nombre": item.get("nombre", ""),
+                            "unidades": 0.0,
+                            "costo_total": 0.0,
+                        }
+
+                    por_proveedor[proveedor_item]["unidades"] += unidades_item
+                    por_proveedor[proveedor_item]["costo_total"] += costo_item
+
+                for proveedor_item, info_pp in por_proveedor.items():
+                    costo_unitario_pp = (
+                        info_pp["costo_total"] / info_pp["unidades"]
+                        if info_pp["unidades"] > 0 else 0
+                    )
+
+                    filas_pp.append({
+                        "Producto": info_pp["nombre"],
+                        "Proveedor": proveedor_item,
+                        "Precio Costo": round(costo_unitario_pp, 4),
+                        "Principal": "Sí",
+                    })
+
+            # Fallback: si por alguna razón no hay origen registrado,
+            # al menos incluir TODOS los productos con el primer proveedor.
+            if not filas_pp:
+                for _, row in df_prod.iterrows():
+                    filas_pp.append({
+                        "Producto": row["Nombre"],
+                        "Proveedor": lista_provs[0],
+                        "Precio Costo": row["Costo"],
+                        "Principal": "Sí",
+                    })
+
+            pd.DataFrame(filas_pp).to_excel(
+                writer,
+                index=False,
+                sheet_name="Producto-Proveedor"
+            )
 
         pd.DataFrame({
             "Instrucciones para importar en WilPOS": [
@@ -2541,9 +2582,20 @@ def modal_confirmacion(validas, duplicadas_count, margen):
     with b1:
         if st.button("✅ Confirmar y consolidar", type="primary", use_container_width=True):
             st.session_state.margen_usado = margen
+
+            # =====================================================
+            # NUEVO LOTE / NUEVO EXCEL
+            # =====================================================
+            # Este sistema genera un archivo independiente a partir
+            # de las facturas cargadas AHORA. No conserva productos
+            # ni firmas de una generación anterior.
+            st.session_state.inventario_acumulado = {}
+            st.session_state.firmas_facturas_procesadas = set()
+            st.session_state.detalle_facturas_procesadas = {}
+            st.session_state.origen_productos_facturas = {}
             st.session_state.articulos_repetidos_notif = []
 
-            # Solo se recorren facturas válidas y únicas; los duplicados nunca llegan aquí.
+            # Solo se recorren facturas válidas y únicas del lote actual.
             for archivo, firma, proveedor, num_fac, fecha_fac, productos_en_archivo in validas:
                 st.session_state.firmas_facturas_procesadas.add(firma)
                 st.session_state.detalle_facturas_procesadas[firma] = {
@@ -2778,6 +2830,9 @@ def render_carga_facturas(titulo=True):
     st.markdown(
         '<div class="load-title">1. Cargar facturas</div>',
         unsafe_allow_html=True,
+    )
+    st.caption(
+        "Cada procesamiento genera un Excel nuevo únicamente con las facturas cargadas en este lote."
     )
 
     carga_col, margen_col = st.columns([3.2, 1], gap="medium")
@@ -3032,12 +3087,8 @@ def render_carga_facturas(titulo=True):
                 if not productos:
                     archivos_invalidos.append(f.name)
 
-                elif firma in st.session_state.firmas_facturas_procesadas:
-                    archivos_duplicados.append(
-                        (f.name, proveedor, num_fac)
-                    )
-
                 elif firma in firmas_detectadas_en_lote:
+                    # Duplicado REAL dentro de los archivos cargados actualmente.
                     archivos_duplicados.append(
                         (f.name, proveedor, num_fac)
                     )
@@ -3092,7 +3143,7 @@ def render_carga_facturas(titulo=True):
 
             for nombre_archivo, proveedor_dup, num_fac_dup in archivos_duplicados:
                 if num_fac_dup:
-                    motivo_dup = "Factura ya procesada o repetida en esta carga"
+                    motivo_dup = "Mismo proveedor y número de factura repetidos en esta carga"
                     proveedor_mostrar = proveedor_dup or "No identificado"
                     factura_mostrar = num_fac_dup
                 else:
@@ -3374,7 +3425,10 @@ elif pagina == "📦 Productos consolidados":
 
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown("### 📦 Productos consolidados")
-    st.caption("Los productos repetidos entre facturas se consolidan por código en una sola fila para generar el Excel final de WilPOS.")
+    st.caption(
+        "Los productos repetidos entre facturas se consolidan por código en una sola fila. "
+        "Por eso el número de productos consolidados puede ser menor que el número total de líneas leídas."
+    )
     st.info(
         "Vista previa del consolidado que se exportará al archivo Excel para importarlo en WilPOS."
     )
