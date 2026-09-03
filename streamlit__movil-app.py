@@ -4866,6 +4866,32 @@ def aplicar_layout_v3():
   .v3-kpi-card strong {{font-size:.94rem;}}
   .v3-kpi-icon {{width:34px;height:34px;flex-basis:34px;}}
 }}
+
+/* Contraste final del sidebar: prevalece sobre estilos heredados */
+[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label p,
+[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label [data-testid="stMarkdownContainer"],
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {{
+  color:{{"#dbeafe" if dark else "#17324d"}} !important;
+  opacity:1 !important;
+  font-weight:750 !important;
+}}
+[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) p,
+[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) [data-testid="stMarkdownContainer"] {{
+  color:#ffffff !important;
+}}
+[data-testid="stSidebar"] .stButton button {{
+  color:{{"#eef6ff" if dark else "#17324d"}} !important;
+  opacity:1 !important;
+}}
+.v3-formula-only {{
+  color:{muted};
+  font-size:.64rem;
+  line-height:1.35;
+  padding:.35rem .1rem .15rem .1rem;
+}}
+.v3-process-top {{
+  height:.18rem;
+}}
 </style>
 """,
         unsafe_allow_html=True,
@@ -6681,50 +6707,18 @@ def render_carga_facturas(titulo=True):
             if foto is not None:
                 uploaded_files = list(uploaded_files) + [foto]
 
-        st.markdown(
-            '<div class="v3-config-label">Configuración de precios</div>',
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "Precio Venta = Costo sin ITBIS × (1 + % de ganancia) × (1 + ITBIS)"
-        )
-
-        precio_c1, precio_c2 = st.columns([3.2, 1], gap="small")
-
-        with precio_c1:
-            margen_porcentaje = st.number_input(
-                "% de Ganancia",
-                min_value=0.0,
-                max_value=500.0,
-                value=float(st.session_state.margen_usado),
-                step=1.0,
-                format="%.2f",
-                key=f"margen_input_{st.session_state.uploader_key}_{st.session_state.camera_key}",
-            )
-
-        with precio_c2:
-            st.markdown(
-                """
-<div class="v3-itbis-box">
-  <span>ITBIS aplicado</span>
-  <strong>18%</strong>
-</div>
-""",
-                unsafe_allow_html=True,
-            )
-
+        # El porcentaje de ganancia se configura únicamente arriba en Inicio.
+        margen_porcentaje = float(st.session_state.margen_usado)
         margen_col = st.container()
 
-        if margen_porcentaje > 0:
-            st.markdown(
-                '<div class="v3-valid">✓ Ganancia válida para procesar</div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                '<div class="v3-invalid">La ganancia debe ser mayor al 0%</div>',
-                unsafe_allow_html=True,
-            )
+        st.markdown(
+            """
+<div class="v3-formula-only">
+  Precio Venta = Costo sin ITBIS × (1 + ganancia) × (1 + ITBIS)
+</div>
+""",
+            unsafe_allow_html=True,
+        )
 
     def _huella_archivo_ui(archivo):
         try:
@@ -6847,6 +6841,21 @@ def render_carga_facturas(titulo=True):
                     archivos_validos.append(
                         (f, firma, proveedor, num_fac, fecha_fac, productos)
                     )
+
+        # Acción principal visible inmediatamente después de leer la factura.
+        st.markdown("<div class='v3-process-top'></div>", unsafe_allow_html=True)
+        if st.button(
+            "🚀  Procesar Factura",
+            type="primary",
+            use_container_width=True,
+            disabled=(len(archivos_validos) == 0 or margen_porcentaje <= 0),
+            key="procesar_facturas_principal",
+        ):
+            modal_confirmacion(
+                archivos_validos,
+                len(archivos_duplicados),
+                margen_porcentaje,
+            )
 
     if uploaded_files:
         # -----------------------------------------------------
@@ -6983,27 +6992,10 @@ def render_carga_facturas(titulo=True):
         if margen_porcentaje <= 0:
             st.error("La ganancia debe ser mayor al 0% para procesar.")
 
-        # El botón principal se muestra en la columna derecha,
-        # justo debajo del margen de ganancia.
+        # =====================================================
+        # RESUMEN DE VALIDACIÓN DEL LOTE
+        # =====================================================
         with margen_col:
-            st.markdown('<div class="process-action-spacer compact"></div>', unsafe_allow_html=True)
-
-            if st.button(
-                "🚀  Procesar Factura",
-                type="primary",
-                use_container_width=True,
-                disabled=(len(archivos_validos) == 0 or margen_porcentaje <= 0),
-                key="procesar_facturas_principal",
-            ):
-                modal_confirmacion(
-                    archivos_validos,
-                    len(archivos_duplicados),
-                    margen_porcentaje,
-                )
-
-            # =====================================================
-            # RESUMEN DE VALIDACIÓN DEL LOTE
-            # =====================================================
             total_validas = len(archivos_validos) if uploaded_files else 0
             total_omitidas = (
                 len(archivos_duplicados) + len(archivos_invalidos)
@@ -7120,13 +7112,7 @@ def render_carga_facturas(titulo=True):
             )
             st.caption("Carga una factura válida para habilitar el procesamiento.")
 
-        st.markdown("""
-        <div class="empty-state">
-          <div class="big">🧾</div>
-          <b>Aún no has cargado facturas</b><br>
-          Selecciona archivos o usa la cámara para comenzar.
-        </div>
-        """, unsafe_allow_html=True)
+        st.caption("Selecciona una factura o usa la cámara para comenzar.")
 
 
 
@@ -7150,7 +7136,7 @@ with st.sidebar:
         "Navegación",
         [
             "🏠 Inicio",
-            "🧾 Generar Archivo Excel",
+            "🧾 Procesar Factura",
             "📦 Productos consolidados",
             "📋 Detalle de facturas",
             "📥 Exportar Excel",
@@ -7341,7 +7327,7 @@ if pagina == "🏠 Inicio":
             st.caption("Carga y procesa facturas para mostrar productos aquí.")
 
 
-elif pagina == "🧾 Generar Archivo Excel":
+elif pagina == "🧾 Procesar Factura":
     render_carga_facturas(titulo=True)
 
 
