@@ -3748,7 +3748,7 @@ div[data-testid="stDialog"] img{
 DEFAULTS = {
     "inventario_acumulado": {},
     "firmas_facturas_procesadas": set(),
-    "margen_usado": 17.0,
+    "margen_usado": 25.0,
     "detalle_facturas_procesadas": {},
     "uploader_key": 0,
     "camera_key": 0,
@@ -5080,7 +5080,7 @@ def resetear_todo():
     st.session_state.inventario_acumulado = {}
     st.session_state.firmas_facturas_procesadas = set()
     st.session_state.detalle_facturas_procesadas = {}
-    st.session_state.margen_usado = 17.0
+    st.session_state.margen_usado = 25.0
     st.session_state.articulos_repetidos_notif = []
     st.session_state.errores_ocr = []
     st.session_state.uploader_key += 1
@@ -5662,7 +5662,7 @@ def render_carga_facturas(titulo=True):
         )
         st.caption(
             "El Precio Venta se calcula: Costo sin ITBIS × (1 + ganancia) × (1 + ITBIS). "
-            "Ejemplo: costo RD$1,000 + 17% de ganancia + 18% ITBIS = RD$1,380.60 antes del redondeo."
+            "Ejemplo: costo RD$1,000 + 25% de ganancia + 18% ITBIS = RD$1,475.00 antes del redondeo."
         )
 
 
