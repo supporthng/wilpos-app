@@ -5010,31 +5010,17 @@ def aplicar_layout_v4():
 /* Encabezado WilPOS */
 .v4-app-header {{
   width:100%;
-  min-height:78px;
+  min-height:50px;
   display:flex;
   align-items:center;
   justify-content:space-between;
   gap:1rem;
-  padding:.85rem 1rem;
-  margin:0 0 .85rem 0;
+  padding:.42rem .72rem;
+  margin:0 0 .35rem 0;
   border-radius:14px;
   border:1px solid {header_border};
   background:{header_bg};
   box-shadow:0 7px 22px {header_shadow};
-}}
-
-.v4-header-brand {{
-  display:flex;
-  align-items:center;
-  gap:.8rem;
-  min-width:0;
-}}
-
-.v4-header-brand img {{
-  width:132px;
-  max-height:48px;
-  object-fit:contain;
-  object-position:left center;
 }}
 
 .v4-header-copy {{
@@ -5083,9 +5069,6 @@ def aplicar_layout_v4():
     min-height:66px;
     padding:.65rem .7rem;
   }}
-  .v4-header-brand img {{
-    width:105px;
-  }}
   .v4-header-copy span {{
     display:none;
   }}
@@ -5101,6 +5084,50 @@ def aplicar_layout_v4():
 
 
 aplicar_layout_v4()
+
+# Override final: elimina la franja superior reservada por Streamlit.
+st.markdown(
+    """
+<style>
+html, body {
+  margin-top:0 !important;
+  padding-top:0 !important;
+}
+[data-testid="stHeader"],
+[data-testid="stToolbar"],
+[data-testid="stDecoration"] {
+  display:none !important;
+  height:0 !important;
+  min-height:0 !important;
+}
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewContainer"] > .main,
+[data-testid="stMain"],
+section.main {
+  padding-top:0 !important;
+  margin-top:0 !important;
+}
+[data-testid="stMainBlockContainer"],
+.main .block-container,
+.block-container {
+  padding-top:.20rem !important;
+  margin-top:0 !important;
+}
+.v4-app-header {
+  min-height:50px !important;
+  padding:.42rem .72rem !important;
+  margin-top:0 !important;
+  margin-bottom:.35rem !important;
+}
+
+/* Solo el logo del sidebar debe mostrarse en la navegación */
+.v3-side-brand img {
+  display:block !important;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
 
 
@@ -7375,12 +7402,9 @@ if pagina == "🏠 Inicio":
     modo_texto = "Modo oscuro" if st.session_state.get("modo_oscuro", False) else "Modo claro"
     encabezado_html = f"""
 <div class="v4-app-header">
-  <div class="v4-header-brand">
-    <img src="data:image/png;base64,{WILPOS_LOGO_B64}" alt="WilPOS">
-    <div class="v4-header-copy">
-      <strong>WilPOS Móvil</strong>
-      <span>Procesador inteligente de facturas</span>
-    </div>
+  <div class="v4-header-copy">
+    <strong>WilPOS Móvil</strong>
+    <span>Procesador inteligente de facturas</span>
   </div>
   <div class="v4-header-status">
     <span class="v4-status-dot"></span>
