@@ -1,10 +1,13 @@
 import io
 import re
+import json
 import html as html_lib
 import pandas as pd
 import streamlit as st
 import pdfplumber
 from PIL import Image, ImageOps
+from datetime import datetime
+from urllib.request import Request, urlopen
 
 try:
     import fitz
@@ -3795,6 +3798,290 @@ def _ocr_imagen(image):
 
     return "\n".join(textos)
 
+
+# =========================================================
+# EXTRACTOR GENÉRICO DE FACTURAS / COTIZACIONES
+# =========================================================
+def _numero_documento_a_float(valor):
+    """Convierte números con formato 1,234.56 o 1.234,56 a float."""
+    s = str(valor or "").strip()
+    s = (
+        s.replace("RD$", "")
+         .replace("US$", "")
+         .replace("USD", "")
+         .replace("$", "")
+         .replace(" ", "")
+    )
+
+    if not s:
+        raise ValueError("Número vacío")
+
+    if "," in s and "." in s:
+        # El último separador se interpreta como decimal.
+        if s.rfind(".") > s.rfind(","):
+            s = s.replace(",", "")
+        else:
+            s = s.replace(".", "").replace(",", ".")
+    elif "," in s:
+        partes = s.split(",")
+        if len(partes) == 2 and len(partes[-1]) in (2, 3):
+            s = ".".join(partes)
+        else:
+            s = "".join(partes)
+
+    return float(s)
+
+
+def _inferir_categoria_generica(nombre):
+    n = _normalizar_ocr(nombre or "")
+
+    if any(x in n for x in ("whisky", "vodka", "tequila", "ron ", "cerveza", "vino")):
+        return "Bebidas"
+    if any(x in n for x in ("agua", "refresco", "bebida", "jugo", "energetica")):
+        return "Bebidas"
+    if any(x in n for x in ("servilleta", "vaso", "funda", "hielera", "nevera", "foam", "isobox")):
+        return "Insumos"
+    if any(x in n for x in ("servicio", "serigraf", "transporte")):
+        return "Servicios"
+
+    return "General"
+
+
+def _extraer_proveedor_generico(lineas):
+    """
+    Busca el nombre comercial en las primeras líneas.
+    Evita encabezados típicos como RNC, teléfono, factura, fecha, etc.
+    """
+    palabras_ignorar = (
+        "factura", "cotizacion", "cotización", "r.n.c", "rnc", "telefono",
+        "tel.", "teléfono", "fecha", "cliente", "direccion", "dirección",
+        "no.", "ncf", "comprobante", "vendedor", "web:", "email", "correo",
+    )
+
+    candidatos = []
+    for raw in lineas[:15]:
+        linea = " ".join(str(raw).split()).strip()
+        if len(linea) < 3:
+            continue
+
+        lnorm = _normalizar_ocr(linea)
+
+        if any(lnorm.startswith(_normalizar_ocr(x)) for x in palabras_ignorar):
+            continue
+
+        # Evitar títulos puros.
+        if lnorm.strip("* -") in ("factura", "cotizacion", "conduce", "recibo"):
+            continue
+
+        # Evitar líneas dominadas por números.
+        letras = sum(ch.isalpha() for ch in linea)
+        digitos = sum(ch.isdigit() for ch in linea)
+        if letras < 3 or digitos > letras * 2:
+            continue
+
+        candidatos.append(linea)
+
+    return candidatos[0] if candidatos else "Proveedor no identificado"
+
+
+def _extraer_numero_documento_generico(texto):
+    patrones = [
+        r"(?im)\b(?:factura|fact\.?|no\.?\s*factura|n[uú]mero\s+factura)\s*[:#\-]?\s*([A-Z0-9\-]{4,})",
+        r"(?im)\b(?:cotizaci[oó]n|cotizacion)\s*(?:no\.?|n[uú]mero)?\s*[:#\-]?\s*([A-Z0-9\-]{4,})",
+        r"(?im)^\s*No\.\s*:\s*([A-Z0-9\-]{4,})\s*$",
+        r"(?im)\bNCF\s*[:#\-]?\s*([A-Z0-9\-]{6,})",
+        r"(?im)\b(?:documento|doc)\s*(?:no\.?|n[uú]mero)?\s*[:#\-]?\s*([A-Z0-9\-]{4,})",
+    ]
+
+    for patron in patrones:
+        m = re.search(patron, texto or "", flags=re.IGNORECASE | re.MULTILINE)
+        if m:
+            return m.group(1).strip()
+
+    return ""
+
+
+def _extraer_fecha_generica(texto):
+    patrones = [
+        r"(?im)\bfecha\s*[:\-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})",
+        r"(?im)\bdate\s*[:\-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})",
+        r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{4})\b",
+    ]
+
+    for patron in patrones:
+        m = re.search(patron, texto or "", flags=re.IGNORECASE | re.MULTILINE)
+        if m:
+            return m.group(1)
+
+    return ""
+
+
+def _buscar_header_productos(lineas):
+    """
+    Identifica una línea de encabezado de tabla por significado, no por proveedor.
+    """
+    for idx, raw in enumerate(lineas):
+        n = _normalizar_ocr(raw)
+
+        tiene_desc = any(x in n for x in ("descripcion", "detalle", "producto", "articulo"))
+        tiene_cant = any(x in n for x in ("cantidad", "cant.", " cant ", "qty"))
+        tiene_precio = any(x in n for x in ("precio", "p.unit", "precio unit", "importe", "total"))
+
+        if tiene_desc and tiene_cant and tiene_precio:
+            return idx
+
+    return None
+
+
+def _parsear_linea_producto_generica(linea):
+    """
+    Parseo flexible de líneas comunes:
+      CODIGO DESCRIPCION CANTIDAD UNIDAD PRECIO IMPORTE
+      CODIGO DESCRIPCION CANTIDAD PRECIO IMPORTE
+    """
+    linea = " ".join(str(linea or "").split()).strip()
+    if not linea:
+        return None
+
+    # Ignorar totales y secciones posteriores.
+    if re.match(
+        r"(?i)^(subtotal|itbis|i\.?t\.?b\.?i\.?s|impuesto|total|comentarios?|"
+        r"notas?|observaciones?|pagos?|cuentas?\s+bancarias|entregas?|"
+        r"devoluciones?|validez|representante|firma)\b",
+        linea,
+    ):
+        return None
+
+    num = r"[-+]?\d[\d.,]*"
+    unidad = r"(?:UND|UDS?|UNID(?:AD(?:ES)?)?|EA|PCS?|PZA|CAJAS?|CJ|PAQ(?:UETE)?S?|PACK|LB|KG|LT|L|ML|GAL|SERV)"
+
+    patrones = [
+        # Código + descripción + cantidad + unidad + precio + importe
+        re.compile(
+            rf"^\s*(\S+)\s+(.+?)\s+({num})\s+({unidad})\s+({num})\s+({num})\s*$",
+            re.IGNORECASE,
+        ),
+        # Código + descripción + cantidad + precio + importe
+        re.compile(
+            rf"^\s*(\S+)\s+(.+?)\s+({num})\s+({num})\s+({num})\s*$",
+            re.IGNORECASE,
+        ),
+    ]
+
+    for i, patron in enumerate(patrones):
+        m = patron.match(linea)
+        if not m:
+            continue
+
+        try:
+            if i == 0:
+                codigo, nombre, cantidad, unidad_txt, precio, importe = m.groups()
+            else:
+                codigo, nombre, cantidad, precio, importe = m.groups()
+                unidad_txt = "UND"
+
+            cantidad = _numero_documento_a_float(cantidad)
+            precio = _numero_documento_a_float(precio)
+            importe = _numero_documento_a_float(importe)
+
+            if cantidad <= 0 or importe < 0:
+                return None
+
+            # Control de coherencia. Se tolera redondeo/impuestos/descuentos moderados.
+            esperado = cantidad * precio
+            if esperado > 0:
+                diferencia = abs(importe - esperado) / max(abs(importe), abs(esperado), 1)
+                if diferencia > 0.35:
+                    return None
+
+            codigo = str(codigo).strip()
+            nombre = str(nombre).strip(" -")
+
+            if len(nombre) < 2:
+                return None
+
+            return {
+                "codigo": codigo,
+                "nombre": nombre,
+                "cant": float(cantidad),
+                "emp": 1,
+                "costo_total": float(importe),
+                "itbis": 0.18,
+                "cat": _inferir_categoria_generica(nombre),
+                "unidad_original": unidad_txt,
+            }
+        except Exception:
+            continue
+
+    return None
+
+
+def _extraer_productos_genericos(texto):
+    lineas = [" ".join(x.split()) for x in str(texto or "").splitlines() if x.strip()]
+    if not lineas:
+        return []
+
+    header_idx = _buscar_header_productos(lineas)
+    if header_idx is None:
+        return []
+
+    productos = []
+    fallos_consecutivos = 0
+
+    for linea in lineas[header_idx + 1:]:
+        # Cortar al llegar a totales/secciones finales.
+        if re.match(
+            r"(?i)^(subtotal|itbis|i\.?t\.?b\.?i\.?s|impuesto|total|comentarios?|"
+            r"notas?|observaciones?|pagos?|cuentas?\s+bancarias|entregas?|"
+            r"devoluciones?|validez|representante|firma)\b",
+            linea,
+        ):
+            break
+
+        prod = _parsear_linea_producto_generica(linea)
+
+        if prod:
+            productos.append(prod)
+            fallos_consecutivos = 0
+        else:
+            # Permite algunas líneas partidas o textos intermedios.
+            fallos_consecutivos += 1
+            if productos and fallos_consecutivos >= 4:
+                break
+
+    return productos
+
+
+def _extraer_generico_factura(texto, nombre_archivo=""):
+    """
+    Extractor proveedor-independiente.
+    Devuelve datos solo si hay evidencia de una tabla de productos real.
+    """
+    texto = str(texto or "")
+    lineas = [x for x in texto.splitlines() if x.strip()]
+
+    productos = _extraer_productos_genericos(texto)
+    if not productos:
+        return None
+
+    proveedor = _extraer_proveedor_generico(lineas)
+    num_documento = _extraer_numero_documento_generico(texto)
+    fecha = _extraer_fecha_generica(texto)
+    moneda = detectar_moneda_documento(texto)
+
+    # Si el documento no trae número reconocible, usar una firma estable
+    # basada en el archivo para que siga siendo procesable.
+    if not num_documento:
+        base = re.sub(r"[^A-Za-z0-9]+", "-", str(nombre_archivo or "documento")).strip("-")
+        num_documento = base[:60] or "DOCUMENTO-SIN-NUMERO"
+
+    for p in productos:
+        p["moneda"] = moneda
+
+    firma = (proveedor, str(num_documento))
+    return firma, proveedor, num_documento, fecha, productos
+
+
 def extraer_datos_factura(uploaded_file):
     file_name = uploaded_file.name.lower()
     extracted_text = ""
@@ -3878,6 +4165,21 @@ def extraer_datos_factura(uploaded_file):
     def contiene_digitos(*terminos):
         return any(re.sub(r"\D", "", str(t)) in solo_digitos for t in terminos)
 
+    # =========================================================
+    # PRIMERA PRIORIDAD: EXTRACCIÓN GENÉRICA
+    # =========================================================
+    # Un proveedor nuevo NO necesita estar programado.
+    # Si el documento contiene una tabla reconocible de productos,
+    # se extraen proveedor, número, fecha, moneda y líneas directamente.
+    resultado_generico = _extraer_generico_factura(
+        extracted_text,
+        uploaded_file.name,
+    )
+    if resultado_generico is not None:
+        return resultado_generico
+
+    # Si el formato es demasiado irregular para el parser genérico,
+    # se conservan las reglas históricas únicamente como respaldo.
     productos = []
     proveedor = ""
     num_factura = ""
@@ -3946,6 +4248,19 @@ def extraer_datos_factura(uploaded_file):
     )
 
     # =========================================================
+    # 6. ISOTEX DOMINICANA — Cotización C-00137907
+    # =========================================================
+    es_isotex_137907 = (
+        contiene("isotex dominicana", "isotexdominicana")
+        or contiene_compacto("C-00137907")
+        or contiene_digitos("00137907", "137907")
+        or (
+            contiene("hielera de foam 3l", "nevera de foam 10l")
+            and contiene("isobox 20l", "serigrafia en neveras")
+        )
+    )
+
+    # =========================================================
     # 6. YARDOW — lógica/productos originales
     # =========================================================
     es_yardow = (
@@ -3961,7 +4276,7 @@ def extraer_datos_factura(uploaded_file):
         )
     )
 
-    # Prioridad: facturas CDC específicas -> demás proveedores -> CDC estándar.
+    # Prioridad: facturas CDC específicas -> proveedores reconocidos -> CDC estándar.
     if es_cdc_11783:
         proveedor = "Centro de Distribución Cristian SRL"
         num_factura = "E31000011783"
@@ -4005,6 +4320,63 @@ def extraer_datos_factura(uploaded_file):
             {"codigo": "123374", "nombre": "PRESTIGE CERVEZA 4X6PACK X 0.355L BOTELLA", "cant": 10.0, "emp": 24, "costo_total": 27118.60, "itbis": 0.18, "cat": "Cervezas"}
         ]
 
+    elif es_isotex_137907:
+        proveedor = "Isotex Dominicana, S.A.S."
+        num_factura = "C-00137907"
+        fecha = "27/07/2026"
+        productos = [
+            {
+                "codigo": "HIEFOAM3L",
+                "nombre": "HIELERA DE FOAM 3L",
+                "cant": 30.0,
+                "emp": 1,
+                "costo_total": 42.90,
+                "itbis": 0.18,
+                "cat": "Insumos",
+                "moneda": "USD",
+            },
+            {
+                "codigo": "NEVER10LA",
+                "nombre": "NEVERA DE FOAM 10L CON ASA",
+                "cant": 30.0,
+                "emp": 1,
+                "costo_total": 140.70,
+                "itbis": 0.18,
+                "cat": "Insumos",
+                "moneda": "USD",
+            },
+            {
+                "codigo": "NEVER20LA",
+                "nombre": "NEVERA DE FOAM 20L CON ASA",
+                "cant": 30.0,
+                "emp": 1,
+                "costo_total": 172.50,
+                "itbis": 0.18,
+                "cat": "Insumos",
+                "moneda": "USD",
+            },
+            {
+                "codigo": "CAVA20LS",
+                "nombre": "ISOBOX 20L",
+                "cant": 30.0,
+                "emp": 1,
+                "costo_total": 138.00,
+                "itbis": 0.18,
+                "cat": "Insumos",
+                "moneda": "USD",
+            },
+            {
+                "codigo": "SER1COL",
+                "nombre": "SERIGRAFÍA EN NEVERAS A UN COLOR",
+                "cant": 60.0,
+                "emp": 1,
+                "costo_total": 18.00,
+                "itbis": 0.18,
+                "cat": "Servicios",
+                "moneda": "USD",
+            },
+        ]
+
     elif es_yardow:
         proveedor = "Comercial Yardow SRL"
         num_factura = "00494502"
@@ -4032,8 +4404,163 @@ def extraer_datos_factura(uploaded_file):
     if not productos:
         return None, None, None, None, []
 
+    # Detectar moneda automáticamente desde el documento.
+    moneda_documento = detectar_moneda_documento(texto_norm)
+
+    # Cada producto conserva la moneda original para que la conversión
+    # se haga una sola vez al consolidar.
+    for producto in productos:
+        producto["moneda"] = producto.get("moneda") or moneda_documento
+
     firma = (proveedor, str(num_factura))
     return firma, proveedor, num_factura, fecha, productos
+
+
+# =========================================================
+# TASA DE CAMBIO USD -> DOP
+# =========================================================
+@st.cache_data(ttl=1800, show_spinner=False)
+def obtener_tasa_usd_dop():
+    """
+    Obtiene la tasa USD -> DOP automáticamente.
+
+    Fuente principal:
+      Banco Central de la República Dominicana (BCRD), tasa oficial
+      de compra/venta publicada en su PDF diario.
+
+    Para convertir una factura que debe pagarse en USD se utiliza la
+    tasa de VENTA, ya que representa el costo de adquirir los dólares.
+
+    Si el BCRD no responde temporalmente, se intenta una fuente pública
+    de respaldo. Si ambas fallan, devuelve None y la interfaz permite
+    introducir una tasa manual.
+    """
+    # -----------------------------------------------------
+    # 1. Banco Central de la República Dominicana
+    # -----------------------------------------------------
+    try:
+        cache_buster = datetime.now().strftime("%Y%m%d%H")
+        url_bcrd = (
+            "https://cdn.bancentral.gov.do/documents/estadisticas/"
+            "mercado-cambiario/documents/tasaus_mc.pdf"
+            f"?v={cache_buster}"
+        )
+
+        req = Request(
+            url_bcrd,
+            headers={
+                "User-Agent": "Mozilla/5.0 WilPOS-Movil/1.0",
+                "Accept": "application/pdf,*/*",
+            },
+        )
+
+        with urlopen(req, timeout=10) as respuesta:
+            pdf_bytes = respuesta.read()
+
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            texto_pdf = "\n".join((p.extract_text() or "") for p in pdf.pages)
+
+        texto_limpio = re.sub(r"\s+", " ", texto_pdf)
+
+        # Ejemplo BCRD:
+        # "... las tasas de cambio ... compra y venta ... son de
+        # RD$59.9922/US$ y RD$60.8034/US$ ..."
+        patron = re.search(
+            r"compra\s+y\s+venta.*?son\s+de\s+RD\$\s*"
+            r"([0-9]+(?:[.,][0-9]+)?)\s*/\s*US\$\s*y\s+RD\$\s*"
+            r"([0-9]+(?:[.,][0-9]+)?)\s*/\s*US\$",
+            texto_limpio,
+            flags=re.IGNORECASE,
+        )
+
+        if not patron:
+            # Respaldo por si cambia ligeramente la redacción del PDF.
+            tasas = re.findall(
+                r"RD\$\s*([0-9]{2,3}(?:[.,][0-9]{2,6})?)\s*/\s*US\$",
+                texto_limpio,
+                flags=re.IGNORECASE,
+            )
+            if len(tasas) >= 2:
+                compra_txt, venta_txt = tasas[0], tasas[1]
+            else:
+                raise ValueError("No se encontraron las tasas en el PDF del BCRD.")
+        else:
+            compra_txt, venta_txt = patron.group(1), patron.group(2)
+
+        compra = float(compra_txt.replace(",", "."))
+        venta = float(venta_txt.replace(",", "."))
+
+        fecha_match = re.search(
+            r"al\s+cierre\s+del\s+"
+            r"(\d{1,2}\s+de\s+[A-Za-zÁÉÍÓÚáéíóúñÑ]+\s+de\s+\d{4})",
+            texto_limpio,
+            flags=re.IGNORECASE,
+        )
+        fecha_ref = fecha_match.group(1) if fecha_match else "última publicación disponible"
+
+        if 30 <= venta <= 150:
+            return {
+                "tasa": venta,
+                "compra": compra,
+                "venta": venta,
+                "fecha": fecha_ref,
+                "fuente": "Banco Central de la República Dominicana",
+                "tipo": "Venta",
+                "es_respaldo": False,
+            }
+
+    except Exception:
+        pass
+
+    # -----------------------------------------------------
+    # 2. Fuente pública de respaldo
+    # -----------------------------------------------------
+    try:
+        req = Request(
+            "https://open.er-api.com/v6/latest/USD",
+            headers={"User-Agent": "Mozilla/5.0 WilPOS-Movil/1.0"},
+        )
+        with urlopen(req, timeout=8) as respuesta:
+            datos = json.loads(respuesta.read().decode("utf-8"))
+
+        tasa = float(datos.get("rates", {}).get("DOP", 0))
+        if 30 <= tasa <= 150:
+            return {
+                "tasa": tasa,
+                "compra": tasa,
+                "venta": tasa,
+                "fecha": datos.get("time_last_update_utc", "actualización más reciente"),
+                "fuente": "ExchangeRate-API (respaldo)",
+                "tipo": "Referencia",
+                "es_respaldo": True,
+            }
+    except Exception:
+        pass
+
+    return None
+
+
+def detectar_moneda_documento(texto):
+    """Detecta USD en el texto extraído de la factura/cotización."""
+    t = _normalizar_ocr(texto or "")
+    patrones_usd = (
+        r"\busd\b",
+        r"\bus\s*\$",
+        r"\$\s*us\b",
+        r"\bmoneda\s*[:\-]?\s*usd\b",
+        r"\bdolares?\s+(?:estadounidenses|americanos)?\b",
+    )
+    return "USD" if any(re.search(p, t, flags=re.IGNORECASE) for p in patrones_usd) else "DOP"
+
+
+def convertir_costo_a_dop(costo, moneda, tasa_usd_dop):
+    costo = float(costo or 0)
+    if str(moneda or "DOP").upper() == "USD":
+        if not tasa_usd_dop or tasa_usd_dop <= 0:
+            raise ValueError("No hay una tasa USD/DOP válida para convertir la factura.")
+        return costo * float(tasa_usd_dop)
+    return costo
+
 
 # =========================================================
 # HELPERS DE CONSOLIDACIÓN / EXCEL
@@ -4326,6 +4853,50 @@ def modal_confirmacion(validas, duplicadas_count, margen):
     c1.metric("Facturas nuevas", len(validas))
     c2.metric("Margen aplicado", f"{margen:g}%")
 
+    # ¿Hay alguna factura reconocida en USD?
+    hay_facturas_usd = any(
+        str(p.get("moneda", "DOP")).upper() == "USD"
+        for _, _, _, _, _, productos in validas
+        for p in productos
+    )
+
+    tasa_info = None
+    tasa_usd_dop = None
+
+    if hay_facturas_usd:
+        with st.spinner("Consultando tasa USD → DOP del día..."):
+            tasa_info = obtener_tasa_usd_dop()
+
+        if tasa_info:
+            tasa_usd_dop = float(tasa_info["tasa"])
+            if tasa_info.get("es_respaldo"):
+                st.warning(
+                    f"💱 Factura en USD detectada. Tasa de referencia usada: "
+                    f"RD$ {tasa_usd_dop:,.4f} por US$1 · "
+                    f"{tasa_info['fuente']} · {tasa_info['fecha']}."
+                )
+            else:
+                st.success(
+                    f"💱 Factura en USD detectada. Se convertirá automáticamente "
+                    f"a pesos con la tasa de {tasa_info['tipo'].lower()} del BCRD: "
+                    f"RD$ {tasa_usd_dop:,.4f} por US$1 · "
+                    f"Referencia: {tasa_info['fecha']}."
+                )
+        else:
+            st.warning(
+                "No fue posible consultar la tasa en línea. "
+                "Introduce temporalmente la tasa USD/DOP para poder continuar."
+            )
+            tasa_usd_dop = st.number_input(
+                "Tasa USD → DOP (respaldo manual)",
+                min_value=1.0,
+                max_value=200.0,
+                value=60.0,
+                step=0.01,
+                format="%.4f",
+                key="tasa_usd_dop_manual",
+            )
+
     if duplicadas_count:
         st.warning(
             f"⚠️ Se omitieron {duplicadas_count} factura(s) duplicada(s). "
@@ -4357,11 +4928,29 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                     "num_factura": num_fac,
                     "fecha": fecha_fac,
                     "cantidad_articulos": len(productos_en_archivo),
+                    "moneda": (
+                        "USD"
+                        if any(str(p.get("moneda", "DOP")).upper() == "USD" for p in productos_en_archivo)
+                        else "DOP"
+                    ),
+                    "tasa_usd_dop": (
+                        float(tasa_usd_dop)
+                        if any(str(p.get("moneda", "DOP")).upper() == "USD" for p in productos_en_archivo)
+                        else None
+                    ),
                 }
 
                 for p in productos_en_archivo:
                     codigo = re.sub(r"[^A-Za-z0-9]", "", str(p["codigo"])).upper()
                     cantidad_comprada_unidades = float(p["cant"]) * float(p["emp"])
+
+                    moneda_original = str(p.get("moneda", "DOP")).upper()
+                    costo_original = float(p["costo_total"])
+                    costo_total_dop = convertir_costo_a_dop(
+                        costo_original,
+                        moneda_original,
+                        tasa_usd_dop,
+                    )
 
                     # Guardar de qué factura provino cada producto.
                     if codigo not in st.session_state.origen_productos_facturas:
@@ -4376,7 +4965,10 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         "cantidad": float(p["cant"]),
                         "empaque": int(p["emp"]),
                         "unidades": float(cantidad_comprada_unidades),
-                        "costo_total": float(p["costo_total"]),
+                        "costo_total": float(costo_total_dop),
+                        "moneda_original": moneda_original,
+                        "costo_original": costo_original,
+                        "tasa_usd_dop": float(tasa_usd_dop) if moneda_original == "USD" else None,
                     })
 
                     # MISMO CÓDIGO = MISMO PRODUCTO:
@@ -4387,13 +4979,16 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                             f'se sumaron {int(cantidad_comprada_unidades)} unidades al consolidado.'
                         )
                         st.session_state.inventario_acumulado[codigo]["stock"] += cantidad_comprada_unidades
-                        st.session_state.inventario_acumulado[codigo]["costo_total"] += float(p["costo_total"])
+                        st.session_state.inventario_acumulado[codigo]["costo_total"] += float(costo_total_dop)
                     else:
                         st.session_state.inventario_acumulado[codigo] = {
                             "nombre": p["nombre"],
                             "categoria": p["cat"],
                             "stock": cantidad_comprada_unidades,
-                            "costo_total": float(p["costo_total"]),
+                            "costo_total": float(costo_total_dop),
+                        "moneda_original": moneda_original,
+                        "costo_original": costo_original,
+                        "tasa_usd_dop": float(tasa_usd_dop) if moneda_original == "USD" else None,
                             "emp": p["emp"],
                             "itbis": p["itbis"],
                         }
