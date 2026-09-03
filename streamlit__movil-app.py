@@ -3748,7 +3748,7 @@ div[data-testid="stDialog"] img{
 DEFAULTS = {
     "inventario_acumulado": {},
     "firmas_facturas_procesadas": set(),
-    "margen_usado": 35.0,
+    "margen_usado": 17.0,
     "detalle_facturas_procesadas": {},
     "uploader_key": 0,
     "camera_key": 0,
@@ -4077,6 +4077,158 @@ def _extraer_productos_genericos(texto):
     return productos
 
 
+
+def _extraer_totales_documento(texto):
+    """
+    Extrae Subtotal, ITBIS y Total cuando están presentes.
+    Se usa para determinar si los importes de las líneas vienen
+    con ITBIS incluido o sin ITBIS.
+    """
+    texto = str(texto or "")
+    resultados = {
+        "subtotal": None,
+        "itbis": None,
+        "total": None,
+    }
+
+    patrones = {
+        "subtotal": [
+            r"(?im)^\s*subtotal\s*[:\-]?\s*(?:RD\$|US\$|\$)?\s*([0-9][0-9.,]*)\s*$",
+            r"(?im)\bsubtotal\s*[:\-]?\s*(?:RD\$|US\$|\$)?\s*([0-9][0-9.,]*)",
+        ],
+        "itbis": [
+            r"(?im)^\s*(?:itbis|i\.?t\.?b\.?i\.?s\.?|impuesto)\s*[:\-]?\s*(?:RD\$|US\$|\$)?\s*([0-9][0-9.,]*)\s*$",
+            r"(?im)\b(?:itbis|i\.?t\.?b\.?i\.?s\.?|impuesto)\s*[:\-]?\s*(?:RD\$|US\$|\$)?\s*([0-9][0-9.,]*)",
+        ],
+        "total": [
+            r"(?im)^\s*total\s*[:\-]?\s*(?:RD\$|US\$|\$)?\s*([0-9][0-9.,]*)\s*$",
+            r"(?im)\btotal\s*(?:general)?\s*[:\-]?\s*(?:RD\$|US\$|\$)?\s*([0-9][0-9.,]*)",
+        ],
+    }
+
+    for campo, lista_patrones in patrones.items():
+        for patron in lista_patrones:
+            m = re.search(patron, texto)
+            if not m:
+                continue
+            try:
+                resultados[campo] = _numero_documento_a_float(m.group(1))
+                break
+            except Exception:
+                continue
+
+    # Respaldo para PDFs donde las etiquetas salen primero y los valores
+    # aparecen en las siguientes líneas, como:
+    # Subtotal:
+    # ITBIS:
+    # Total:
+    # 512.10
+    # 92.18
+    # 604.28
+    if any(v is None for v in resultados.values()):
+        lineas = [" ".join(x.split()) for x in texto.splitlines() if x.strip()]
+        for i in range(len(lineas) - 5):
+            bloque = " ".join(lineas[i:i+3]).lower()
+            if (
+                "subtotal" in bloque
+                and "itbis" in bloque
+                and "total" in bloque
+            ):
+                nums = []
+                for linea in lineas[i+3:i+7]:
+                    if re.fullmatch(r"\s*(?:RD\$|US\$|\$)?\s*[0-9][0-9.,]*\s*", linea):
+                        try:
+                            nums.append(_numero_documento_a_float(linea))
+                        except Exception:
+                            pass
+                if len(nums) >= 3:
+                    if resultados["subtotal"] is None:
+                        resultados["subtotal"] = nums[0]
+                    if resultados["itbis"] is None:
+                        resultados["itbis"] = nums[1]
+                    if resultados["total"] is None:
+                        resultados["total"] = nums[2]
+                    break
+
+    return resultados
+
+
+def _determinar_importes_incluyen_itbis(texto, productos):
+    """
+    Determina si los importes de las líneas ya contienen ITBIS.
+
+    Retorna:
+      - False: las líneas coinciden con subtotal -> costo ya está SIN ITBIS.
+      - True: las líneas coinciden con total -> costo viene CON ITBIS.
+      - None: no hay evidencia suficiente; no se altera el costo.
+    """
+    if not productos:
+        return None
+
+    totales = _extraer_totales_documento(texto)
+    subtotal = totales.get("subtotal")
+    itbis = totales.get("itbis")
+    total = totales.get("total")
+
+    suma_lineas = sum(float(p.get("costo_total", 0) or 0) for p in productos)
+    if suma_lineas <= 0:
+        return None
+
+    def cerca(a, b):
+        if a is None or b is None:
+            return False
+        tolerancia = max(0.05, abs(float(b)) * 0.015)  # 1.5%
+        return abs(float(a) - float(b)) <= tolerancia
+
+    # Caso ideal: líneas = subtotal => costos netos.
+    if cerca(suma_lineas, subtotal):
+        return False
+
+    # Si líneas = total y existe ITBIS, vienen con impuesto.
+    if itbis not in (None, 0) and cerca(suma_lineas, total):
+        return True
+
+    # Si no hay subtotal pero total - ITBIS coincide con líneas, también neto.
+    if total is not None and itbis is not None and cerca(suma_lineas, total - itbis):
+        return False
+
+    return None
+
+
+def _normalizar_costos_sin_itbis(texto, productos):
+    """
+    Garantiza que costo_total quede SIN ITBIS cuando existe evidencia
+    suficiente en el documento.
+
+    No descuenta impuesto a ciegas: si no puede determinarlo,
+    conserva el importe original y marca la detección como 'indeterminada'.
+    """
+    incluyen = _determinar_importes_incluyen_itbis(texto, productos)
+
+    for p in productos:
+        tasa = float(p.get("itbis", 0.18) or 0)
+        costo_original = float(p.get("costo_total", 0) or 0)
+
+        p["costo_total_original_documento"] = costo_original
+
+        if incluyen is True and tasa > 0:
+            p["costo_total"] = costo_original / (1.0 + tasa)
+            p["costo_incluia_itbis"] = True
+            p["itbis_detectado"] = "incluido"
+        elif incluyen is False:
+            p["costo_total"] = costo_original
+            p["costo_incluia_itbis"] = False
+            p["itbis_detectado"] = "separado"
+        else:
+            # Seguridad: no inventar una exclusión de ITBIS cuando no
+            # existen totales suficientes para demostrarlo.
+            p["costo_total"] = costo_original
+            p["costo_incluia_itbis"] = None
+            p["itbis_detectado"] = "indeterminado"
+
+    return productos, incluyen
+
+
 def _extraer_generico_factura(texto, nombre_archivo=""):
     """
     Extractor proveedor-independiente.
@@ -4102,6 +4254,9 @@ def _extraer_generico_factura(texto, nombre_archivo=""):
 
     for p in productos:
         p["moneda"] = moneda
+
+    # Normalizar todos los costos al valor SIN ITBIS.
+    productos, incluye_itbis = _normalizar_costos_sin_itbis(texto, productos)
 
     firma = (proveedor, str(num_documento))
     return firma, proveedor, num_documento, fecha, productos
@@ -4437,6 +4592,11 @@ def extraer_datos_factura(uploaded_file):
     for producto in productos:
         producto["moneda"] = producto.get("moneda") or moneda_documento
 
+    # Intentar normalizar también los costos de plantillas fallback.
+    # Si el documento no permite determinarlo con seguridad,
+    # se conserva el costo original.
+    productos, _ = _normalizar_costos_sin_itbis(extracted_text, productos)
+
     firma = (proveedor, str(num_factura))
     return firma, proveedor, num_factura, fecha, productos
 
@@ -4650,9 +4810,10 @@ def construir_df_productos():
     - si el código varía pero el nombre es exactamente el mismo normalizado,
       también se consolida;
     - stock y costo total se suman;
-    - el costo mostrado es promedio ponderado por unidades.
+    - el costo mostrado es promedio ponderado por unidades;
+    - el Precio Venta incluye la ganancia configurada y luego el ITBIS.
     """
-    factor_margen = 1 + (st.session_state.margen_usado / 100.0)
+    factor_ganancia = 1 + (st.session_state.margen_usado / 100.0)
 
     consolidados = {}
     clave_nombre_a_codigo = {}
@@ -4698,7 +4859,11 @@ def construir_df_productos():
         stock = float(data["stock"])
         costo_total = float(data["costo_total"])
         costo_unitario = costo_total / stock if stock > 0 else 0
-        precio_venta = round_to_nearest_5(costo_unitario * factor_margen)
+        tasa_itbis = float(data.get("itbis", 0.18) or 0)
+        precio_antes_itbis = costo_unitario * factor_ganancia
+        precio_venta = round_to_nearest_5(
+            precio_antes_itbis * (1.0 + tasa_itbis)
+        )
 
         filas.append({
             "Nombre": data["nombre"],
@@ -4915,7 +5080,7 @@ def resetear_todo():
     st.session_state.inventario_acumulado = {}
     st.session_state.firmas_facturas_procesadas = set()
     st.session_state.detalle_facturas_procesadas = {}
-    st.session_state.margen_usado = 35.0
+    st.session_state.margen_usado = 17.0
     st.session_state.articulos_repetidos_notif = []
     st.session_state.errores_ocr = []
     st.session_state.uploader_key += 1
@@ -4932,7 +5097,7 @@ def modal_confirmacion(validas, duplicadas_count, margen):
 
     c1, c2 = st.columns(2)
     c1.metric("Facturas nuevas", len(validas))
-    c2.metric("Margen aplicado", f"{margen:g}%")
+    c2.metric("Ganancia aplicada", f"{margen:g}%")
 
     # ¿Hay alguna factura reconocida en USD?
     hay_facturas_usd = any(
@@ -5019,6 +5184,15 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         float(tasa_usd_dop)
                         if any(str(p.get("moneda", "DOP")).upper() == "USD" for p in productos_en_archivo)
                         else None
+                    ),
+                    "itbis_costos": (
+                        "Incluido y descontado"
+                        if any(p.get("costo_incluia_itbis") is True for p in productos_en_archivo)
+                        else (
+                            "Separado / costo ya neto"
+                            if any(p.get("costo_incluia_itbis") is False for p in productos_en_archivo)
+                            else "No determinado"
+                        )
                     ),
                 }
 
@@ -5472,12 +5646,12 @@ def render_carga_facturas(titulo=True):
     # =========================================================
     with margen_col:
         st.markdown(
-            '<div class="margin-heading">Margen de ganancia (%)</div>',
+            '<div class="margin-heading">Ganancia (%)</div>',
             unsafe_allow_html=True,
         )
 
         margen_porcentaje = st.number_input(
-            "Margen (%)",
+            "Ganancia (%)",
             min_value=0.0,
             max_value=500.0,
             value=float(st.session_state.margen_usado),
@@ -5486,12 +5660,17 @@ def render_carga_facturas(titulo=True):
             label_visibility="collapsed",
             key=f"margen_input_{st.session_state.uploader_key}_{st.session_state.camera_key}",
         )
+        st.caption(
+            "El Precio Venta se calcula: Costo sin ITBIS × (1 + ganancia) × (1 + ITBIS). "
+            "Ejemplo: costo RD$1,000 + 17% de ganancia + 18% ITBIS = RD$1,380.60 antes del redondeo."
+        )
 
-        if margen_porcentaje > 15:
+
+        if margen_porcentaje > 0:
             st.markdown(
                 """
                 <div class="margin-status ok-status">
-                    ✓ Margen válido para procesar
+                    ✓ Ganancia válida para procesar
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -5500,7 +5679,7 @@ def render_carga_facturas(titulo=True):
             st.markdown(
                 """
                 <div class="margin-status warn-status">
-                    El margen debe ser mayor al 15%
+                    La ganancia debe ser mayor al 0%
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -5763,8 +5942,8 @@ def render_carga_facturas(titulo=True):
                 for err in st.session_state.errores_ocr:
                     st.warning(err)
 
-        if margen_porcentaje <= 15:
-            st.error("El margen de ganancia debe ser mayor al 15% para procesar.")
+        if margen_porcentaje <= 0:
+            st.error("La ganancia debe ser mayor al 0% para procesar.")
 
         # El botón principal se muestra en la columna derecha,
         # justo debajo del margen de ganancia.
@@ -5873,7 +6052,7 @@ def render_carga_facturas(titulo=True):
                 "🚀  Generar Archivo Excel",
                 type="primary",
                 use_container_width=True,
-                disabled=(len(archivos_validos) == 0 or margen_porcentaje <= 15),
+                disabled=(len(archivos_validos) == 0 or margen_porcentaje <= 0),
                 key="procesar_facturas_principal",
             ):
                 modal_confirmacion(
@@ -6153,7 +6332,7 @@ elif pagina == "📦 Productos consolidados":
         "Por eso el número de productos consolidados puede ser menor que el número total de líneas leídas."
     )
     st.info(
-        "Vista previa del consolidado que se exportará al archivo Excel para importarlo en WilPOS."
+        "Vista previa del consolidado que se exportará a WilPOS. El campo Costo se normaliza sin ITBIS cuando el documento permite detectarlo."
     )
 
     if not df_repetidos_hist.empty:
@@ -6273,7 +6452,7 @@ elif pagina == "📦 Productos consolidados":
         c1, c2, c3 = st.columns(3)
         c1.metric("Productos consolidados", len(df_productos))
         c2.metric("Unidades consolidadas", int(df_productos["Stock"].sum()))
-        c3.metric("Margen aplicado", f"{st.session_state.margen_usado:g}%")
+        c3.metric("Ganancia aplicada", f"{st.session_state.margen_usado:g}%")
     st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -6293,6 +6472,7 @@ elif pagina == "📋 Detalle de facturas":
                 "No. Factura": info["num_factura"],
                 "Fecha": info["fecha"],
                 "Artículos": info["cantidad_articulos"],
+                "Costo / ITBIS": info.get("itbis_costos", "No determinado"),
             })
         st.dataframe(pd.DataFrame(tabla), use_container_width=True, hide_index=True)
     st.markdown('</div>', unsafe_allow_html=True)
