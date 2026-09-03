@@ -3715,6 +3715,30 @@ div[data-testid="stDialog"] img{
     }
 }
 
+
+/* ===== GESTOR: QUITAR PRODUCTOS DEL EXCEL ===== */
+[data-testid="stExpander"] button[title^="Quitar "]{
+    min-height:34px !important;
+    padding:.2rem .35rem !important;
+    font-size:1rem !important;
+    font-weight:900 !important;
+    color:#dc2626 !important;
+    border-color:#fecaca !important;
+    background:#fff !important;
+}
+
+[data-testid="stExpander"] button[title^="Quitar "]:hover{
+    background:#fff1f2 !important;
+    border-color:#f87171 !important;
+}
+
+@media (max-width:700px){
+    /* Las filas del gestor siguen legibles en teléfono */
+    [data-testid="stExpander"] [data-testid="stHorizontalBlock"]{
+        align-items:center !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -3733,6 +3757,7 @@ DEFAULTS = {
     "modo_carga_ui": "archivos",
     "archivos_ocultos_ui": set(),
     "origen_productos_facturas": {},
+    "productos_excluidos": set(),
 }
 
 for key, value in DEFAULTS.items():
@@ -4587,6 +4612,37 @@ def _nombre_producto_canonico(valor):
     return re.sub(r"\s+", "", nombre)
 
 
+
+def _token_codigo_exclusion(codigo):
+    return f"COD::{_codigo_producto_canonico(codigo)}"
+
+
+def _token_nombre_exclusion(nombre):
+    return f"NOM::{_nombre_producto_canonico(nombre)}"
+
+
+def producto_esta_excluido(codigo, nombre=""):
+    excluidos = st.session_state.get("productos_excluidos", set())
+    return (
+        _token_codigo_exclusion(codigo) in excluidos
+        or (nombre and _token_nombre_exclusion(nombre) in excluidos)
+    )
+
+
+def excluir_producto_del_excel(codigo, nombre):
+    """
+    Excluye el producto del consolidado y de TODAS las hojas relacionadas
+    del Excel del lote actual. No altera la factura original.
+    """
+    st.session_state.productos_excluidos.add(_token_codigo_exclusion(codigo))
+    if nombre:
+        st.session_state.productos_excluidos.add(_token_nombre_exclusion(nombre))
+
+
+def restaurar_productos_excluidos():
+    st.session_state.productos_excluidos = set()
+
+
 def construir_df_productos():
     """
     Construye SIEMPRE un consolidado final:
@@ -4602,6 +4658,9 @@ def construir_df_productos():
     clave_nombre_a_codigo = {}
 
     for codigo_original, data in st.session_state.inventario_acumulado.items():
+        if producto_esta_excluido(codigo_original, data.get("nombre", "")):
+            continue
+
         codigo = _codigo_producto_canonico(codigo_original)
         nombre_key = _nombre_producto_canonico(data.get("nombre", ""))
 
@@ -4754,7 +4813,26 @@ def generar_excel_wilpos(df_prod):
             # cada producto con cada proveedor real del lote.
             filas_pp = []
 
+            codigos_exportados = {
+                _codigo_producto_canonico(x)
+                for x in df_prod["Código Barra"].astype(str).tolist()
+            }
+            nombres_exportados = {
+                _nombre_producto_canonico(x)
+                for x in df_prod["Nombre"].astype(str).tolist()
+            }
+
             for codigo, apariciones in st.session_state.origen_productos_facturas.items():
+                nombre_origen = (
+                    apariciones[0].get("nombre", "")
+                    if apariciones else ""
+                )
+                if (
+                    _codigo_producto_canonico(codigo) not in codigos_exportados
+                    and _nombre_producto_canonico(nombre_origen) not in nombres_exportados
+                ):
+                    continue
+
                 # Agrupar por proveedor para no duplicar la relación.
                 por_proveedor = {}
 
@@ -4822,11 +4900,13 @@ def totales_dashboard():
     ))
     total_unidades = int(sum(
         x.get("stock", 0)
-        for x in st.session_state.inventario_acumulado.values()
+        for codigo, x in st.session_state.inventario_acumulado.items()
+        if not producto_esta_excluido(codigo, x.get("nombre", ""))
     ))
     valor_compra = float(sum(
         x.get("costo_total", 0)
-        for x in st.session_state.inventario_acumulado.values()
+        for codigo, x in st.session_state.inventario_acumulado.items()
+        if not producto_esta_excluido(codigo, x.get("nombre", ""))
     ))
     return total_facturas, total_productos, total_lineas, total_unidades, valor_compra
 
@@ -4841,6 +4921,7 @@ def resetear_todo():
     st.session_state.uploader_key += 1
     st.session_state.archivos_ocultos_ui = set()
     st.session_state.origen_productos_facturas = {}
+    st.session_state.productos_excluidos = set()
     st.session_state.camera_key += 1
 
 
@@ -4918,6 +4999,7 @@ def modal_confirmacion(validas, duplicadas_count, margen):
             st.session_state.firmas_facturas_procesadas = set()
             st.session_state.detalle_facturas_procesadas = {}
             st.session_state.origen_productos_facturas = {}
+            st.session_state.productos_excluidos = set()
             st.session_state.articulos_repetidos_notif = []
 
             # Solo se recorren facturas válidas y únicas del lote actual.
@@ -5212,6 +5294,67 @@ def mostrar_vista_previa_productos(df_productos):
             "Categoría": st.column_config.TextColumn("Categoría", width="medium"),
         },
     )
+
+
+def render_gestor_exclusion_productos(df_productos, key_prefix):
+    """
+    Permite quitar productos del archivo final con una X.
+    La exclusión afecta inmediatamente la vista, métricas y Excel.
+    """
+    if df_productos is None or df_productos.empty:
+        return
+
+    with st.expander(
+        f"✕ Quitar productos del Excel ({len(df_productos)})",
+        expanded=False,
+    ):
+        st.caption(
+            "Usa la X para excluir insumos o artículos que no quieras importar a WilPOS. "
+            "Al quitarlos desaparecen también del Excel que descargues."
+        )
+
+        for idx, row in df_productos.reset_index(drop=True).iterrows():
+            codigo = str(row.get("Código Barra", "")).strip()
+            nombre = str(row.get("Nombre", "")).strip()
+            stock = int(float(row.get("Stock", 0) or 0))
+            costo = float(row.get("Costo", 0) or 0)
+
+            c_codigo, c_nombre, c_info, c_x = st.columns(
+                [1.45, 4.4, 1.45, .55],
+                gap="small",
+                vertical_alignment="center",
+            )
+
+            with c_codigo:
+                st.caption(codigo or "Sin código")
+
+            with c_nombre:
+                st.markdown(f"**{nombre}**")
+
+            with c_info:
+                st.caption(f"{stock:,} und · RD$ {costo:,.2f}")
+
+            with c_x:
+                if st.button(
+                    "✕",
+                    key=f"{key_prefix}_excluir_{idx}_{_codigo_producto_canonico(codigo)}",
+                    help=f"Quitar {nombre} del Excel",
+                    use_container_width=True,
+                ):
+                    excluir_producto_del_excel(codigo, nombre)
+                    st.toast(f"Producto quitado: {nombre}", icon="🗑️")
+                    st.rerun()
+
+        if st.session_state.get("productos_excluidos"):
+            st.divider()
+            if st.button(
+                "↩ Restaurar productos eliminados",
+                key=f"{key_prefix}_restaurar_excluidos",
+                use_container_width=True,
+            ):
+                restaurar_productos_excluidos()
+                st.rerun()
+
 
 def render_carga_facturas(titulo=True):
     """Carga y procesa facturas con un selector visual robusto basado en botones reales."""
@@ -5922,6 +6065,14 @@ if pagina == "🏠 Inicio":
                 )
 
         if not df_inicio.empty:
+            render_gestor_exclusion_productos(
+                df_inicio,
+                key_prefix="inicio",
+            )
+
+            # Reconstruir porque una exclusión puede haber cambiado el consolidado.
+            df_inicio = construir_df_productos()
+
             cols = [
                 c for c in [
                     "Código Barra",
@@ -6062,6 +6213,14 @@ elif pagina == "📦 Productos consolidados":
                 key="download_excel_inventario",
             )
 
+        render_gestor_exclusion_productos(
+            df_productos,
+            key_prefix="productos",
+        )
+
+        # Reconstruir porque una exclusión puede haber cambiado el consolidado.
+        df_productos = construir_df_productos()
+
         # =====================================================
         # PRODUCTOS CONSOLIDADOS — SCROLL VERTICAL REAL
         # =====================================================
@@ -6148,8 +6307,8 @@ elif pagina == "📥 Exportar Excel":
     st.markdown("### 📥 Generar Excel para WilPOS")
     st.caption("Genera el archivo Excel consolidado y listo para importar en WilPOS.")
     st.info(
-        "Los productos con el mismo código, aunque aparezcan en facturas diferentes, "
-        "se exportan en una sola fila con sus unidades y costos consolidados."
+        "Los productos con el mismo código se consolidan en una sola fila. "
+        "Los artículos que hayas quitado con la X no se incluyen en el Excel."
     )
 
     if df_productos.empty:
