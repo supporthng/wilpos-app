@@ -5630,6 +5630,139 @@ def _extraer_generico_factura(texto, nombre_archivo=""):
     return firma, proveedor, num_documento, fecha, productos
 
 
+
+def _preparar_variantes_ocr_imagen(imagen):
+    """
+    Genera varias versiones de una foto para mejorar OCR en:
+    - fotos tomadas a monitores/pantallas
+    - documentos con perspectiva leve
+    - texto pequeño
+    - bajo contraste / moiré
+    No altera el archivo original.
+    """
+    variantes = []
+    try:
+        from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+
+        if not isinstance(imagen, Image.Image):
+            imagen = Image.open(imagen)
+
+        base = ImageOps.exif_transpose(imagen).convert("RGB")
+
+        # Aumentar tamaño cuando la foto tiene texto pequeño.
+        w, h = base.size
+        lado_largo = max(w, h)
+        escala = 1.0
+        if lado_largo < 2600:
+            escala = min(2.2, 2600.0 / max(lado_largo, 1))
+        if escala > 1.05:
+            base = base.resize(
+                (int(w * escala), int(h * escala)),
+                Image.Resampling.LANCZOS,
+            )
+
+        variantes.append(("original_mejorada", base))
+
+        # Escala de grises + autocontraste.
+        gris = ImageOps.grayscale(base)
+        gris = ImageOps.autocontrast(gris, cutoff=1)
+        gris = ImageEnhance.Contrast(gris).enhance(1.45)
+        gris = ImageEnhance.Sharpness(gris).enhance(1.35)
+        variantes.append(("gris_contraste", gris))
+
+        # Mediana ayuda a reducir ruido/patrón de pantalla (moiré ligero).
+        suave = gris.filter(ImageFilter.MedianFilter(size=3))
+        suave = ImageEnhance.Contrast(suave).enhance(1.35)
+        variantes.append(("antiruido", suave))
+
+        # Binarización: útil para tablas y letras negras sobre fondo claro.
+        umbral = suave.point(lambda p: 255 if p > 168 else 0)
+        variantes.append(("binaria", umbral))
+
+    except Exception:
+        try:
+            variantes.append(("original", imagen))
+        except Exception:
+            pass
+
+    return variantes
+
+
+def _puntuar_texto_ocr_factura(texto):
+    """Prioriza la lectura que más se parece a una factura/cotización."""
+    t = normalizar_texto(texto or "")
+    if not t:
+        return -1
+
+    score = min(len(t) / 80.0, 20.0)
+    claves = {
+        "CODIGO": 6,
+        "DESCRIPCION": 6,
+        "CANTIDAD": 6,
+        "PRECIO": 5,
+        "IMPORTE": 6,
+        "SUBTOTAL": 4,
+        "ITBIS": 5,
+        "TOTAL": 4,
+        "FACTURA": 3,
+        "COTIZACION": 5,
+        "MONEDA": 3,
+        "FECHA": 3,
+        "RNC": 3,
+    }
+    for clave, puntos in claves.items():
+        if clave in t:
+            score += puntos
+
+    # Premio especial si aparece una cabecera de tabla reconocible.
+    if (
+        "CODIGO" in t
+        and "DESCRIPCION" in t
+        and "CANTIDAD" in t
+        and ("PRECIO" in t or "IMPORTE" in t)
+    ):
+        score += 25
+
+    # Las líneas con varios números suelen representar productos.
+    lineas_tabla = 0
+    for linea in (texto or "").splitlines():
+        nums = re.findall(r"\d+(?:[.,]\d+)?", linea)
+        if len(nums) >= 3:
+            lineas_tabla += 1
+    score += min(lineas_tabla, 12) * 1.5
+
+    return score
+
+
+def _ocr_multilectura(imagen):
+    """
+    Ejecuta OCR sobre varias versiones y configuraciones.
+    Devuelve la lectura con mejor puntuación documental.
+    """
+    lecturas = []
+    variantes = _preparar_variantes_ocr_imagen(imagen)
+
+    for nombre, variante in variantes:
+        for psm in (6, 4, 11):
+            try:
+                txt = pytesseract.image_to_string(
+                    variante,
+                    lang="eng",
+                    config=f"--oem 3 --psm {psm}",
+                )
+                lecturas.append(
+                    (_puntuar_texto_ocr_factura(txt), nombre, psm, txt)
+                )
+            except Exception:
+                continue
+
+    if not lecturas:
+        return ""
+
+    lecturas.sort(key=lambda x: x[0], reverse=True)
+    return lecturas[0][3]
+
+
 def extraer_datos_factura(uploaded_file):
     file_name = uploaded_file.name.lower()
     extracted_text = ""
