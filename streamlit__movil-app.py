@@ -27,7 +27,7 @@ st.set_page_config(
 page_title="WilPOS Móvil | Procesador de Facturas",
     page_icon="📦",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 
 # =========================================================
@@ -7468,6 +7468,116 @@ st.markdown(
   }
   .v4-header-copy span {
     font-size:.65rem !important;
+  }
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+
+st.markdown(
+    """
+<style>
+@media (max-width: 768px) {
+  [data-testid="stHeader"] {
+    display:flex !important;
+    height:2.65rem !important;
+    min-height:2.65rem !important;
+    background:transparent !important;
+    pointer-events:none !important;
+  }
+
+  [data-testid="stHeader"] button,
+  [data-testid="stHeader"] [role="button"],
+  [data-testid="collapsedControl"] {
+    pointer-events:auto !important;
+  }
+
+  [data-testid="stToolbar"] {
+    display:none !important;
+  }
+
+  [data-testid="stMainBlockContainer"],
+  .main .block-container,
+  .block-container {
+    padding-top:.25rem !important;
+    margin-top:0 !important;
+  }
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+
+# =========================================================
+# V6 — SIDEBAR RESPONSIVE PARA MÓVIL
+# =========================================================
+st.markdown(
+    """
+<style>
+/* Escritorio: mantener navegación lateral normal */
+@media (min-width: 769px) {
+  [data-testid="stSidebar"] {
+    transform:none !important;
+    visibility:visible !important;
+  }
+}
+
+/* Móvil y tablets pequeñas */
+@media (max-width: 768px) {
+  /* El contenido principal ocupa todo el ancho */
+  [data-testid="stAppViewContainer"] > .main,
+  [data-testid="stMain"],
+  section.main {
+    width:100% !important;
+    margin-left:0 !important;
+    padding-left:0 !important;
+  }
+
+  [data-testid="stMainBlockContainer"],
+  .main .block-container,
+  .block-container {
+    max-width:100% !important;
+    width:100% !important;
+    margin-left:0 !important;
+    margin-right:0 !important;
+    padding-left:.55rem !important;
+    padding-right:.55rem !important;
+  }
+
+  /* Cuando Streamlit deja el sidebar abierto al cargar en móvil,
+     lo sacamos visualmente del viewport. Al usar el control nativo,
+     Streamlit puede volver a mostrarlo. */
+  [data-testid="stSidebar"][aria-expanded="true"] {
+    position:fixed !important;
+    z-index:9999 !important;
+    height:100vh !important;
+    max-width:82vw !important;
+  }
+
+  /* Reducir su ancho cuando el usuario lo abre manualmente */
+  [data-testid="stSidebar"] {
+    width:min(82vw, 280px) !important;
+    min-width:min(82vw, 280px) !important;
+  }
+
+  /* Mostrar el botón nativo para abrir/cerrar sidebar */
+  [data-testid="collapsedControl"],
+  button[data-testid="stSidebarCollapseButton"],
+  button[data-testid="stSidebarExpandButton"] {
+    display:flex !important;
+    visibility:visible !important;
+    opacity:1 !important;
+    z-index:10000 !important;
+  }
+
+  /* Header compacto en móvil */
+  .v4-app-header {
+    width:100% !important;
+    margin-left:0 !important;
+    margin-right:0 !important;
   }
 }
 </style>
