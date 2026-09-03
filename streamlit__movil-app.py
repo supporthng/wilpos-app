@@ -3758,11 +3758,287 @@ DEFAULTS = {
     "archivos_ocultos_ui": set(),
     "origen_productos_facturas": {},
     "productos_excluidos": set(),
+    "modo_oscuro": False,
 }
 
 for key, value in DEFAULTS.items():
     if key not in st.session_state:
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
+
+
+# =========================================================
+# TEMA VISUAL CLARO / OSCURO
+# =========================================================
+def aplicar_tema_visual():
+    oscuro = bool(st.session_state.get("modo_oscuro", False))
+
+    if oscuro:
+        colores = {
+            "bg": "#07111f",
+            "bg_soft": "#0b1728",
+            "panel": "#101d30",
+            "panel2": "#14243a",
+            "border": "#263850",
+            "text": "#f1f5f9",
+            "muted": "#9fb0c5",
+            "header": "rgba(7,17,31,.92)",
+            "input": "#0c192a",
+            "table_head": "#16263d",
+            "table_alt": "#0d1a2b",
+            "shadow": "rgba(0,0,0,.28)",
+            "hero1": "#101f35",
+            "hero2": "#0b1728",
+            "accent_soft": "rgba(37,99,235,.14)",
+            "sidebar1": "#030b16",
+            "sidebar2": "#071a33",
+        }
+    else:
+        colores = {
+            "bg": "#f4f7fb",
+            "bg_soft": "#eef4fb",
+            "panel": "#ffffff",
+            "panel2": "#f8fbff",
+            "border": "#dce6f2",
+            "text": "#0f172a",
+            "muted": "#64748b",
+            "header": "rgba(244,247,251,.92)",
+            "input": "#ffffff",
+            "table_head": "#f3f7fc",
+            "table_alt": "#fbfdff",
+            "shadow": "rgba(15,23,42,.08)",
+            "hero1": "#ffffff",
+            "hero2": "#edf5ff",
+            "accent_soft": "#eff6ff",
+            "sidebar1": "#06172d",
+            "sidebar2": "#0b2a50",
+        }
+
+    st.markdown(
+        f"""
+        <style>
+        :root {{
+            --bg:{colores["bg"]};
+            --panel:{colores["panel"]};
+            --border:{colores["border"]};
+            --text:{colores["text"]};
+            --muted:{colores["muted"]};
+            --navy:{colores["sidebar1"]};
+            --navy2:{colores["sidebar2"]};
+            color-scheme: {"dark" if oscuro else "light"};
+        }}
+
+        html, body, .stApp {{
+            background:{colores["bg"]} !important;
+            color:{colores["text"]} !important;
+        }}
+
+        [data-testid="stHeader"] {{
+            background:{colores["header"]} !important;
+            border-bottom:1px solid {colores["border"]};
+            backdrop-filter:blur(12px);
+        }}
+
+        [data-testid="stSidebar"] {{
+            background:
+                radial-gradient(circle at 15% 0%, rgba(37,99,235,.22), transparent 28%),
+                linear-gradient(180deg,{colores["sidebar1"]} 0%, {colores["sidebar2"]} 100%) !important;
+        }}
+
+        /* Tarjetas principales */
+        .hero-card,
+        .stats-card,
+        .section-card,
+        .main-card,
+        .inventory-card,
+        .file-card,
+        .file-action-card,
+        .selected-file-card,
+        .preview-file-card,
+        .validation-summary,
+        .duplicate-details-box,
+        .duplicate-mobile-card,
+        .invalid-mobile-card,
+        .empty-state,
+        .process-ready,
+        .process-waiting,
+        .info-strip,
+        .wilpos-products-wrap {{
+            background:{colores["panel"]} !important;
+            border-color:{colores["border"]} !important;
+            color:{colores["text"]} !important;
+            box-shadow:0 10px 30px {colores["shadow"]} !important;
+        }}
+
+        .hero-card {{
+            background:
+                radial-gradient(circle at 88% 18%, rgba(37,99,235,.14), transparent 29%),
+                linear-gradient(135deg,{colores["hero1"]} 0%, {colores["hero2"]} 100%) !important;
+        }}
+
+        .hero-card h1,
+        .hero-card .subtitle,
+        .stats-title,
+        .inventory-title,
+        .main-card-header,
+        .load-title,
+        .margin-heading,
+        .selected-file-name,
+        .preview-file-card,
+        .file-action-name,
+        .file-click-name,
+        .validation-value,
+        .products-count-line {{
+            color:{colores["text"]} !important;
+        }}
+
+        .hero-card p,
+        .mode-caption,
+        .file-action-meta,
+        .file-click-meta,
+        .selected-file-meta,
+        .validation-label,
+        .validation-reason,
+        .process-note,
+        .home-products-note,
+        .products-scroll-hint {{
+            color:{colores["muted"]} !important;
+        }}
+
+        /* Formularios */
+        .stTextInput input,
+        .stNumberInput input,
+        .stDateInput input,
+        .stTextArea textarea,
+        [data-baseweb="select"] > div,
+        [data-testid="stFileUploaderDropzone"] {{
+            background:{colores["input"]} !important;
+            color:{colores["text"]} !important;
+            border-color:{colores["border"]} !important;
+        }}
+
+        [data-testid="stFileUploaderDropzone"] * {{
+            color:{colores["text"]} !important;
+        }}
+
+        /* Expansores */
+        [data-testid="stExpander"] {{
+            background:{colores["panel"]} !important;
+            border:1px solid {colores["border"]} !important;
+            border-radius:14px !important;
+        }}
+        [data-testid="stExpander"] summary,
+        [data-testid="stExpander"] p {{
+            color:{colores["text"]} !important;
+        }}
+
+        /* Dataframes y tablas */
+        [data-testid="stDataFrame"],
+        [data-testid="stTable"] {{
+            border:1px solid {colores["border"]} !important;
+            border-radius:14px !important;
+            overflow:hidden;
+            background:{colores["panel"]} !important;
+        }}
+
+        .wilpos-scroll-table th {{
+            background:{colores["table_head"]} !important;
+            color:{colores["text"]} !important;
+            border-color:{colores["border"]} !important;
+        }}
+        .wilpos-scroll-table td {{
+            background:{colores["panel"]} !important;
+            color:{colores["text"]} !important;
+            border-color:{colores["border"]} !important;
+        }}
+        .wilpos-scroll-table tbody tr:nth-child(even) td {{
+            background:{colores["table_alt"]} !important;
+        }}
+
+        /* Métricas */
+        [data-testid="stMetric"] {{
+            background:{colores["panel"]};
+            border:1px solid {colores["border"]};
+            border-radius:16px;
+            padding:.75rem 1rem;
+            box-shadow:0 8px 24px {colores["shadow"]};
+        }}
+        [data-testid="stMetricLabel"],
+        [data-testid="stMetricValue"] {{
+            color:{colores["text"]} !important;
+        }}
+
+        /* Separadores y texto general */
+        hr {{
+            border-color:{colores["border"]} !important;
+        }}
+        .stMarkdown, .stMarkdown p, .stMarkdown li,
+        [data-testid="stCaptionContainer"] {{
+            color:{colores["text"]};
+        }}
+        [data-testid="stCaptionContainer"] {{
+            opacity:.72;
+        }}
+
+        /* Botones secundarios */
+        .stButton button:not([kind="primary"]),
+        .stDownloadButton button {{
+            background:{colores["panel"]} !important;
+            color:{colores["text"]} !important;
+            border-color:{colores["border"]} !important;
+            border-radius:12px !important;
+        }}
+        .stButton button:not([kind="primary"]):hover,
+        .stDownloadButton button:hover {{
+            border-color:#3b82f6 !important;
+            background:{colores["accent_soft"]} !important;
+        }}
+
+        /* Botones principales */
+        .stButton button[kind="primary"] {{
+            border-radius:12px !important;
+            box-shadow:0 8px 18px rgba(37,99,235,.23) !important;
+        }}
+
+        /* Toggle de apariencia */
+        [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {{
+            color:#dbeafe !important;
+            font-weight:700 !important;
+        }}
+        [data-testid="stSidebar"] [data-testid="stToggle"] {{
+            padding:.25rem .1rem .65rem .1rem;
+        }}
+
+        /* Scroll */
+        ::-webkit-scrollbar {{
+            width:9px;
+            height:9px;
+        }}
+        ::-webkit-scrollbar-thumb {{
+            background:{"#344963" if oscuro else "#c7d5e5"};
+            border-radius:20px;
+        }}
+        ::-webkit-scrollbar-track {{
+            background:transparent;
+        }}
+
+        @media (max-width:700px) {{
+            .block-container {{
+                padding-top:.65rem !important;
+            }}
+            .hero-card,
+            .stats-card,
+            .section-card,
+            .main-card {{
+                border-radius:16px !important;
+            }}
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+aplicar_tema_visual()
 
 
 
@@ -6122,6 +6398,12 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
+    st.toggle(
+        "🌙 Modo oscuro",
+        key="modo_oscuro",
+        help="Activa o desactiva el tema oscuro. El modo claro queda disponible al apagar este interruptor.",
+    )
+
     pagina = st.radio(
         "Navegación",
         [
@@ -6134,9 +6416,23 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
-    st.markdown("""
-    <div style="height:1px;background:rgba(255,255,255,.08);margin:.9rem 0;"></div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div style="
+            display:flex;
+            align-items:center;
+            gap:.45rem;
+            color:#94a3b8;
+            font-size:.68rem;
+            font-weight:750;
+            letter-spacing:.04em;
+            padding:.15rem .1rem .2rem .1rem;">
+            {"🌙 OSCURO" if st.session_state.modo_oscuro else "☀️ CLARO"}
+        </div>
+        <div style="height:1px;background:rgba(255,255,255,.08);margin:.55rem 0 .9rem 0;"></div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     st.markdown(f"""
     <div class="side-summary">
