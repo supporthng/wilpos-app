@@ -6986,7 +6986,20 @@ def render_carga_facturas(titulo=True):
         # El botón principal se muestra en la columna derecha,
         # justo debajo del margen de ganancia.
         with margen_col:
-            st.markdown('<div class="process-action-spacer"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="process-action-spacer compact"></div>', unsafe_allow_html=True)
+
+            if st.button(
+                "🚀  Procesar Factura",
+                type="primary",
+                use_container_width=True,
+                disabled=(len(archivos_validos) == 0 or margen_porcentaje <= 0),
+                key="procesar_facturas_principal",
+            ):
+                modal_confirmacion(
+                    archivos_validos,
+                    len(archivos_duplicados),
+                    margen_porcentaje,
+                )
 
             # =====================================================
             # RESUMEN DE VALIDACIÓN DEL LOTE
@@ -7086,19 +7099,6 @@ def render_carga_facturas(titulo=True):
                 )
                 st.markdown(detalle_html, unsafe_allow_html=True)
 
-            if st.button(
-                "🚀  Generar Archivo Excel",
-                type="primary",
-                use_container_width=True,
-                disabled=(len(archivos_validos) == 0 or margen_porcentaje <= 0),
-                key="procesar_facturas_principal",
-            ):
-                modal_confirmacion(
-                    archivos_validos,
-                    len(archivos_duplicados),
-                    margen_porcentaje,
-                )
-
             st.caption(
                 "Se omiten automáticamente las facturas duplicadas antes de consolidar."
             )
@@ -7108,29 +7108,17 @@ def render_carga_facturas(titulo=True):
     else:
         # Mantener visible la acción principal desde el primer momento.
         # Se habilitará automáticamente cuando existan facturas válidas
-        # y el margen sea mayor al 15%.
+        # y la ganancia sea mayor al 0%.
         with margen_col:
-            st.markdown('<div class="process-action-spacer"></div>', unsafe_allow_html=True)
-            st.markdown(
-                """
-                <div class="process-ready process-waiting">
-                    <div class="process-ready-icon">📄</div>
-                    <div>
-                        <b>Generar Archivo Excel</b>
-                        <span>Carga tus facturas para habilitar el procesamiento</span>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            st.markdown('<div class="process-action-spacer compact"></div>', unsafe_allow_html=True)
             st.button(
-                "🚀  Generar Archivo Excel",
+                "🚀  Procesar Factura",
                 type="primary",
                 use_container_width=True,
                 disabled=True,
                 key="procesar_facturas_principal_inactivo",
             )
-            st.caption("Se habilita automáticamente cuando haya facturas válidas.")
+            st.caption("Carga una factura válida para habilitar el procesamiento.")
 
         st.markdown("""
         <div class="empty-state">
