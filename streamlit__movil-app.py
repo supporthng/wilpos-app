@@ -4727,6 +4727,156 @@ def aplicar_layout_v2():
 aplicar_layout_v2()
 
 
+# =========================================================
+# TEMA V3 — DASHBOARD COMPACTO
+# =========================================================
+def aplicar_layout_v3():
+    dark = bool(st.session_state.get("modo_oscuro", False))
+    bg = "#07111e" if dark else "#f7f9fc"
+    panel = "#0d1b2c" if dark else "#ffffff"
+    panel2 = "#0b1726" if dark else "#fbfdff"
+    border = "#233750" if dark else "#dbe5f0"
+    txt = "#eef5ff" if dark else "#10203a"
+    muted = "#9aabc0" if dark else "#62728a"
+    shadow = "rgba(0,0,0,.22)" if dark else "rgba(39,67,104,.08)"
+
+    st.markdown(
+        f"""
+<style>
+.stApp {{background:{bg} !important;}}
+.block-container {{max-width:1500px !important;padding:1.15rem 1.35rem 2rem 1.35rem !important;}}
+[data-testid="stHeader"] {{background:transparent !important;}}
+
+[data-testid="stSidebar"] {{
+  width:228px !important;
+  background:{"linear-gradient(180deg,#07172b,#061321)" if dark else "#ffffff"} !important;
+  border-right:1px solid {border} !important;
+  box-shadow:none !important;
+}}
+.v3-side-brand {{padding:.55rem .35rem 1.1rem .35rem;}}
+.v3-side-brand img {{width:150px;max-height:52px;object-fit:contain;object-position:left center;}}
+.v3-side-label {{
+  color:{"#8297b2" if dark else "#44556d"};font-size:.68rem;font-weight:850;
+  letter-spacing:.08em;margin:.25rem .35rem .45rem .35rem;
+}}
+.v3-side-divider {{height:1px;background:{border};margin:1.1rem .25rem 1rem .25rem;}}
+.v3-side-bottom-gap {{height:1rem;}}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] {{gap:.18rem !important;}}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label {{
+  border-radius:9px !important;padding:.52rem .65rem !important;
+}}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label:has(input:checked) {{
+  background:linear-gradient(135deg,#1d67e8,#124ed5) !important;box-shadow:none !important;
+}}
+[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label p {{font-size:.79rem !important;}}
+[data-testid="stSidebar"] [data-testid="stToggle"] {{
+  border:none !important;background:transparent !important;padding:.3rem .35rem !important;
+}}
+
+.v3-page-title h1 {{
+  font-size:1.75rem !important;margin:0 !important;color:{txt} !important;letter-spacing:-.035em;
+}}
+.v3-page-title p {{margin:.22rem 0 0 0;color:{muted};font-size:.82rem;}}
+.v3-top-label {{font-size:.66rem;font-weight:780;color:{txt};margin:.1rem 0 .28rem .12rem;}}
+.v3-top-itbis {{
+  height:70px;display:flex;flex-direction:column;justify-content:center;padding:.55rem .7rem;
+  border-radius:10px;border:1px solid rgba(59,130,246,.23);
+  background:{"#0b2445" if dark else "#edf5ff"};
+}}
+.v3-top-itbis span {{color:{"#7fb2ff" if dark else "#1d4ed8"};font-size:.64rem;font-weight:750;}}
+.v3-top-itbis strong {{color:{"#53a8ff" if dark else "#1d4ed8"};font-size:1.28rem;margin-top:.15rem;}}
+
+.v3-kpi-grid {{
+  display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.7rem;margin:1rem 0 .85rem 0;
+}}
+.v3-kpi-card {{
+  min-height:100px;display:flex;align-items:center;gap:.72rem;padding:.85rem .82rem;
+  border:1px solid {border};border-radius:12px;background:{panel};box-shadow:0 5px 16px {shadow};
+}}
+.v3-kpi-icon {{
+  width:42px;height:42px;flex:0 0 42px;display:flex;align-items:center;justify-content:center;
+  border-radius:50%;font-size:1rem;font-weight:900;
+}}
+.v3-kpi-icon.blue {{background:rgba(37,99,235,.13);}}
+.v3-kpi-icon.green {{background:rgba(34,197,94,.13);}}
+.v3-kpi-icon.purple {{background:rgba(139,92,246,.13);}}
+.v3-kpi-icon.orange {{background:rgba(249,115,22,.13);}}
+.v3-kpi-icon.teal {{background:rgba(20,184,166,.13);}}
+.v3-kpi-card span {{display:block;color:{muted};font-size:.65rem;font-weight:720;}}
+.v3-kpi-card strong {{
+  display:block;color:{txt};font-size:1.15rem;line-height:1.18;margin:.16rem 0;
+  letter-spacing:-.02em;white-space:nowrap;
+}}
+.v3-kpi-card small {{color:{muted};font-size:.61rem;}}
+
+[data-testid="stVerticalBlockBorderWrapper"] {{
+  border-color:{border} !important;border-radius:12px !important;background:{panel} !important;
+  box-shadow:0 5px 16px {shadow};
+}}
+.v3-panel-title {{color:{txt};font-size:.86rem;font-weight:850;margin:0 0 .55rem 0;}}
+.v3-drop-heading {{
+  display:flex;align-items:center;gap:.7rem;padding:.55rem .65rem;border:1px dashed {border};
+  border-radius:9px;background:{panel2};margin-bottom:.45rem;
+}}
+.v3-cloud {{
+  width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:50%;
+  background:rgba(37,99,235,.12);
+}}
+.v3-drop-heading b {{display:block;color:{txt};font-size:.72rem;}}
+.v3-drop-heading span {{display:block;color:{muted};font-size:.61rem;margin-top:.1rem;}}
+[data-testid="stFileUploaderDropzone"] {{
+  min-height:52px !important;padding:.45rem .65rem !important;border-radius:8px !important;
+  border-color:{border} !important;background:{panel2} !important;
+}}
+.v3-config-label {{margin:.85rem 0 .16rem 0;color:{txt};font-size:.69rem;font-weight:850;}}
+.v3-itbis-box {{
+  height:64px;display:flex;flex-direction:column;justify-content:center;border:1px solid rgba(59,130,246,.22);
+  border-radius:8px;padding:.42rem .52rem;background:{"#0b2445" if dark else "#eff6ff"};margin-top:1.55rem;
+}}
+.v3-itbis-box span {{font-size:.58rem;color:{"#8ab8f7" if dark else "#295eb2"};}}
+.v3-itbis-box strong {{font-size:1.05rem;color:{"#55a7ff" if dark else "#1d4ed8"};}}
+.v3-valid {{
+  margin:.45rem 0;padding:.45rem .55rem;border-radius:8px;font-size:.64rem;color:#14833b;
+  border:1px solid rgba(34,197,94,.25);background:rgba(34,197,94,.07);
+}}
+.v3-invalid {{
+  margin:.45rem 0;padding:.45rem .55rem;border-radius:8px;font-size:.64rem;color:#b42318;
+  border:1px solid rgba(239,68,68,.25);background:rgba(239,68,68,.07);
+}}
+
+[data-testid="stDataFrame"] {{
+  border:1px solid {border} !important;border-radius:9px !important;overflow:hidden;background:{panel} !important;
+}}
+[data-testid="stDataFrame"] * {{font-size:.72rem !important;}}
+.stButton button,.stDownloadButton button {{
+  min-height:36px !important;border-radius:8px !important;font-size:.72rem !important;
+}}
+.stButton button[kind="primary"] {{background:linear-gradient(135deg,#1e63df,#144dd4) !important;}}
+
+.hero-grid,.hero-card,.stats-card,.modern-page-header,.modern-kpi-grid {{display:none !important;}}
+
+@media(max-width:1100px) {{
+  .v3-kpi-grid {{grid-template-columns:repeat(2,minmax(0,1fr));}}
+}}
+@media(max-width:700px) {{
+  .block-container {{padding:.65rem .7rem 1.5rem .7rem !important;}}
+  .v3-page-title h1 {{font-size:1.42rem !important;}}
+  .v3-kpi-grid {{grid-template-columns:1fr 1fr;gap:.45rem;}}
+  .v3-kpi-card {{min-height:82px;padding:.65rem;}}
+  .v3-kpi-card strong {{font-size:.94rem;}}
+  .v3-kpi-icon {{width:34px;height:34px;flex-basis:34px;}}
+}}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+aplicar_layout_v3()
+
+
+
+
 
 WILPOS_LOGO_B64 = "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"
 
@@ -6493,173 +6643,89 @@ def render_gestor_exclusion_productos(df_productos, key_prefix):
 
 
 def render_carga_facturas(titulo=True):
-    """Carga y procesa facturas con un selector visual robusto basado en botones reales."""
+    """Carga y procesa facturas conservando toda la lógica original."""
 
-    st.markdown(
-        '<div class="load-title">Cargar archivo y configurar</div>',
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "Selecciona tus facturas, define el porcentaje de ganancia y genera el archivo para WilPOS."
-    )
-
-    carga_col, margen_col = st.columns([3.2, 1], gap="medium")
-
-    # =========================================================
-    # IZQUIERDA: selector real de modo de carga
-    # =========================================================
-    with carga_col:
-        b1, b2, b3 = st.columns(3, gap="small")
-
-        with b1:
-            st.markdown(
-                """
-                <div class="mode-icon">📁</div>
-                """,
-                unsafe_allow_html=True,
-            )
-            if st.button(
-                "Cargar Facturas",
-                use_container_width=True,
-                type="primary" if st.session_state.modo_carga_ui == "archivos" else "secondary",
-                key="modo_archivos_btn",
-            ):
-                st.session_state.modo_carga_ui = "archivos"
-                st.rerun()
-            st.markdown(
-                '<div class="mode-caption">PDF, JPG, JPEG o PNG</div>',
-                unsafe_allow_html=True,
-            )
-
-        with b2:
-            st.markdown(
-                """
-                <div class="mode-icon">📷</div>
-                """,
-                unsafe_allow_html=True,
-            )
-            if st.button(
-                "Tomar foto",
-                use_container_width=True,
-                type="primary" if st.session_state.modo_carga_ui == "camara" else "secondary",
-                key="modo_camara_btn",
-            ):
-                st.session_state.modo_carga_ui = "camara"
-                st.rerun()
-            st.markdown(
-                '<div class="mode-caption">Usar cámara del teléfono</div>',
-                unsafe_allow_html=True,
-            )
-
-        with b3:
-            st.markdown(
-                """
-                <div class="mode-icon">☁️</div>
-                """,
-                unsafe_allow_html=True,
-            )
-            if st.button(
-                "Arrastrar y soltar",
-                use_container_width=True,
-                type="primary" if st.session_state.modo_carga_ui == "arrastrar" else "secondary",
-                key="modo_arrastrar_btn",
-            ):
-                st.session_state.modo_carga_ui = "arrastrar"
-                st.rerun()
-            st.markdown(
-                '<div class="mode-caption">Suelta tus archivos aquí</div>',
-                unsafe_allow_html=True,
-            )
-
+    with st.container(border=True):
         st.markdown(
-            '<div class="load-supported">Formatos soportados: PDF, JPG, JPEG, PNG · Puedes seleccionar múltiples archivos</div>',
+            '<div class="v3-panel-title">Cargar facturas o imágenes</div>',
             unsafe_allow_html=True,
         )
 
-        uploaded_files = []
+        st.markdown(
+            """
+<div class="v3-drop-heading">
+  <div class="v3-cloud">☁️</div>
+  <div>
+    <b>Arrastra y suelta tus archivos aquí</b>
+    <span>Formatos soportados: JPG, PNG, PDF</span>
+  </div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
 
-        if st.session_state.modo_carga_ui == "archivos":
-            uploaded_files = st.file_uploader(
-                "Selecciona tus facturas",
-                type=["pdf", "png", "jpg", "jpeg"],
-                accept_multiple_files=True,
-                key=f"uploader_{st.session_state.uploader_key}",
-            ) or []
+        uploaded_files = st.file_uploader(
+            "Seleccionar archivos",
+            type=["pdf", "png", "jpg", "jpeg"],
+            accept_multiple_files=True,
+            key=f"uploader_{st.session_state.uploader_key}",
+            label_visibility="collapsed",
+            help="Selecciona uno o varios archivos. También puedes arrastrarlos al área de carga.",
+        ) or []
 
-        elif st.session_state.modo_carga_ui == "camara":
+        with st.expander("📷 Usar cámara del teléfono", expanded=False):
             foto = st.camera_input(
                 "Toma una foto completa de la factura",
                 key=f"camera_{st.session_state.camera_key}",
             )
             if foto is not None:
-                uploaded_files = [foto]
+                uploaded_files = list(uploaded_files) + [foto]
 
-        else:
-            uploaded_files = st.file_uploader(
-                "Arrastra y suelta tus facturas",
-                type=["pdf", "png", "jpg", "jpeg"],
-                accept_multiple_files=True,
-                key=f"drag_uploader_{st.session_state.uploader_key}",
-                help="Arrastra uno o varios archivos dentro del área punteada.",
-            ) or []
-
-    # =========================================================
-    # DERECHA: margen real
-    # =========================================================
-    with margen_col:
         st.markdown(
-            '<div class="margin-heading">Ganancia (%)</div>',
+            '<div class="v3-config-label">Configuración de precios</div>',
             unsafe_allow_html=True,
         )
-
-        margen_porcentaje = st.number_input(
-            "Ganancia (%)",
-            min_value=0.0,
-            max_value=500.0,
-            value=float(st.session_state.margen_usado),
-            step=1.0,
-            format="%.2f",
-            label_visibility="collapsed",
-            key=f"margen_input_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+        st.caption(
+            "Precio Venta = Costo sin ITBIS × (1 + % de ganancia) × (1 + ITBIS)"
         )
-        formula_html = """
-<div style="
-  margin:.25rem 0 .7rem 0;
-  padding:.72rem .82rem;
-  border-radius:12px;
-  border:1px solid var(--border);
-  background:rgba(37,99,235,.06);
-  font-size:.78rem;
-  line-height:1.45;">
-  <b>Precio Venta</b> = Costo sin ITBIS × (1 + % de ganancia) × (1 + ITBIS)<br>
-  <span style="opacity:.72;">Ejemplo con 25%: RD$1,000 × 1.25 × 1.18 = RD$1,475.00 antes del redondeo.</span>
-</div>
-"""
-        st.markdown(formula_html, unsafe_allow_html=True)
 
+        precio_c1, precio_c2 = st.columns([3.2, 1], gap="small")
+
+        with precio_c1:
+            margen_porcentaje = st.number_input(
+                "% de Ganancia",
+                min_value=0.0,
+                max_value=500.0,
+                value=float(st.session_state.margen_usado),
+                step=1.0,
+                format="%.2f",
+                key=f"margen_input_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+            )
+
+        with precio_c2:
+            st.markdown(
+                """
+<div class="v3-itbis-box">
+  <span>ITBIS aplicado</span>
+  <strong>18%</strong>
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+
+        margen_col = st.container()
 
         if margen_porcentaje > 0:
             st.markdown(
-                """
-                <div class="margin-status ok-status">
-                    ✓ Ganancia válida para procesar
-                </div>
-                """,
+                '<div class="v3-valid">✓ Ganancia válida para procesar</div>',
                 unsafe_allow_html=True,
             )
         else:
             st.markdown(
-                """
-                <div class="margin-status warn-status">
-                    La ganancia debe ser mayor al 0%
-                </div>
-                """,
+                '<div class="v3-invalid">La ganancia debe ser mayor al 0%</div>',
                 unsafe_allow_html=True,
             )
 
-    # =========================================================
-    # ARCHIVOS SELECCIONADOS — vista compacta y funcional
-    # =========================================================
     def _huella_archivo_ui(archivo):
         try:
             datos = archivo.getvalue()
@@ -7082,16 +7148,15 @@ def render_carga_facturas(titulo=True):
 total_facturas, total_productos, total_lineas, total_unidades, valor_compra = totales_dashboard()
 
 with st.sidebar:
-    st.markdown("""
-    <div class="modern-side-brand">
-      <div class="modern-side-mark">W</div>
-      <div>
-        <div class="modern-side-name">WilPOS</div>
-        <div class="modern-side-sub">Procesador de Facturas</div>
-      </div>
-    </div>
-    <div class="modern-side-label">MENÚ</div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        f"""
+<div class="v3-side-brand">
+  <img src="data:image/png;base64,{WILPOS_LOGO_B64}" alt="WilPOS">
+</div>
+<div class="v3-side-label">MENÚ</div>
+""",
+        unsafe_allow_html=True,
+    )
 
     pagina = st.radio(
         "Navegación",
@@ -7106,28 +7171,21 @@ with st.sidebar:
     )
 
     st.markdown(
-        '<div class="modern-side-divider"></div>'
-        '<div class="modern-side-label">APARIENCIA</div>',
+        """
+<div class="v3-side-divider"></div>
+<div class="v3-side-label">APARIENCIA</div>
+""",
         unsafe_allow_html=True,
     )
 
     st.toggle(
         "🌙 Modo oscuro",
         key="modo_oscuro",
-        help="Activa el tema oscuro o vuelve al tema claro.",
+        help="Cambia entre tema claro y oscuro.",
     )
 
-    st.markdown(
-        f"""
-        <div class="modern-mini-status">
-            <span>{"🌙" if st.session_state.modo_oscuro else "☀️"}</span>
-            <span>{"Modo oscuro activo" if st.session_state.modo_oscuro else "Modo claro activo"}</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown("<div class='v3-side-bottom-gap'></div>", unsafe_allow_html=True)
 
-    st.markdown("<div class='modern-side-spacer'></div>", unsafe_allow_html=True)
     if st.button("🔄 Reiniciar todo", use_container_width=True):
         resetear_todo()
         st.rerun()
@@ -7137,164 +7195,164 @@ with st.sidebar:
 # INICIO
 # =========================================================
 if pagina == "🏠 Inicio":
-    # HTML sin sangría inicial para evitar que Markdown lo muestre como código.
-    home_html = f"""
-<div class="modern-page-header">
-  <div>
-    <div class="modern-eyebrow">WILPOS · PROCESAMIENTO DE COMPRAS</div>
-    <h1>Procesador de Facturas</h1>
-    <p>Convierte tus facturas de compra en productos consolidados y genera el Excel listo para WilPOS.</p>
-  </div>
-  <div class="modern-header-logo">
-    <img src="data:image/png;base64,{WILPOS_LOGO_B64}" alt="WilPOS">
-  </div>
+    head_left, head_gain, head_itbis = st.columns([5.8, 1.25, .9], gap="medium")
+
+    with head_left:
+        st.markdown(
+            """
+<div class="v3-page-title">
+  <h1>Procesar Facturas e Imágenes</h1>
+  <p>Extrae productos, calcula precios y genera el archivo para WilPOS automáticamente.</p>
 </div>
-<div class="modern-kpi-grid">
-  <div class="modern-kpi-card">
-    <div class="modern-kpi-icon blue">🧾</div>
-    <div>
-      <div class="modern-kpi-label">Facturas procesadas</div>
-      <div class="modern-kpi-value">{total_facturas}</div>
-    </div>
+""",
+            unsafe_allow_html=True,
+        )
+
+    with head_gain:
+        st.markdown('<div class="v3-top-label">% de Ganancia</div>', unsafe_allow_html=True)
+        margen_home = st.number_input(
+            "Ganancia principal",
+            min_value=0.0,
+            max_value=500.0,
+            value=float(st.session_state.margen_usado),
+            step=1.0,
+            format="%.0f",
+            label_visibility="collapsed",
+            key="margen_home_v3",
+        )
+        if margen_home != st.session_state.margen_usado:
+            st.session_state.margen_usado = float(margen_home)
+
+    with head_itbis:
+        st.markdown(
+            """
+<div class="v3-top-itbis">
+  <span>ITBIS aplicado</span>
+  <strong>18%</strong>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+    df_home = construir_df_productos()
+    valor_venta_estimado = 0.0
+    if not df_home.empty:
+        try:
+            valor_venta_estimado = float(
+                (df_home["Precio Venta"].astype(float) * df_home["Stock"].astype(float)).sum()
+            )
+        except Exception:
+            valor_venta_estimado = 0.0
+
+    ganancia_estimada = max(0.0, valor_venta_estimado - valor_compra)
+
+    kpi_html = f"""
+<div class="v3-kpi-grid">
+  <div class="v3-kpi-card">
+    <div class="v3-kpi-icon blue">🧾</div>
+    <div><span>Facturas procesadas</span><strong>{total_facturas}</strong><small>archivos</small></div>
   </div>
-  <div class="modern-kpi-card">
-    <div class="modern-kpi-icon green">📦</div>
-    <div>
-      <div class="modern-kpi-label">Productos únicos</div>
-      <div class="modern-kpi-value">{total_productos}</div>
-    </div>
+  <div class="v3-kpi-card">
+    <div class="v3-kpi-icon green">📦</div>
+    <div><span>Productos únicos</span><strong>{total_productos}</strong><small>productos</small></div>
   </div>
-  <div class="modern-kpi-card">
-    <div class="modern-kpi-icon purple">🏷️</div>
-    <div>
-      <div class="modern-kpi-label">% de Ganancia</div>
-      <div class="modern-kpi-value">{float(st.session_state.margen_usado):.0f}%</div>
-      <div class="modern-kpi-note">Editable al procesar</div>
-    </div>
+  <div class="v3-kpi-card">
+    <div class="v3-kpi-icon purple">💲</div>
+    <div><span>Valor de compra</span><strong>RD${valor_compra:,.2f}</strong><small>sin ITBIS</small></div>
   </div>
-  <div class="modern-kpi-card">
-    <div class="modern-kpi-icon orange">🧮</div>
-    <div>
-      <div class="modern-kpi-label">ITBIS aplicado</div>
-      <div class="modern-kpi-value">18%</div>
-      <div class="modern-kpi-note">Cuando corresponde</div>
-    </div>
+  <div class="v3-kpi-card">
+    <div class="v3-kpi-icon orange">📈</div>
+    <div><span>Valor de venta</span><strong>RD${valor_venta_estimado:,.2f}</strong><small>con ITBIS</small></div>
+  </div>
+  <div class="v3-kpi-card">
+    <div class="v3-kpi-icon teal">%</div>
+    <div><span>Ganancia estimada</span><strong>RD${ganancia_estimada:,.2f}</strong><small>{float(st.session_state.margen_usado):.0f}%</small></div>
   </div>
 </div>
 """
-    st.markdown(home_html, unsafe_allow_html=True)
+    st.markdown(kpi_html, unsafe_allow_html=True)
 
-    render_carga_facturas(titulo=False)
+    upload_col, preview_col = st.columns([.92, 1.65], gap="medium")
 
+    with upload_col:
+        render_carga_facturas(titulo=False)
 
+    with preview_col:
+        st.markdown(
+            '<div class="v3-panel-title">Vista previa del inventario</div>',
+            unsafe_allow_html=True,
+        )
 
-    if st.session_state.detalle_facturas_procesadas:
-        st.markdown('<div class="inventory-card">', unsafe_allow_html=True)
+        df_preview = construir_df_productos()
 
-        df_inicio = construir_df_productos()
-
-        inv_c1, inv_preview, inv_download = st.columns([3.2, 1, 1.25])
-
-        with inv_c1:
-            st.markdown(
-                f'<div class="inventory-title">📦 Productos consolidados '
-                f'<span class="badge">{len(df_inicio)} productos únicos</span></div>',
-                unsafe_allow_html=True
-            )
-
-        with inv_preview:
-            if not df_inicio.empty:
-                if st.button(
-                    "👁 Vista previa",
-                    use_container_width=True,
-                    key="preview_productos_inicio",
-                ):
-                    mostrar_vista_previa_productos(df_inicio)
-
-        with inv_download:
-            if not df_inicio.empty:
-                excel_inicio = generar_excel_wilpos(df_inicio)
+        if not df_preview.empty:
+            botones_a, botones_b, botones_c = st.columns([2.4, 1.15, 1.05], gap="small")
+            with botones_b:
+                if st.button("Ver inventario completo", use_container_width=True, key="v3_ver_inv"):
+                    mostrar_vista_previa_productos(df_preview)
+            with botones_c:
+                excel_home = generar_excel_wilpos(df_preview)
                 st.download_button(
-                    "📥 Descargar Excel",
-                    data=excel_inicio,
+                    "⬇ Exportar Excel",
+                    data=excel_home,
                     file_name="Productos_WilPOS_Consolidados.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                     type="primary",
-                    key="download_excel_inicio",
+                    key="v3_export_home",
                 )
 
-        if not df_inicio.empty:
-            render_gestor_exclusion_productos(
-                df_inicio,
-                key_prefix="inicio",
-            )
-
-            # Reconstruir porque una exclusión puede haber cambiado el consolidado.
-            df_inicio = construir_df_productos()
-
-            cols = [
+            cols_preview = [
                 c for c in [
                     "Código Barra",
                     "Nombre",
-                    "Cantidad Empaque",
                     "Stock",
                     "Costo",
+                    "ITBIS",
+                    "Precio Venta",
+                    "Categoría",
+                ] if c in df_preview.columns
+            ]
+
+            df_show = df_preview[cols_preview].head(8).copy()
+            if "Nombre" in df_show.columns:
+                df_show = df_show.rename(columns={"Nombre": "Descripción"})
+            if "Stock" in df_show.columns:
+                df_show = df_show.rename(columns={"Stock": "Cantidad"})
+
+            st.dataframe(
+                df_show,
+                use_container_width=True,
+                hide_index=True,
+                height=310,
+                column_config={
+                    "Costo": st.column_config.NumberColumn(format="RD$ %.2f"),
+                    "Precio Venta": st.column_config.NumberColumn(format="RD$ %.2f"),
+                    "ITBIS": st.column_config.NumberColumn(format="%.2f"),
+                },
+            )
+            st.caption(f"Mostrando {min(8, len(df_preview))} de {len(df_preview)} productos")
+        else:
+            empty_df = pd.DataFrame(
+                columns=[
+                    "Código Barra",
+                    "Descripción",
+                    "Cantidad",
+                    "Costo sin ITBIS",
+                    "ITBIS",
                     "Precio Venta",
                     "Categoría",
                 ]
-                if c in df_inicio.columns
-            ]
-
-            st.markdown(
-                f"""
-                <div class="home-products-note">
-                    <span><b>{len(df_inicio)}</b> productos consolidados</span>
-                    <span>↕ Desplázate para ver todos</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
             )
-
-            # IMPORTANTE: ya no se usa .head(8).
-            # Todas las filas están dentro del dataframe y el scroll
-            # vertical aparece al superar la altura configurada.
             st.dataframe(
-                df_inicio[cols],
+                empty_df,
                 use_container_width=True,
                 hide_index=True,
-                height=500,
-                column_config={
-                    "Código Barra": st.column_config.TextColumn(
-                        "Código Barra", width="medium"
-                    ),
-                    "Nombre": st.column_config.TextColumn(
-                        "Nombre", width="large"
-                    ),
-                    "Cantidad Empaque": st.column_config.NumberColumn(
-                        "Cantidad Empaque", format="%d"
-                    ),
-                    "Stock": st.column_config.NumberColumn(
-                        "Stock", format="%d"
-                    ),
-                    "Costo": st.column_config.NumberColumn(
-                        "Costo", format="%.4f"
-                    ),
-                    "Precio Venta": st.column_config.NumberColumn(
-                        "Precio Venta", format="%.2f"
-                    ),
-                    "Categoría": st.column_config.TextColumn(
-                        "Categoría", width="medium"
-                    ),
-                },
+                height=310,
             )
+            st.caption("Carga y procesa facturas para mostrar productos aquí.")
 
-        st.markdown('</div>', unsafe_allow_html=True)
 
-
-# =========================================================
-# GENERAR ARCHIVO EXCEL
-# =========================================================
 elif pagina == "🧾 Generar Archivo Excel":
     render_carga_facturas(titulo=True)
 
