@@ -4037,6 +4037,382 @@ def aplicar_tema_visual():
         unsafe_allow_html=True,
     )
 
+    # Capa visual moderna. Solo CSS: no cambia la lógica de la app.
+    st.markdown(
+        f"""
+        <style>
+        /* =====================================================
+           WILPOS - REDISEÑO VISUAL MODERNO
+           ===================================================== */
+
+        .block-container {{
+            max-width: 1500px !important;
+            padding-top: 1.15rem !important;
+            padding-left: 1.4rem !important;
+            padding-right: 1.4rem !important;
+            padding-bottom: 2rem !important;
+        }}
+
+        /* Sidebar */
+        [data-testid="stSidebar"] {{
+            border-right: 1px solid rgba(148,163,184,.16);
+            box-shadow: 10px 0 35px rgba(2,6,23,.08);
+        }}
+
+        [data-testid="stSidebar"] > div:first-child {{
+            padding-top: .45rem;
+        }}
+
+        [data-testid="stSidebar"] .stRadio > label {{
+            display:none;
+        }}
+
+        [data-testid="stSidebar"] .stRadio div[role="radiogroup"] {{
+            gap: .32rem;
+        }}
+
+        [data-testid="stSidebar"] .stRadio div[role="radiogroup"] label {{
+            border-radius: 11px !important;
+            padding: .55rem .72rem !important;
+            transition: all .18s ease;
+        }}
+
+        [data-testid="stSidebar"] .stRadio div[role="radiogroup"] label:hover {{
+            background: rgba(59,130,246,.15) !important;
+        }}
+
+        [data-testid="stSidebar"] .stRadio div[role="radiogroup"] label:has(input:checked) {{
+            background: linear-gradient(135deg,#2563eb,#0f6ae8) !important;
+            box-shadow: 0 8px 18px rgba(37,99,235,.28);
+        }}
+
+        [data-testid="stSidebar"] .stRadio div[role="radiogroup"] label:has(input:checked) p {{
+            color: white !important;
+            font-weight: 800 !important;
+        }}
+
+        /* Encabezados */
+        h1 {{
+            font-size: clamp(1.65rem, 2.4vw, 2.45rem) !important;
+            line-height:1.08 !important;
+            letter-spacing:-.035em !important;
+            color:{colores["text"]} !important;
+            margin-bottom:.35rem !important;
+        }}
+
+        h2 {{
+            letter-spacing:-.025em !important;
+        }}
+
+        h3 {{
+            letter-spacing:-.018em !important;
+        }}
+
+        /* Hero */
+        .hero-grid {{
+            gap: 1rem !important;
+            align-items: stretch !important;
+            margin-bottom: 1rem !important;
+        }}
+
+        .hero-card {{
+            min-height: 220px !important;
+            border-radius: 22px !important;
+            padding: 1.45rem 1.55rem !important;
+            overflow: hidden !important;
+            position: relative !important;
+        }}
+
+        .hero-card:before {{
+            content:"";
+            position:absolute;
+            width:220px;
+            height:220px;
+            border-radius:50%;
+            right:-85px;
+            top:-90px;
+            background:radial-gradient(circle,rgba(37,99,235,.18),transparent 68%);
+            pointer-events:none;
+        }}
+
+        .hero-copy {{
+            position:relative;
+            z-index:3;
+            max-width:68%;
+        }}
+
+        .hero-copy h1 {{
+            margin-top:.12rem !important;
+        }}
+
+        .hero-copy .subtitle {{
+            font-size:.98rem !important;
+            line-height:1.55 !important;
+            max-width:720px;
+        }}
+
+        .hero-brand-zone {{
+            right: 1.5rem !important;
+            top: 1.25rem !important;
+        }}
+
+        .wilpos-hero-logo {{
+            max-width: 180px !important;
+            max-height: 72px !important;
+            object-fit: contain !important;
+            filter: {"brightness(1.08)" if oscuro else "none"};
+        }}
+
+        /* Statistics card */
+        .stats-card {{
+            border-radius:22px !important;
+            padding:1.15rem 1.2rem !important;
+            min-height:220px !important;
+        }}
+
+        .stats-title {{
+            font-size:.78rem !important;
+            letter-spacing:.08em !important;
+            text-transform:uppercase;
+            color:{colores["muted"]} !important;
+        }}
+
+        /* Cards */
+        .section-card,
+        .main-card,
+        .inventory-card {{
+            border-radius:20px !important;
+            padding:1.15rem 1.2rem !important;
+        }}
+
+        .file-action-card,
+        .file-card,
+        .selected-file-card,
+        .preview-file-card,
+        .duplicate-mobile-card,
+        .invalid-mobile-card {{
+            border-radius:16px !important;
+            transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+        }}
+
+        .file-action-card:hover,
+        .file-card:hover {{
+            transform:translateY(-2px);
+            border-color:rgba(59,130,246,.55) !important;
+            box-shadow:0 14px 28px {colores["shadow"]} !important;
+        }}
+
+        /* Métricas nativas */
+        [data-testid="stMetric"] {{
+            border-radius:16px !important;
+            min-height: 105px;
+            display:flex;
+            flex-direction:column;
+            justify-content:center;
+        }}
+
+        [data-testid="stMetricValue"] {{
+            font-size:1.55rem !important;
+            letter-spacing:-.025em !important;
+        }}
+
+        [data-testid="stMetricLabel"] p {{
+            font-size:.76rem !important;
+            font-weight:750 !important;
+            color:{colores["muted"]} !important;
+        }}
+
+        /* File uploader */
+        [data-testid="stFileUploaderDropzone"] {{
+            border:1.5px dashed {"#35506d" if oscuro else "#cbd8e8"} !important;
+            border-radius:16px !important;
+            padding:1rem !important;
+            transition:.18s ease;
+        }}
+
+        [data-testid="stFileUploaderDropzone"]:hover {{
+            border-color:#3b82f6 !important;
+            box-shadow:inset 0 0 0 1px rgba(59,130,246,.12);
+        }}
+
+        /* Inputs */
+        .stNumberInput input,
+        .stTextInput input,
+        .stDateInput input,
+        .stTextArea textarea,
+        [data-baseweb="select"] > div {{
+            border-radius:11px !important;
+            min-height:42px !important;
+        }}
+
+        .stNumberInput button {{
+            border-color:{colores["border"]} !important;
+        }}
+
+        /* Botones */
+        .stButton button,
+        .stDownloadButton button {{
+            min-height:42px !important;
+            font-weight:800 !important;
+            border-radius:11px !important;
+            transition:transform .14s ease, box-shadow .14s ease;
+        }}
+
+        .stButton button:hover,
+        .stDownloadButton button:hover {{
+            transform:translateY(-1px);
+        }}
+
+        .stButton button[kind="primary"] {{
+            background:linear-gradient(135deg,#1769e0,#0b7af3) !important;
+            border:0 !important;
+            color:white !important;
+            box-shadow:0 10px 24px rgba(37,99,235,.22) !important;
+        }}
+
+        .stButton button[kind="primary"]:hover {{
+            box-shadow:0 13px 28px rgba(37,99,235,.30) !important;
+        }}
+
+        /* Dataframes */
+        [data-testid="stDataFrame"] {{
+            border-radius:16px !important;
+            box-shadow:0 8px 24px {colores["shadow"]} !important;
+        }}
+
+        .wilpos-products-wrap {{
+            border-radius:18px !important;
+            overflow:hidden;
+        }}
+
+        .wilpos-scroll-table {{
+            border-collapse:separate !important;
+            border-spacing:0 !important;
+        }}
+
+        .wilpos-scroll-table th {{
+            position:sticky;
+            top:0;
+            z-index:2;
+            font-size:.72rem !important;
+            text-transform:uppercase;
+            letter-spacing:.045em;
+        }}
+
+        .wilpos-scroll-table td {{
+            font-size:.83rem !important;
+        }}
+
+        /* Expander */
+        [data-testid="stExpander"] {{
+            border-radius:15px !important;
+            overflow:hidden;
+        }}
+
+        /* Alertas */
+        [data-testid="stAlert"] {{
+            border-radius:14px !important;
+        }}
+
+        /* Tabs */
+        .stTabs [data-baseweb="tab-list"] {{
+            gap:.35rem;
+            background:{colores["panel"]};
+            border:1px solid {colores["border"]};
+            padding:.3rem;
+            border-radius:14px;
+        }}
+
+        .stTabs [data-baseweb="tab"] {{
+            border-radius:10px;
+            padding:.45rem .8rem;
+        }}
+
+        /* Toggle tema */
+        [data-testid="stSidebar"] [data-testid="stToggle"] {{
+            background:rgba(255,255,255,.03);
+            border:1px solid rgba(255,255,255,.07);
+            border-radius:12px;
+            padding:.58rem .72rem !important;
+            margin-top:.35rem;
+        }}
+
+        /* Footer / captions */
+        [data-testid="stCaptionContainer"] {{
+            font-size:.76rem !important;
+        }}
+
+        /* Mobile */
+        @media (max-width: 900px) {{
+            .block-container {{
+                padding-left:.85rem !important;
+                padding-right:.85rem !important;
+            }}
+
+            .hero-grid {{
+                grid-template-columns:1fr !important;
+            }}
+
+            .hero-card,
+            .stats-card {{
+                min-height:auto !important;
+            }}
+
+            .hero-copy {{
+                max-width:100% !important;
+                padding-right:0 !important;
+            }}
+
+            .hero-brand-zone {{
+                position:relative !important;
+                right:auto !important;
+                top:auto !important;
+                margin-top:.85rem !important;
+                justify-content:flex-start !important;
+            }}
+
+            .hero-visual {{
+                opacity:.28 !important;
+                transform:scale(.82);
+                transform-origin:right bottom;
+            }}
+        }}
+
+        @media (max-width: 640px) {{
+            .block-container {{
+                padding-top:.5rem !important;
+            }}
+
+            h1 {{
+                font-size:1.62rem !important;
+            }}
+
+            .hero-card {{
+                padding:1.05rem !important;
+                border-radius:17px !important;
+            }}
+
+            .section-card,
+            .main-card,
+            .inventory-card {{
+                padding:.9rem !important;
+                border-radius:16px !important;
+            }}
+
+            [data-testid="stMetric"] {{
+                min-height:92px;
+            }}
+
+            .stButton button,
+            .stDownloadButton button {{
+                min-height:44px !important;
+            }}
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 aplicar_tema_visual()
 
@@ -5936,9 +6312,21 @@ def render_carga_facturas(titulo=True):
             label_visibility="collapsed",
             key=f"margen_input_{st.session_state.uploader_key}_{st.session_state.camera_key}",
         )
-        st.caption(
-            "El Precio Venta se calcula: Costo sin ITBIS × (1 + ganancia) × (1 + ITBIS). "
-            "Ejemplo: costo RD$1,000 + 25% de ganancia + 18% ITBIS = RD$1,475.00 antes del redondeo."
+        st.markdown(
+            """
+            <div style="
+                margin:.25rem 0 .7rem 0;
+                padding:.72rem .82rem;
+                border-radius:12px;
+                border:1px solid var(--border);
+                background:rgba(37,99,235,.06);
+                font-size:.78rem;
+                line-height:1.45;">
+                <b>Precio Venta</b> = Costo sin ITBIS × (1 + % de ganancia) × (1 + ITBIS)<br>
+                <span style="opacity:.72;">Ejemplo con 25%: RD$1,000 × 1.25 × 1.18 = RD$1,475.00 antes del redondeo.</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
 
@@ -6458,7 +6846,7 @@ if pagina == "🏠 Inicio":
     st.markdown(f"""<div class="hero-grid">
 <div class="hero-card hero-card-logo">
 <div class="hero-copy">
-<h1>¡Bienvenido! 👋</h1>
+<h1>Procesador de Facturas</h1>
 <div class="subtitle">Procesador de Facturas para WilPOS</div>
 <p>Carga tus facturas desde tu teléfono o computadora.</p>
 <p>El sistema consolidará los productos y generará el Excel listo para importar en WilPOS.</p>
