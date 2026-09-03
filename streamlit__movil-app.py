@@ -7396,6 +7396,87 @@ with st.sidebar:
 
 
 # =========================================================
+# V5 — COMPACTAR ESPACIO SUPERIOR + HEADER MÁS GRANDE
+# =========================================================
+st.markdown(
+    """
+<style>
+/* Streamlit mantiene un bloque superior por la cabecera/sidebar.
+   Lo compactamos agresivamente sin afectar los widgets. */
+[data-testid="stAppViewContainer"] {
+  padding-top:0 !important;
+}
+[data-testid="stMain"] {
+  padding-top:0 !important;
+  margin-top:0 !important;
+}
+[data-testid="stMainBlockContainer"],
+.main .block-container,
+.block-container {
+  padding-top:0 !important;
+  margin-top:-2.35rem !important;
+}
+
+/* En móviles no usamos margen negativo tan fuerte */
+@media(max-width:700px) {
+  [data-testid="stMainBlockContainer"],
+  .main .block-container,
+  .block-container {
+    margin-top:-1.15rem !important;
+  }
+}
+
+/* Encabezado principal más grande y protagonista */
+.v4-app-header {
+  min-height:82px !important;
+  padding:.85rem 1.15rem !important;
+  margin-top:0 !important;
+  margin-bottom:.75rem !important;
+  border-radius:14px !important;
+}
+
+.v4-header-copy strong {
+  font-size:1.28rem !important;
+  line-height:1.15 !important;
+  font-weight:900 !important;
+  letter-spacing:-.025em !important;
+}
+
+.v4-header-copy span {
+  font-size:.78rem !important;
+  margin-top:.18rem !important;
+}
+
+.v4-header-status {
+  font-size:.72rem !important;
+  padding:.48rem .72rem !important;
+}
+
+/* Sidebar también sube para aprovechar el espacio */
+[data-testid="stSidebar"] > div:first-child {
+  padding-top:.35rem !important;
+}
+
+@media(max-width:700px) {
+  .v4-app-header {
+    min-height:68px !important;
+    padding:.65rem .75rem !important;
+    margin-bottom:.55rem !important;
+  }
+  .v4-header-copy strong {
+    font-size:1.05rem !important;
+  }
+  .v4-header-copy span {
+    font-size:.65rem !important;
+  }
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+
+# =========================================================
 # INICIO
 # =========================================================
 if pagina == "🏠 Inicio":
