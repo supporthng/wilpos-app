@@ -4901,6 +4901,209 @@ def aplicar_layout_v3():
 aplicar_layout_v3()
 
 
+# =========================================================
+# V4 — ENCABEZADO + SIDEBAR LEGIBLE
+# =========================================================
+def aplicar_layout_v4():
+    dark = bool(st.session_state.get("modo_oscuro", False))
+
+    sidebar_text = "#e7f0fb" if dark else "#17324d"
+    sidebar_muted = "#a8bdd4" if dark else "#52677f"
+    header_bg = (
+        "linear-gradient(135deg,#0b1d33,#102c4c)"
+        if dark
+        else "linear-gradient(135deg,#ffffff,#eef5ff)"
+    )
+    header_border = "#233750" if dark else "#dbe5f0"
+    header_text = "#eef5ff" if dark else "#10203a"
+    header_muted = "#9aabc0" if dark else "#62728a"
+    header_status_bg = "rgba(255,255,255,.05)" if dark else "#ffffff"
+    header_shadow = "rgba(0,0,0,.22)" if dark else "rgba(39,67,104,.08)"
+    sidebar_bg = (
+        "linear-gradient(180deg,#07172b,#061321)"
+        if dark
+        else "linear-gradient(180deg,#f7fbff,#edf4fb)"
+    )
+
+    st.markdown(
+        f"""
+<style>
+/* Quitar barra superior nativa y espacio vacío */
+[data-testid="stHeader"] {{
+  display:none !important;
+  height:0 !important;
+}}
+[data-testid="stToolbar"] {{
+  display:none !important;
+}}
+.block-container {{
+  padding-top:.75rem !important;
+}}
+
+/* Sidebar */
+[data-testid="stSidebar"] {{
+  background:{sidebar_bg} !important;
+  opacity:1 !important;
+}}
+
+/* Forzar texto visible en todas las opciones */
+[data-testid="stSidebar"] div[role="radiogroup"] label p,
+[data-testid="stSidebar"] div[role="radiogroup"] label span,
+[data-testid="stSidebar"] div[role="radiogroup"] label div {{
+  color:{sidebar_text} !important;
+  -webkit-text-fill-color:{sidebar_text} !important;
+  opacity:1 !important;
+  font-weight:760 !important;
+}}
+
+[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) p,
+[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) span,
+[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) div {{
+  color:#ffffff !important;
+  -webkit-text-fill-color:#ffffff !important;
+  opacity:1 !important;
+  font-weight:850 !important;
+}}
+
+/* Streamlit baja la opacidad de opciones deshabilitadas */
+[data-testid="stSidebar"] [aria-disabled="true"],
+[data-testid="stSidebar"] [disabled],
+[data-testid="stSidebar"] label:has(input:disabled) {{
+  opacity:1 !important;
+  filter:none !important;
+}}
+
+[data-testid="stSidebar"] label:has(input:disabled) p,
+[data-testid="stSidebar"] label:has(input:disabled) span,
+[data-testid="stSidebar"] label:has(input:disabled) div {{
+  color:{sidebar_muted} !important;
+  -webkit-text-fill-color:{sidebar_muted} !important;
+  opacity:1 !important;
+  font-weight:700 !important;
+}}
+
+/* Texto de apariencia */
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+[data-testid="stSidebar"] [data-testid="stToggle"] p,
+[data-testid="stSidebar"] [data-testid="stToggle"] span {{
+  color:{sidebar_text} !important;
+  -webkit-text-fill-color:{sidebar_text} !important;
+  opacity:1 !important;
+  font-weight:760 !important;
+}}
+
+/* Botón reiniciar */
+[data-testid="stSidebar"] .stButton button,
+[data-testid="stSidebar"] .stButton button p {{
+  color:{sidebar_text} !important;
+  -webkit-text-fill-color:{sidebar_text} !important;
+  opacity:1 !important;
+  font-weight:800 !important;
+}}
+
+/* Labels MENÚ / APARIENCIA */
+.v3-side-label {{
+  color:{sidebar_muted} !important;
+  opacity:1 !important;
+}}
+
+/* Encabezado WilPOS */
+.v4-app-header {{
+  width:100%;
+  min-height:78px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:1rem;
+  padding:.85rem 1rem;
+  margin:0 0 .85rem 0;
+  border-radius:14px;
+  border:1px solid {header_border};
+  background:{header_bg};
+  box-shadow:0 7px 22px {header_shadow};
+}}
+
+.v4-header-brand {{
+  display:flex;
+  align-items:center;
+  gap:.8rem;
+  min-width:0;
+}}
+
+.v4-header-brand img {{
+  width:132px;
+  max-height:48px;
+  object-fit:contain;
+  object-position:left center;
+}}
+
+.v4-header-copy {{
+  display:flex;
+  flex-direction:column;
+  min-width:0;
+}}
+
+.v4-header-copy strong {{
+  color:{header_text} !important;
+  font-size:.93rem;
+  font-weight:900;
+  letter-spacing:-.015em;
+}}
+
+.v4-header-copy span {{
+  color:{header_muted} !important;
+  font-size:.66rem;
+  margin-top:.08rem;
+}}
+
+.v4-header-status {{
+  display:flex;
+  align-items:center;
+  gap:.45rem;
+  padding:.42rem .62rem;
+  border-radius:999px;
+  color:{header_text} !important;
+  border:1px solid {header_border};
+  background:{header_status_bg};
+  font-size:.66rem;
+  font-weight:760;
+  white-space:nowrap;
+}}
+
+.v4-status-dot {{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:#22c55e;
+  box-shadow:0 0 0 4px rgba(34,197,94,.12);
+}}
+
+@media(max-width:700px) {{
+  .v4-app-header {{
+    min-height:66px;
+    padding:.65rem .7rem;
+  }}
+  .v4-header-brand img {{
+    width:105px;
+  }}
+  .v4-header-copy span {{
+    display:none;
+  }}
+  .v4-header-status {{
+    font-size:.58rem;
+    padding:.34rem .45rem;
+  }}
+}}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+aplicar_layout_v4()
+
+
+
 
 
 
@@ -7169,6 +7372,24 @@ with st.sidebar:
 # INICIO
 # =========================================================
 if pagina == "🏠 Inicio":
+    modo_texto = "Modo oscuro" if st.session_state.get("modo_oscuro", False) else "Modo claro"
+    encabezado_html = f"""
+<div class="v4-app-header">
+  <div class="v4-header-brand">
+    <img src="data:image/png;base64,{WILPOS_LOGO_B64}" alt="WilPOS">
+    <div class="v4-header-copy">
+      <strong>WilPOS Móvil</strong>
+      <span>Procesador inteligente de facturas</span>
+    </div>
+  </div>
+  <div class="v4-header-status">
+    <span class="v4-status-dot"></span>
+    <span>{modo_texto}</span>
+  </div>
+</div>
+"""
+    st.markdown(encabezado_html, unsafe_allow_html=True)
+
     head_left, head_gain, head_itbis = st.columns([5.8, 1.25, .9], gap="medium")
 
     with head_left:
