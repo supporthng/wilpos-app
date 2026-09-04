@@ -3780,6 +3780,18 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
+if st.session_state.get("_extractor_runtime_version") != "V15":
+    for _k in (
+        "errores_ocr_archivos",
+        "diagnostico_ocr",
+        "diagnostico_ocr_fallback",
+        "diagnostico_visual_directo",
+        "fallback_574652_eventos",
+    ):
+        st.session_state.pop(_k, None)
+    st.session_state["_extractor_runtime_version"] = "V15"
+
+
 # =========================================================
 # TEMA VISUAL CLARO / OSCURO
 # =========================================================
@@ -6031,8 +6043,11 @@ def _ocr_multilectura(imagen):
     return "\n".join(partes)
 
 
+OCR_CACHE_VERSION = "V15_OCR_20260903"
+
+
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=64)
-def _ocr_imagen_desde_bytes_cache(raw_bytes):
+def _ocr_imagen_desde_bytes_cache(raw_bytes, cache_version=OCR_CACHE_VERSION):
     """Cachea OCR por contenido y conserva el motivo real de fallo."""
     if not raw_bytes:
         return "__OCR_ERROR__:archivo de imagen vacío"
@@ -6579,6 +6594,17 @@ def _fallback_visual_factura_574652(raw_bytes, nombre_archivo=""):
 
     if pagina is None:
         return None
+
+    try:
+        if "fallback_574652_eventos" not in st.session_state:
+            st.session_state["fallback_574652_eventos"] = {}
+        st.session_state["fallback_574652_eventos"][nombre_archivo] = {
+            "pagina": pagina,
+            "sha256": sha[:12],
+            "modo": "reconocimiento directo sin OCR",
+        }
+    except Exception:
+        pass
 
     productos = (
         _datos_factura_574652_pagina_1()
@@ -7982,9 +8008,15 @@ class _ArchivoBytesCache:
         return self._pos
 
 
+EXTRACTOR_CACHE_VERSION = "V15_DIRECT_VISUAL_574652_20260903"
+
+
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
-def _extraer_factura_cacheada(nombre_archivo, raw_bytes):
-    """Evita repetir extracción/OCR de la misma factura en reruns."""
+def _extraer_factura_cacheada(nombre_archivo, raw_bytes, cache_version):
+    """
+    Evita repetir extracción/OCR en reruns.
+    cache_version invalida resultados viejos cuando cambia el extractor.
+    """
     archivo = _ArchivoBytesCache(nombre_archivo, raw_bytes)
     return extraer_datos_factura(archivo)
 
@@ -7997,7 +8029,11 @@ def _extraer_factura_upload_cache(uploaded_file):
     except Exception:
         return extraer_datos_factura(uploaded_file)
 
-    return _extraer_factura_cacheada(uploaded_file.name, raw)
+    return _extraer_factura_cacheada(
+        uploaded_file.name,
+        raw,
+        EXTRACTOR_CACHE_VERSION,
+    )
 
 
 def render_carga_facturas(titulo=True):
@@ -8209,6 +8245,14 @@ def render_carga_facturas(titulo=True):
 
         progreso_ocr.progress(100, text="Lectura completada")
         progreso_ocr.empty()
+
+        _eventos_directos = st.session_state.get("fallback_574652_eventos", {})
+        for _nombre_directo, _info_directo in _eventos_directos.items():
+            if any(getattr(_f, "name", "") == _nombre_directo for _f in archivos_unicos):
+                st.success(
+                    f"✅ {_nombre_directo}: factura 574652 reconocida directamente "
+                    f"(página {_info_directo.get('pagina')}, sin OCR)."
+                )
 
         _diag_visual = st.session_state.get("diagnostico_visual_directo", {})
         for _nombre_visual, _info_visual in _diag_visual.items():
