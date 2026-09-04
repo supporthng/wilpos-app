@@ -3792,7 +3792,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "V28":
+if st.session_state.get("_extractor_runtime_version") != "V29":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3801,7 +3801,7 @@ if st.session_state.get("_extractor_runtime_version") != "V28":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "V28"
+    st.session_state["_extractor_runtime_version"] = "V29"
 
 
 # =========================================================
@@ -6660,6 +6660,18 @@ def _fallback_visual_factura_574652(raw_bytes, nombre_archivo=""):
 
 
 
+
+def _timeout_vision_segundos():
+    """Límite por llamada para evitar bloqueos largos en Streamlit."""
+    try:
+        return float(st.secrets.get("OPENAI_VISION_TIMEOUT", 55))
+    except Exception:
+        try:
+            return float(os.getenv("OPENAI_VISION_TIMEOUT", "55"))
+        except Exception:
+            return 55.0
+
+
 def _obtener_openai_api_key():
     """
     Lee la clave únicamente desde Streamlit Secrets o variable de entorno.
@@ -7050,7 +7062,7 @@ def _fusionar_lecturas_vision(base, nueva):
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V28"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V29"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -7166,7 +7178,7 @@ REGLAS:
     for modelo in modelos:
         try:
             _diag_vision(nombre_archivo, "envío API", "INTENTO", f"Modelo: {modelo}")
-            client = OpenAI(api_key=api_key)
+            client = OpenAI(api_key=api_key, timeout=_timeout_vision_segundos(), max_retries=1)
             _diag_vision(nombre_archivo, "cliente OpenAI", "OK", f"Cliente creado; modelo={modelo}")
             response = client.responses.create(
                 model=modelo,
@@ -7208,8 +7220,8 @@ REGLAS:
             data = json.loads(raw_json)
 
             # V28: autocorrección. Si faltan filas, hay omitidos o el subtotal
-            # de página no cuadra, hacer hasta 2 pasadas adicionales enfocadas.
-            for intento_extra in range(1, 3):
+            # de página no cuadra, hacer como máximo 1 pasada adicional enfocada.
+            for intento_extra in range(1, 2):
                 necesita, motivo_retry = _vision_necesita_reintento(data)
                 if not necesita:
                     break
@@ -7218,7 +7230,7 @@ REGLAS:
                     nombre_archivo,
                     f"reintento {intento_extra}",
                     "INTENTO",
-                    motivo_retry,
+                    motivo_retry + " · máximo 1 reintento automático",
                 )
 
                 productos_previos = data.get("products") or []
@@ -7249,20 +7261,29 @@ OBJETIVO:
 6. Si una fila sigue siendo ilegible, inclúyela en omitted_rows con una razón precisa.
 7. Devuelve SOLO JSON con exactamente el mismo formato solicitado anteriormente.
 """
-                retry_response = client.responses.create(
-                    model=modelo,
-                    store=False,
-                    reasoning={"effort": "medium"},
-                    input=[{
-                        "role": "user",
-                        "content": [
-                            {"type": "input_text", "text": instrucciones + "\\n\\n" + prompt_retry},
-                            {"type": "input_image", "image_url": data_url, "detail": "high"},
-                        ],
-                    }],
-                    text={"verbosity": "low"},
-                    max_output_tokens=14000,
-                )
+                try:
+                    retry_response = client.responses.create(
+                        model=modelo,
+                        store=False,
+                        reasoning={"effort": "low"},
+                        input=[{
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": instrucciones + "\\n\\n" + prompt_retry},
+                                {"type": "input_image", "image_url": data_url, "detail": "high"},
+                            ],
+                        }],
+                        text={"verbosity": "low"},
+                        max_output_tokens=10000,
+                    )
+                except Exception as exc_retry_api:
+                    _diag_vision(
+                        nombre_archivo,
+                        f"reintento {intento_extra}",
+                        "ERROR",
+                        f"Reintento cancelado/expirado: {type(exc_retry_api).__name__}: {str(exc_retry_api)[:500]}",
+                    )
+                    break
                 retry_text = str(getattr(retry_response, "output_text", "") or "").strip()
                 retry_text = re.sub(r"^```(?:json)?\\s*", "", retry_text, flags=re.I)
                 retry_text = re.sub(r"\\s*```$", "", retry_text).strip()
@@ -8883,7 +8904,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "V28_AUTOCORRECCION_FILAS_20260903"
+EXTRACTOR_CACHE_VERSION = "V29_TIMEOUT_REINTENTO_CONTROLADO_20260903"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -8916,6 +8937,7 @@ def render_carga_facturas(titulo=True):
     vision_ok, vision_msg = _estado_vision_api()
     if vision_ok:
         st.caption("🟢 Lectura avanzada por visión: activa")
+        st.caption(f"⏱️ Vision: límite {_timeout_vision_segundos():.0f}s por llamada · máximo 1 reintento por imagen")
     else:
         st.warning(
             "⚠️ Lectura avanzada por visión NO está activa. "
@@ -9121,7 +9143,7 @@ def render_carga_facturas(titulo=True):
         for indice_ocr, f in enumerate(archivos_unicos, start=1):
             progreso_ocr.progress(
             min(99, int(((indice_ocr - 1) / total_archivos_ocr) * 100)),
-            text=f"Leyendo {indice_ocr} de {total_archivos_ocr}: {f.name}",
+            text=f"Leyendo {indice_ocr} de {total_archivos_ocr}: {f.name} · límite Vision {_timeout_vision_segundos():.0f}s",
             )
             firma, proveedor, num_fac, fecha_fac, productos = _extraer_factura_upload_cache(f)
 
