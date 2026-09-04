@@ -3792,7 +3792,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "V29":
+if st.session_state.get("_extractor_runtime_version") != "V27":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3801,7 +3801,7 @@ if st.session_state.get("_extractor_runtime_version") != "V29":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "V29"
+    st.session_state["_extractor_runtime_version"] = "V27"
 
 
 # =========================================================
@@ -6660,18 +6660,6 @@ def _fallback_visual_factura_574652(raw_bytes, nombre_archivo=""):
 
 
 
-
-def _timeout_vision_segundos():
-    """Límite por llamada para evitar bloqueos largos en Streamlit."""
-    try:
-        return float(st.secrets.get("OPENAI_VISION_TIMEOUT", 55))
-    except Exception:
-        try:
-            return float(os.getenv("OPENAI_VISION_TIMEOUT", "55"))
-        except Exception:
-            return 55.0
-
-
 def _obtener_openai_api_key():
     """
     Lee la clave únicamente desde Streamlit Secrets o variable de entorno.
@@ -6991,78 +6979,7 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
     )
 
 
-
-def _vision_necesita_reintento(data):
-    """Decide si una lectura visual requiere una segunda pasada enfocada."""
-    if not isinstance(data, dict):
-        return True, "respuesta inválida"
-    productos = data.get("products") or []
-    omitidos = data.get("omitted_rows") or []
-    try:
-        visibles = int(data.get("visible_product_rows") or 0)
-    except Exception:
-        visibles = 0
-
-    explicadas = len(productos) + len(omitidos)
-    razones = []
-    if visibles > explicadas:
-        razones.append(f"{visibles-explicadas} fila(s) visible(s) sin explicar")
-    if omitidos:
-        razones.append(f"{len(omitidos)} fila(s) marcada(s) como omitida(s)")
-
-    # Sólo comparar líneas con subtotal cuando éste pertenece a la página.
-    scope = str(data.get("subtotal_scope") or "unknown").lower()
-    try:
-        subtotal = float(data.get("net_subtotal_before_tax")) if data.get("net_subtotal_before_tax") is not None else None
-    except Exception:
-        subtotal = None
-    suma = 0.0
-    validas_costo = 0
-    for p in productos:
-        try:
-            v=float(p.get("line_cost_net") or 0)
-            if v>0:
-                suma += v
-                validas_costo += 1
-        except Exception:
-            pass
-    if scope == "page" and subtotal is not None and validas_costo:
-        dif=round(suma-subtotal,2)
-        if abs(dif) > max(1.0, abs(subtotal)*0.0005):
-            razones.append(f"líneas no cuadran con subtotal de página; diferencia {dif:.2f}")
-
-    return bool(razones), "; ".join(razones)
-
-
-def _fusionar_lecturas_vision(base, nueva):
-    """Prefiere la lectura más completa; conserva metadatos/totales fiables."""
-    if not isinstance(base, dict):
-        return nueva
-    if not isinstance(nueva, dict):
-        return base
-
-    def score(d):
-        prods=d.get("products") or []
-        om=d.get("omitted_rows") or []
-        try: vis=int(d.get("visible_product_rows") or 0)
-        except Exception: vis=0
-        explicadas=len(prods)+len(om)
-        # Prioridad: más productos aceptados, menos omitidos, más filas explicadas.
-        return (len(prods), -len(om), min(explicadas, vis) if vis else explicadas)
-
-    mejor = nueva if score(nueva) > score(base) else base
-
-    # Si una lectura trae metadatos que la mejor no trae, completarlos.
-    for k in (
-        "provider","invoice_number","ncf","date","currency","page_number","total_pages",
-        "visible_product_rows","net_subtotal_before_tax","tax_total","grand_total","subtotal_scope"
-    ):
-        if mejor.get(k) in (None,"",0) and (base if mejor is nueva else nueva).get(k) not in (None,"",0):
-            mejor[k]=(base if mejor is nueva else nueva).get(k)
-    return mejor
-
-
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V29"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V27"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -7145,11 +7062,6 @@ REGLAS:
     "invoice" si corresponde a toda la factura, o "unknown" si no se puede determinar.
 - Si la factura usa etiquetas como "SUBTOTAL GRAVADO PAGINA", ese valor es
   net_subtotal_before_tax y subtotal_scope debe ser "page".
-- Si los totales aparecen al final de una factura multipágina y dicen simplemente
-  SUBTOTAL GRAVADO / DESCUENTO / ITBIS / IMPORTE TOTAL, determina si corresponden
-  al documento completo. En ese caso subtotal_scope debe ser "invoice".
-- Nunca compares ni ajustes artificialmente las líneas de UNA página para que
-  coincidan con un subtotal de TODA la factura.
 - NO uses "SUBTOTAL NETO PAGINA" si ese valor ya incluye ITBIS.
 - Incluye todas las filas reales de productos visibles.
 - Si ves una fila de producto pero algún dato esencial impide extraerla con seguridad,
@@ -7178,7 +7090,7 @@ REGLAS:
     for modelo in modelos:
         try:
             _diag_vision(nombre_archivo, "envío API", "INTENTO", f"Modelo: {modelo}")
-            client = OpenAI(api_key=api_key, timeout=_timeout_vision_segundos(), max_retries=1)
+            client = OpenAI(api_key=api_key)
             _diag_vision(nombre_archivo, "cliente OpenAI", "OK", f"Cliente creado; modelo={modelo}")
             response = client.responses.create(
                 model=modelo,
@@ -7218,93 +7130,6 @@ REGLAS:
             raw_json = re.sub(r"\s*```$", "", raw_json).strip()
 
             data = json.loads(raw_json)
-
-            # V28: autocorrección. Si faltan filas, hay omitidos o el subtotal
-            # de página no cuadra, hacer como máximo 1 pasada adicional enfocada.
-            for intento_extra in range(1, 2):
-                necesita, motivo_retry = _vision_necesita_reintento(data)
-                if not necesita:
-                    break
-
-                _diag_vision(
-                    nombre_archivo,
-                    f"reintento {intento_extra}",
-                    "INTENTO",
-                    motivo_retry + " · máximo 1 reintento automático",
-                )
-
-                productos_previos = data.get("products") or []
-                codigos_previos = [
-                    str(p.get("barcode") or p.get("internal_code") or "").strip()
-                    for p in productos_previos if isinstance(p, dict)
-                ]
-                prompt_retry = f"""
-REVISIÓN DE CONTROL DE CALIDAD DE LA MISMA FACTURA.
-
-La primera lectura necesita corrección por: {motivo_retry}
-
-Vuelve a inspeccionar visualmente TODA la tabla, fila por fila, de arriba hacia abajo.
-No asumas que la primera lectura fue correcta.
-
-Códigos ya detectados en la primera pasada:
-{", ".join(c for c in codigos_previos if c)[:4000]}
-
-OBJETIVO:
-1. Cuenta nuevamente TODAS las filas reales de productos.
-2. Recupera específicamente cualquier fila faltante u omitida.
-3. Devuelve nuevamente la factura COMPLETA, no solamente las filas nuevas.
-4. Verifica código de barras, código interno, descripción, cantidad, empaque,
-   precio/descuento y line_cost_net SIN ITBIS de cada fila.
-5. Si el documento muestra subtotal de PÁGINA, la suma de line_cost_net debe cuadrar
-   con ese subtotal. Si los totales impresos corresponden a TODA LA FACTURA
-   multipágina, usa subtotal_scope="invoice" y NO fuerces el cuadre de esta página.
-6. Si una fila sigue siendo ilegible, inclúyela en omitted_rows con una razón precisa.
-7. Devuelve SOLO JSON con exactamente el mismo formato solicitado anteriormente.
-"""
-                try:
-                    retry_response = client.responses.create(
-                        model=modelo,
-                        store=False,
-                        reasoning={"effort": "low"},
-                        input=[{
-                            "role": "user",
-                            "content": [
-                                {"type": "input_text", "text": instrucciones + "\\n\\n" + prompt_retry},
-                                {"type": "input_image", "image_url": data_url, "detail": "high"},
-                            ],
-                        }],
-                        text={"verbosity": "low"},
-                        max_output_tokens=10000,
-                    )
-                except Exception as exc_retry_api:
-                    _diag_vision(
-                        nombre_archivo,
-                        f"reintento {intento_extra}",
-                        "ERROR",
-                        f"Reintento cancelado/expirado: {type(exc_retry_api).__name__}: {str(exc_retry_api)[:500]}",
-                    )
-                    break
-                retry_text = str(getattr(retry_response, "output_text", "") or "").strip()
-                retry_text = re.sub(r"^```(?:json)?\\s*", "", retry_text, flags=re.I)
-                retry_text = re.sub(r"\\s*```$", "", retry_text).strip()
-                if not retry_text:
-                    _diag_vision(nombre_archivo, f"reintento {intento_extra}", "ERROR", "respuesta vacía")
-                    continue
-                try:
-                    data_retry = json.loads(retry_text)
-                except Exception as exc_retry:
-                    _diag_vision(nombre_archivo, f"reintento {intento_extra}", "ERROR", f"JSON inválido: {exc_retry}")
-                    continue
-
-                data = _fusionar_lecturas_vision(data, data_retry)
-                necesita_post, motivo_post = _vision_necesita_reintento(data)
-                _diag_vision(
-                    nombre_archivo,
-                    f"reintento {intento_extra}",
-                    "FALLO" if necesita_post else "OK",
-                    motivo_post if necesita_post else "lectura completa/corregida",
-                )
-
             resultado = _normalizar_resultado_vision_factura(data, nombre_archivo)
             if resultado is None:
                 _diag_vision(
@@ -8904,7 +8729,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "V29_TIMEOUT_REINTENTO_CONTROLADO_20260903"
+EXTRACTOR_CACHE_VERSION = "V27_CUADRE_FACTURA_ORIGINAL_20260903"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -8937,7 +8762,6 @@ def render_carga_facturas(titulo=True):
     vision_ok, vision_msg = _estado_vision_api()
     if vision_ok:
         st.caption("🟢 Lectura avanzada por visión: activa")
-        st.caption(f"⏱️ Vision: límite {_timeout_vision_segundos():.0f}s por llamada · máximo 1 reintento por imagen")
     else:
         st.warning(
             "⚠️ Lectura avanzada por visión NO está activa. "
@@ -9143,7 +8967,7 @@ def render_carga_facturas(titulo=True):
         for indice_ocr, f in enumerate(archivos_unicos, start=1):
             progreso_ocr.progress(
             min(99, int(((indice_ocr - 1) / total_archivos_ocr) * 100)),
-            text=f"Leyendo {indice_ocr} de {total_archivos_ocr}: {f.name} · límite Vision {_timeout_vision_segundos():.0f}s",
+            text=f"Leyendo {indice_ocr} de {total_archivos_ocr}: {f.name}",
             )
             firma, proveedor, num_fac, fecha_fac, productos = _extraer_factura_upload_cache(f)
 
