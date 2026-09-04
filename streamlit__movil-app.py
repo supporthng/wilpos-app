@@ -3792,7 +3792,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "V20":
+if st.session_state.get("_extractor_runtime_version") != "V21":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3801,7 +3801,7 @@ if st.session_state.get("_extractor_runtime_version") != "V20":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "V20"
+    st.session_state["_extractor_runtime_version"] = "V21"
 
 
 # =========================================================
@@ -6055,7 +6055,7 @@ def _ocr_multilectura(imagen):
     return "\n".join(partes)
 
 
-OCR_CACHE_VERSION = "V20_OCR_20260903"
+OCR_CACHE_VERSION = "V21_OCR_20260903"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=64)
@@ -6689,7 +6689,7 @@ def _modelo_vision_configurado():
         modelo = st.secrets.get("OPENAI_VISION_MODEL")
     except Exception:
         modelo = None
-    return str(modelo or "gpt-5.6-terra").strip()
+    return str(modelo or "gpt-5.4-mini").strip()
 
 
 def _mime_imagen(nombre_archivo):
@@ -6836,97 +6836,145 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
 
 
 @st.cache_data(show_spinner=False, ttl=86400, max_entries=256)
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V20"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V21"):
     """
-    Fallback de visión para facturas que el OCR local no puede interpretar.
-    Solo se invoca cuando las rutas locales no producen productos confiables.
+    Lector visual real. No depende de Tesseract.
+    Se usa para fotos que no coinciden con los fallbacks históricos.
     """
-    if not raw_bytes or not OPENAI_SDK_DISPONIBLE:
+    if not raw_bytes:
         return None
 
-    api_key = _obtener_openai_api_key()
-    if not api_key:
-        return None
-
-    mime = _mime_imagen(nombre_archivo)
-    b64 = base64.b64encode(raw_bytes).decode("ascii")
-    data_url = f"data:{mime};base64,{b64}"
-
-    instrucciones = """
-Extrae fielmente esta factura o página de factura de compra.
-
-Reglas críticas:
-- Lee la imagen visualmente. Puede estar inclinada, girada o fotografiada con celular.
-- Extrae SOLAMENTE filas reales de productos. No conviertas encabezados, sellos, totales o notas en productos.
-- Si hay Código Barra / EAN / UPC, colócalo en barcode. Si no existe, usa null.
-- internal_code es Material / Item / Código / SAP del proveedor cuando exista.
-- quantity_packages es la cantidad facturada en la columna Cantidad.
-- units_per_package es la cantidad física por caja/paquete cuando esté clara en UdM, tamaño o descripción:
-  ejemplos: CJ12BOT -> 12; 24X330ML -> 24; 6X4X355ML -> 24; 12/75 CL -> 12.
-  Si no se puede determinar con seguridad, usa 1.
-- line_cost_net debe ser el COSTO TOTAL DE LA LÍNEA SIN ITBIS y después de descuentos.
-  Si la factura muestra Precio Neto / Imp. Neto / Monto Neto, úsalo.
-  Si solo muestra precio unitario neto y cantidad, calcula cantidad × precio unitario neto.
-  NO uses el Total con ITBIS como costo neto.
-- itbis_rate debe ser 0.18 para 18%, 0 para exento, o la tasa visible.
-- Si una página es continuación y no repite el número comercial, conserva el NCF.
-- No inventes números o códigos ilegibles. Usa null donde el esquema lo permita.
-- Revisa toda la tabla antes de responder para no omitir filas visibles.
-"""
-
-    try:
-        client = OpenAI(api_key=api_key)
-        response = client.responses.create(
-            model=_modelo_vision_configurado(),
-            reasoning={"effort": "low"},
-            store=False,
-            input=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": instrucciones,
-                        },
-                        {
-                            "type": "input_image",
-                            "image_url": data_url,
-                            "detail": "original",
-                        },
-                    ],
-                }
-            ],
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": "wilpos_invoice_extraction",
-                    "strict": True,
-                    "schema": VISION_FACTURA_SCHEMA,
-                },
-                "verbosity": "low",
-            },
-        )
-
-        raw_json = str(response.output_text or "").strip()
-        if not raw_json:
-            return None
-
-        data = json.loads(raw_json)
-        return _normalizar_resultado_vision_factura(
-            data,
-            nombre_archivo,
-        )
-
-    except Exception as exc:
+    if not OPENAI_SDK_DISPONIBLE:
         try:
-            if "errores_vision_api" not in st.session_state:
-                st.session_state["errores_vision_api"] = {}
-            st.session_state["errores_vision_api"][nombre_archivo] = (
-                f"{type(exc).__name__}: {str(exc)[:700]}"
+            st.session_state.setdefault("errores_vision_api", {})[nombre_archivo] = (
+                "El paquete 'openai' no está instalado. Revisa requirements.txt."
             )
         except Exception:
             pass
         return None
+
+    api_key = _obtener_openai_api_key()
+    if not api_key:
+        try:
+            st.session_state.setdefault("errores_vision_api", {})[nombre_archivo] = (
+                "No se encontró OPENAI_API_KEY en Streamlit Secrets."
+            )
+        except Exception:
+            pass
+        return None
+
+    mime = _mime_imagen(nombre_archivo)
+    data_url = f"data:{mime};base64,{base64.b64encode(raw_bytes).decode('ascii')}"
+
+    instrucciones = """
+Analiza visualmente esta imagen de una factura de compra y devuelve SOLO JSON válido,
+sin markdown y sin explicaciones.
+
+Debes leer la tabla completa aunque la foto esté girada 90 grados.
+
+Formato exacto:
+{
+  "provider": "nombre proveedor",
+  "invoice_number": "numero o null",
+  "ncf": "NCF o null",
+  "date": "fecha o null",
+  "currency": "DOP o USD",
+  "page_number": 1,
+  "total_pages": 1,
+  "products": [
+    {
+      "barcode": "codigo de barras o null",
+      "internal_code": "codigo/material/item o null",
+      "description": "descripcion completa",
+      "quantity_packages": 1,
+      "units_per_package": 1,
+      "unit_cost_net": 0,
+      "line_cost_net": 0,
+      "itbis_rate": 0.18
+    }
+  ]
+}
+
+REGLAS:
+- Incluye todas las filas reales de productos visibles.
+- No conviertas encabezados, subtotales, ITBIS, sellos o firmas en productos.
+- barcode = CODIGO DE BARRAS/EAN/UPC cuando exista.
+- internal_code = CODIGO/MATERIAL/ITEM del proveedor.
+- quantity_packages = columna CANTIDAD.
+- units_per_package = unidades físicas por caja si puede inferirse de TAMAÑO/UdM;
+  si no es seguro usa 1.
+- line_cost_net = IMPORTE NETO DE LA LINEA SIN ITBIS y después del descuento.
+- Si la factura muestra PRECIO, DESCUENTO, VALOR ITBIS e IMPORTE, calcula o usa
+  el importe antes de ITBIS. NO uses importe con ITBIS como costo neto.
+- itbis_rate: 0.18 si indica 18%, 0 si exento.
+- No inventes códigos ilegibles.
+"""
+
+    # Try the configured model first, then a conservative fallback.
+    modelos = []
+    for m in (_modelo_vision_configurado(), "gpt-5.4-mini"):
+        if m and m not in modelos:
+            modelos.append(m)
+
+    ultimo_error = ""
+    for modelo in modelos:
+        try:
+            client = OpenAI(api_key=api_key)
+            response = client.responses.create(
+                model=modelo,
+                store=False,
+                reasoning={"effort": "low"},
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": instrucciones},
+                            {
+                                "type": "input_image",
+                                "image_url": data_url,
+                                "detail": "high",
+                            },
+                        ],
+                    }
+                ],
+                text={"verbosity": "low"},
+                max_output_tokens=12000,
+            )
+
+            raw_json = str(getattr(response, "output_text", "") or "").strip()
+            if not raw_json:
+                raise RuntimeError("La API respondió sin texto.")
+
+            # Tolerar ```json ... ``` si el modelo lo añade.
+            raw_json = re.sub(r"^```(?:json)?\s*", "", raw_json, flags=re.I)
+            raw_json = re.sub(r"\s*```$", "", raw_json).strip()
+
+            data = json.loads(raw_json)
+            resultado = _normalizar_resultado_vision_factura(data, nombre_archivo)
+            if resultado is None:
+                raise RuntimeError(
+                    "La visión respondió, pero no devolvió productos válidos."
+                )
+
+            try:
+                st.session_state.setdefault("diagnostico_vision_api", {})[nombre_archivo] = {
+                    "modelo": modelo,
+                    "estado": "OK",
+                    "productos": len(resultado[4]),
+                }
+                st.session_state.setdefault("errores_vision_api", {}).pop(nombre_archivo, None)
+            except Exception:
+                pass
+            return resultado
+
+        except Exception as exc:
+            ultimo_error = f"{modelo}: {type(exc).__name__}: {str(exc)[:700]}"
+
+    try:
+        st.session_state.setdefault("errores_vision_api", {})[nombre_archivo] = ultimo_error
+    except Exception:
+        pass
+    return None
 
 
 def _producto_extraido_es_valido(prod):
@@ -7079,6 +7127,19 @@ def extraer_datos_factura(uploaded_file):
         )
         if resultado_visual is not None:
             return resultado_visual
+
+
+    # V21: para cualquier foto NO conocida, intentar visión primero.
+    # Así las facturas nuevas no dependen de que Tesseract reconstruya bien la tabla.
+    if file_name.endswith((".png", ".jpg", ".jpeg", ".webp")) and raw is not None:
+        vision_ok, _ = _estado_vision_api()
+        if vision_ok:
+            resultado_vision_directo = _extraer_factura_con_vision_api(
+                raw,
+                uploaded_file.name,
+            )
+            if resultado_vision_directo is not None:
+                return resultado_vision_directo
 
     if file_name.endswith(".pdf"):
         # 1. Intenta obtener texto digital, igual que la versión original.
@@ -8467,7 +8528,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "V20_VISION_DIAGNOSTICO_20260903"
+EXTRACTOR_CACHE_VERSION = "V21_VISION_PRIMARIA_20260903"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
