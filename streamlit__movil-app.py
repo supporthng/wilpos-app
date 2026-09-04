@@ -3793,7 +3793,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R19":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R21":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3802,7 +3802,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R19":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R19"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R21"
 
 
 # =========================================================
@@ -5448,17 +5448,285 @@ def _buscar_header_productos(lineas):
 
 def _extraer_empaque_desde_tamano(texto):
     """
-    Ej.: 6/75 CL -> 6 unidades por caja; 12/70 CL -> 12.
-    Si no hay presentación múltiple, devuelve 1.
+    Infiere unidades físicas por empaque desde descripción/presentación.
+
+    Prioridad:
+    - Caja-500 / Caja 12 / Paquete-24
+    - 6X4X500ML -> 24
+    - 4X6/33CL -> 24
+    - 24/6/330ML -> 24
+    - 24X330ML -> 24
+    - 12/750ML -> 12
+
+    No interpreta medidas fraccionarias como "1 1/2/700 ML" como empaque.
     """
-    t = str(texto or "").upper()
-    m = re.search(r"\b(\d{1,3})\s*/\s*\d+(?:[.,]\d+)?\s*(?:CL|ML|L)\b", t)
+    t = " ".join(str(texto or "").upper().replace(",", ".").replace("×", "X").split())
+    if not t:
+        return 1
+
+    # Presentación fraccionaria de volumen, no cantidad de empaque.
+    if re.search(r"\b1\s+1/2\s*/\s*\d", t):
+        return 1
+
+    # Caja/Paquete explícito.
+    for patron in (
+        r"\b(?:CAJA|CJ|CAJ|CASE|PACK|PCK|PAQUETE)\s*[- ]\s*(\d{1,3})\b",
+        r"\b(?:CAJA|CJ|CAJ|CASE|PACK|PCK|PAQUETE)(\d{1,3})\b",
+    ):
+        m = re.search(patron, t, flags=re.I)
+        if m:
+            n = int(m.group(1))
+            if 2 <= n <= 1000:
+                return n
+
+    # A X B X volumen => A*B. Ej. 6X4X500ML, 2X12X330ML.
+    m = re.search(
+        r"(?<!\d)(\d{1,3})\s*X\s*(\d{1,3})\s*X\s*"
+        r"\d+(?:\.\d+)?\s*(?:ML|CL|L|LT|OZ|CC)\b",
+        t,
+        flags=re.I,
+    )
     if m:
-        try:
-            return max(1, int(m.group(1)))
-        except Exception:
-            pass
+        a, b = int(m.group(1)), int(m.group(2))
+        n = a * b
+        if 2 <= n <= 1000:
+            return n
+
+    # A X B / volumen => A*B. Ej. 4X6/33CL.
+    m = re.search(
+        r"(?<!\d)(\d{1,3})\s*X\s*(\d{1,3})\s*/\s*"
+        r"\d+(?:\.\d+)?\s*(?:ML|CL|L|LT|OZ|CC)\b",
+        t,
+        flags=re.I,
+    )
+    if m:
+        a, b = int(m.group(1)), int(m.group(2))
+        n = a * b
+        if 2 <= n <= 1000:
+            return n
+
+    # A / B / volumen: el primer número es el número de unidades vendibles.
+    # Ej. 24/6/330ML -> 24.
+    m = re.search(
+        r"(?<!\d)(\d{1,3})\s*/\s*(\d{1,3})\s*/\s*"
+        r"\d+(?:\.\d+)?\s*(?:ML|CL|L|LT|OZ|CC)\b",
+        t,
+        flags=re.I,
+    )
+    if m:
+        n = int(m.group(1))
+        if 2 <= n <= 1000:
+            return n
+
+    # A X volumen.
+    m = re.search(
+        r"(?<!\d)(\d{1,3})\s*X\s*\d+(?:\.\d+)?\s*"
+        r"(?:ML|CL|L|LT|OZ|CC)\b",
+        t,
+        flags=re.I,
+    )
+    if m:
+        n = int(m.group(1))
+        if 2 <= n <= 1000:
+            return n
+
+    # A / volumen.
+    m = re.search(
+        r"(?<![\d/])(\d{1,3})\s*/\s*\d+(?:\.\d+)?\s*"
+        r"(?:ML|CL|L|LT|OZ|CC)\b",
+        t,
+        flags=re.I,
+    )
+    if m:
+        n = int(m.group(1))
+        if 2 <= n <= 1000:
+            return n
+
+    # Texto explícito de unidades/botellas.
+    m = re.search(r"\b(\d{1,3})\s*(?:BOTELLAS?|UND|UNIDADES?|PZAS?|PCS)\b", t, flags=re.I)
+    if m:
+        n = int(m.group(1))
+        if 2 <= n <= 1000:
+            return n
+
     return 1
+
+
+def _unidad_es_fisica_individual(unidad):
+    u = " ".join(str(unidad or "").upper().replace(".", "").split()).strip()
+    if not u:
+        return False
+    if re.fullmatch(r"(?:BOT|BOTELLA|BOTELLAS|UND|UNIDAD|UNIDADES|PZA|PIEZA|PIEZAS|EA|PC|PCS)", u):
+        return True
+    if re.fullmatch(r"\d+(?:[.,]\d+)?\s*(?:ML|CL|L|LT|OZ|CC)", u):
+        return True
+    return False
+
+
+
+def _limpiar_nombre_producto_final(nombre):
+    """
+    Deja solamente nombre comercial + presentación útil.
+    Elimina información propia de la factura que no debe formar parte
+    del nombre del artículo: códigos, cantidades de caja, descuentos,
+    ITBIS, precios, marcas de columnas, etc.
+
+    Conserva presentaciones como:
+      750ML, 1.75L, 70 CL, 12 OZ, 330ML, 6/750ML.
+    """
+    s = " ".join(str(nombre or "").replace("\n", " ").split()).strip()
+    if not s:
+        return s
+
+    # Quitar etiquetas administrativas cuando Vision/OCR las pega al nombre.
+    s = re.sub(
+        r"\b(?:CODIGO|CÓDIGO|BARCODE|EAN|SKU|ITEM|MATERIAL|REF(?:ERENCIA)?|"
+        r"PRECIO|ITBIS|IMPORTE|TOTAL|DESCUENTO|DESC\.?|CANTIDAD|CANT\.?|"
+        r"UNIDAD|UDM|UMV)\s*[:#-]?\s*",
+        " ",
+        s,
+        flags=re.I,
+    )
+
+    # Quitar códigos numéricos largos pegados al inicio/final del nombre.
+    s = re.sub(r"^\s*\d{5,14}\s*[-|:/]*\s*", "", s)
+    s = re.sub(r"\s*[-|:/]*\s*\d{8,14}\s*$", "", s)
+
+    # Quitar códigos internos alfanuméricos sólo si vienen explícitamente etiquetados.
+    s = re.sub(
+        r"\b(?:COD|SKU|ITEM|MATERIAL|REF)\s*[:#-]?\s*[A-Z0-9_-]{2,20}\b",
+        " ",
+        s,
+        flags=re.I,
+    )
+
+    # Caja/paquete describe logística, no el nombre de venta.
+    # Se conserva antes en prod['emp']; aquí sólo se limpia la descripción.
+    s = re.sub(
+        r"\b(?:CAJA|CJ|CAJ|CASE|PACK|PCK|PAQUETE)\s*[- ]?\s*\d{1,3}\b",
+        " ",
+        s,
+        flags=re.I,
+    )
+
+    # Multipack + volumen: convertir a presentación simple conservando el volumen.
+    # 6X4X355ML -> 355ML; 2X12X330ML -> 330ML.
+    s = re.sub(
+        r"\b\d{1,3}\s*[Xx]\s*\d{1,3}\s*[Xx]\s*(\d+(?:[.,]\d+)?\s*(?:ML|CL|L|LT|OZ|CC))\b",
+        r"\1",
+        s,
+        flags=re.I,
+    )
+    # 24X330ML -> 330ML.
+    s = re.sub(
+        r"\b\d{1,3}\s*[Xx]\s*(\d+(?:[.,]\d+)?\s*(?:ML|CL|L|LT|OZ|CC))\b",
+        r"\1",
+        s,
+        flags=re.I,
+    )
+    # 24/6/330ML -> 330ML.
+    s = re.sub(
+        r"\b\d{1,3}\s*/\s*\d{1,3}\s*/\s*(\d+(?:[.,]\d+)?\s*(?:ML|CL|L|LT|OZ|CC))\b",
+        r"\1",
+        s,
+        flags=re.I,
+    )
+    # 12/750ML -> 750ML. No tocar 1 1/2/700ML.
+    s = re.sub(
+        r"(?<!\d\s)(?<!\d/)\b\d{1,3}\s*/\s*(\d+(?:[.,]\d+)?\s*(?:ML|CL|L|LT|OZ|CC))\b",
+        r"\1",
+        s,
+        flags=re.I,
+    )
+
+    # Quitar tokens de empaque sueltos, conservando BOT/BOTELLA cuando forman
+    # parte natural del nombre sólo si no están seguidos por una cantidad.
+    s = re.sub(r"\b(?:CJ\d+BOT|CJ\d+|CAJ\d+)\b", " ", s, flags=re.I)
+
+    # Quitar porcentajes fiscales/comerciales aislados, no ABV integrado al nombre.
+    s = re.sub(r"\b(?:ITBIS\s*)?\d{1,2}(?:[.,]\d+)?\s*%\s*$", "", s, flags=re.I)
+
+    # Limpiar separadores y espacios.
+    s = re.sub(r"\s{2,}", " ", s)
+    s = re.sub(r"\s*[-|,;:]+\s*$", "", s)
+    s = s.strip(" -|,;:")
+
+    return s.upper()
+
+
+def _limpiar_producto_para_exportacion(prod):
+    if not isinstance(prod, dict):
+        return prod
+    original = str(prod.get("nombre") or "")
+    limpio = _limpiar_nombre_producto_final(original)
+    if limpio:
+        prod["nombre_original_lectura"] = original
+        prod["nombre"] = limpio
+    return prod
+
+
+def _validar_empaque_final_producto(prod):
+    """
+    Última barrera antes de calcular stock/costo unitario.
+    Corrige empaques leídos como 1 cuando la factura/descripcion demuestra
+    que el precio corresponde a una caja o multipack.
+
+    Si la unidad impresa es BOT/UND/PZA o una medida individual, NO corrige.
+    """
+    if not isinstance(prod, dict):
+        return prod
+
+    nombre = str(prod.get("nombre") or "")
+    unidad = (
+        prod.get("purchase_unit")
+        or prod.get("unidad_original")
+        or prod.get("uom")
+        or ""
+    )
+    package_text = (
+        prod.get("package_text")
+        or prod.get("presentation")
+        or prod.get("size_text")
+        or ""
+    )
+
+    try:
+        emp_actual = max(1, int(float(prod.get("emp") or 1)))
+    except Exception:
+        emp_actual = 1
+
+    # Si la factura dice que se compró BOT/UND/PZA, la cantidad ya es física.
+    if _unidad_es_fisica_individual(unidad):
+        prod["emp"] = 1
+        prod["empaque_validacion_final"] = "unidad_fisica"
+        return prod
+
+    # Priorizar presentación exacta y luego descripción.
+    inferido = _extraer_empaque_desde_tamano(package_text)
+    if inferido <= 1:
+        inferido = _extraer_empaque_desde_tamano(nombre)
+
+    # No tocar depósitos/envases retornables sólo por mencionar "24 botellas".
+    nombre_norm = _normalizar_ocr(nombre)
+    if any(x in nombre_norm for x in ("deposito", "depos.", "depos ", "retornable vacio", "envase vacio")):
+        prod["empaque_validacion_final"] = "deposito_no_corregido"
+        return prod
+
+    if inferido > 1 and (emp_actual <= 1 or emp_actual != inferido):
+        prod["emp_original_antes_validacion"] = emp_actual
+        prod["emp"] = int(inferido)
+        prod["empaque_validacion_final"] = f"corregido_a_{inferido}"
+        advertencias = list(prod.get("advertencias_lectura") or [])
+        advertencias.append(
+            f"empaque corregido antes del costo unitario: {emp_actual} → {inferido}"
+        )
+        prod["advertencias_lectura"] = list(dict.fromkeys(advertencias))
+    else:
+        prod["empaque_validacion_final"] = "sin_cambio"
+
+    return prod
+
+
 
 
 def _parsear_linea_distribuidor_con_barcode(linea):
@@ -5653,7 +5921,8 @@ def _parsear_linea_producto_generica(linea):
                 codigo, nombre, cantidad, unidad_txt, precio, importe = m.groups()
             else:
                 codigo, nombre, cantidad, precio, importe = m.groups()
-                unidad_txt = "UND"
+                # No inventar UND: si la unidad no está en el OCR, inferir desde descripción.
+                unidad_txt = ""
 
             cantidad = _numero_documento_a_float(cantidad)
             precio = _numero_documento_a_float(precio)
@@ -5675,15 +5944,18 @@ def _parsear_linea_producto_generica(linea):
             if len(nombre) < 2:
                 return None
 
+            empaque = 1 if _unidad_es_fisica_individual(unidad_txt) else _extraer_empaque_desde_tamano(nombre)
+
             return {
                 "codigo": codigo,
                 "nombre": nombre,
                 "cant": float(cantidad),
-                "emp": 1,
+                "emp": int(empaque),
                 "costo_total": float(importe),
                 "itbis": 0.18,
                 "cat": _inferir_categoria_generica(nombre),
                 "unidad_original": unidad_txt,
+                "empaque_validacion_final": "parser_generico",
             }
         except Exception:
             continue
@@ -8414,7 +8686,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R19"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R21"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -9944,6 +10216,21 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                 }
 
                 for p in productos_en_archivo:
+                    # BASE6-R20: última validación universal de empaque.
+                    _emp_antes = int(float(p.get("emp") or 1))
+                    p = _validar_empaque_final_producto(p)
+                    # El empaque ya fue interpretado; ahora limpiar el nombre para
+                    # que el Excel conserve sólo producto + presentación.
+                    p = _limpiar_producto_para_exportacion(p)
+                    _emp_despues = int(float(p.get("emp") or 1))
+                    if _emp_despues != _emp_antes:
+                        st.session_state.setdefault("correcciones_empaque_lote", []).append({
+                            "Producto": p.get("nombre", ""),
+                            "Código": p.get("codigo", ""),
+                            "Empaque leído": _emp_antes,
+                            "Empaque corregido": _emp_despues,
+                        })
+
                     codigo = re.sub(r"[^A-Za-z0-9]", "", str(p["codigo"])).upper()
                     cantidad_comprada_unidades = float(p["cant"]) * float(p["emp"])
 
@@ -10496,7 +10783,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R19_PROVEEDOR_CLIENTE_ANTIDUP_20260904"
+EXTRACTOR_CACHE_VERSION = "BASE6_R21_NOMBRE_LIMPIO_PRESENTACION_20260904"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -10592,6 +10879,24 @@ def _resumen_trazabilidad_lote():
         "timeouts": n("timeout"),
         "errores_api": n("error_api") + n("limite_api"),
     }
+
+
+
+def _mostrar_correcciones_empaque_ui():
+    correcciones = []
+    for codigo, apariciones in (st.session_state.get("origen_productos_facturas", {}) or {}).items():
+        for item in apariciones:
+            # origen no guarda advertencias; el aviso detallado se registra durante consolidación.
+            pass
+
+    eventos = st.session_state.get("correcciones_empaque_lote", []) or []
+    if eventos:
+        st.info(
+            f"📦 {len(eventos)} producto(s) tuvieron corrección automática de empaque "
+            "antes de calcular el costo unitario."
+        )
+        with st.expander(f"Ver correcciones de empaque ({len(eventos)})", expanded=False):
+            st.dataframe(pd.DataFrame(eventos), use_container_width=True, hide_index=True)
 
 
 def _mostrar_archivos_no_procesados_ui():
@@ -10861,6 +11166,7 @@ def render_carga_facturas(titulo=True):
     if uploaded_files:
         st.session_state.errores_ocr = []
         st.session_state["resultado_archivos_lote"] = {}
+        st.session_state["correcciones_empaque_lote"] = []
 
         # Evita procesar dos veces el mismo nombre de archivo dentro del lote.
         archivos_por_nombre = {}
@@ -10982,6 +11288,7 @@ def render_carga_facturas(titulo=True):
             total_duplicados_binarios=_dup_binarios,
         )
         _mostrar_archivos_no_procesados_ui()
+        _mostrar_correcciones_empaque_ui()
 
         _eventos_directos = st.session_state.get("fallback_574652_eventos", {})
         for _nombre_directo, _info_directo in _eventos_directos.items():
