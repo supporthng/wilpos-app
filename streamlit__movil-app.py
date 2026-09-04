@@ -5158,38 +5158,34 @@ def _normalizar_ocr(texto):
     return re.sub(r"\s+", " ", texto).strip()
 
 def _ocr_imagen(image):
-    """OCR conservador. No binariza agresivamente para no borrar texto fino."""
+    """
+    Compatibilidad con funciones antiguas.
+    Usa el OCR mejorado cuando ya está disponible.
+    """
     if not OCR_DISPONIBLE:
         return ""
 
+    # _ocr_multilectura se define más abajo y se resuelve al ejecutar la función.
     try:
-        image = ImageOps.exif_transpose(image)
+        return _ocr_multilectura(image)
     except Exception:
-        pass
-
-    # Reduce imágenes enormes, pero conserva resolución suficiente.
-    try:
-        max_lado = 2200
-        mayor = max(image.size)
-        if mayor > max_lado:
-            factor = max_lado / mayor
-            image = image.resize(
-                (max(1, int(image.width * factor)), max(1, int(image.height * factor)))
-            )
-    except Exception:
-        pass
-
-    textos = []
-    # Primer pase: documento/tablas. Segundo pase: texto disperso.
-    for psm in (6, 11):
         try:
-            t = pytesseract.image_to_string(image, config=f"--oem 3 --psm {psm}")
-            if t and t.strip():
-                textos.append(t)
+            image = ImageOps.exif_transpose(image)
         except Exception:
             pass
 
-    return "\n".join(textos)
+        textos = []
+        for psm in (3, 4, 6, 11, 12):
+            try:
+                t = pytesseract.image_to_string(
+                    image,
+                    config=f"--oem 3 --psm {psm}",
+                )
+                if t and t.strip():
+                    textos.append(t)
+            except Exception:
+                pass
+        return "\n".join(textos)
 
 
 # =========================================================
@@ -5358,13 +5354,24 @@ def _parsear_linea_distribuidor_con_barcode(linea):
         return None
 
     # Código de barras real: 8 a 14 dígitos.
+    # OCR puede introducir espacios: 8 410035 601094.
     m_bar = re.search(r"\b(\d{8,14})\b", s)
-    if not m_bar:
-        return None
-
-    barcode = m_bar.group(1)
-    antes = s[:m_bar.start()].strip()
-    despues = s[m_bar.end():].strip()
+    if m_bar:
+        barcode = m_bar.group(1)
+        antes = s[:m_bar.start()].strip()
+        despues = s[m_bar.end():].strip()
+    else:
+        m_sep = re.search(
+            r"(?<!\d)((?:\d[\s\-]*){8,14})(?!\d)",
+            s,
+        )
+        if not m_sep:
+            return None
+        barcode = re.sub(r"\D", "", m_sep.group(1))
+        if not (8 <= len(barcode) <= 14):
+            return None
+        antes = s[:m_sep.start()].strip()
+        despues = s[m_sep.end():].strip()
 
     # Debe haber un código interno cerca del barcode.
     internos = re.findall(r"\b(\d{3,7})\b", antes)
@@ -5553,36 +5560,78 @@ def _extraer_productos_genericos(texto):
 
     header_idx = _buscar_header_productos(lineas)
     if header_idx is None:
-        return []
+        # OCR puede fragmentar la cabecera. Buscarla en ventanas de líneas.
+        header_idx = 0
+        encontrada = False
+        for i in range(max(0, len(lineas) - 4)):
+            bloque = " ".join(lineas[i:i+4])
+            n = _normalizar_ocr(bloque)
+            if (
+                ("descripcion" in n or "descr" in n)
+                and ("precio" in n or "importe" in n)
+                and ("codigo" in n or "barras" in n)
+            ):
+                header_idx = i
+                encontrada = True
+                break
+        if not encontrada:
+            # Incluso sin cabecera perfecta, intentar detectar filas por barcode.
+            header_idx = 0
 
     productos = []
-    fallos_consecutivos = 0
+    firmas_productos = set()
+    i = header_idx + 1
 
-    for linea in lineas[header_idx + 1:]:
-        # Cortar al llegar a totales/secciones finales.
-        if re.match(
-            r"(?i)^(subtotal|itbis|i\.?t\.?b\.?i\.?s|impuesto|total|comentarios?|"
-            r"notas?|observaciones?|pagos?|cuentas?\s+bancarias|entregas?|"
-            r"devoluciones?|validez|representante|firma)\b",
+    def agregar_si_valido(prod):
+        if not prod:
+            return False
+        firma = (
+            _codigo_producto_canonico(prod.get("codigo", "")),
+            _nombre_producto_canonico(prod.get("nombre", "")),
+            round(float(prod.get("costo_total", 0) or 0), 2),
+        )
+        if firma in firmas_productos:
+            return False
+        firmas_productos.add(firma)
+        productos.append(prod)
+        return True
+
+    while i < len(lineas):
+        linea = lineas[i]
+
+        # No cortar demasiado pronto por "TOTAL" si todavía estamos en una
+        # lectura OCR combinada; solo parar cuando ya hay productos y aparece
+        # una sección claramente final.
+        if productos and re.match(
+            r"(?i)^(subtotal|subtotal\\s+neto|itbis|i\\.?t\\.?b\\.?i\\.?s|"
+            r"total\\s*(?:general|p[aá]gina)?|comentarios?|notas?|observaciones?|"
+            r"entregado\\s+por|verificado\\s+por|recibido\\s+por)\\b",
             linea,
         ):
             break
 
-        prod = _parsear_linea_distribuidor_con_barcode(linea)
-        if prod is None:
-            prod = _parsear_linea_producto_generica(linea)
+        # 1. Línea individual.
+        candidatos = [linea]
 
-        if prod:
-            productos.append(prod)
-            fallos_consecutivos = 0
-        else:
-            # Permite algunas líneas partidas o textos intermedios.
-            fallos_consecutivos += 1
-            if productos and fallos_consecutivos >= 4:
+        # 2. OCR de tablas suele partir una fila en varias líneas.
+        #    Concatenamos hasta 4 líneas consecutivas.
+        for ancho in (2, 3, 4):
+            if i + ancho <= len(lineas):
+                candidatos.append(" ".join(lineas[i:i+ancho]))
+
+        encontrado = False
+        for candidato in candidatos:
+            prod = _parsear_linea_distribuidor_con_barcode(candidato)
+            if prod is None:
+                prod = _parsear_linea_producto_generica(candidato)
+
+            if agregar_si_valido(prod):
+                encontrado = True
                 break
 
-    return productos
+        i += 1
 
+    return productos
 
 
 def _extraer_totales_documento(texto):
@@ -5912,7 +5961,25 @@ def _ocr_multilectura(imagen):
         return ""
 
     lecturas.sort(key=lambda x: x[0], reverse=True)
-    return lecturas[0][3]
+
+    # Un solo pase puede reconocer bien el encabezado pero perder filas.
+    # Combinar las mejores lecturas aumenta la posibilidad de conservar
+    # códigos de barras, descripciones e importes.
+    mejores = lecturas[:4]
+    partes = []
+    vistos = set()
+
+    for score, nombre, psm, txt in mejores:
+        limpio = (txt or "").strip()
+        if not limpio:
+            continue
+        huella = re.sub(r"\s+", " ", limpio)[:500]
+        if huella in vistos:
+            continue
+        vistos.add(huella)
+        partes.append(limpio)
+
+    return "\n".join(partes)
 
 
 def extraer_datos_factura(uploaded_file):
@@ -5948,7 +6015,7 @@ def extraer_datos_factura(uploaded_file):
                     for pagina in doc:
                         pix = pagina.get_pixmap(matrix=fitz.Matrix(1.8, 1.8), alpha=False)
                         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                        extracted_text += "\n" + _ocr_imagen(img)
+                        extracted_text += "\n" + _ocr_multilectura(img)
                     doc.close()
                 except Exception as exc:
                     errores_locales.append(
@@ -5967,7 +6034,8 @@ def extraer_datos_factura(uploaded_file):
         elif raw is not None:
             try:
                 image = Image.open(io.BytesIO(raw))
-                extracted_text = _ocr_imagen(image)
+                # Fotos de celular: usar OCR multilectura con rotación automática.
+                extracted_text = _ocr_multilectura(image)
             except Exception as exc:
                 errores_locales.append(
                     f"No se pudo leer la imagen {uploaded_file.name}: {exc}"
@@ -6010,6 +6078,15 @@ def extraer_datos_factura(uploaded_file):
     )
     if resultado_generico is not None:
         return resultado_generico
+
+    # Guardar una muestra OCR para diagnóstico cuando una foto no se reconoce.
+    if file_name.endswith((".png", ".jpg", ".jpeg")):
+        try:
+            if "diagnostico_ocr" not in st.session_state:
+                st.session_state["diagnostico_ocr"] = {}
+            st.session_state["diagnostico_ocr"][uploaded_file.name] = extracted_text[:6000]
+        except Exception:
+            pass
 
     # Si el formato es demasiado irregular para el parser genérico,
     # se conservan las reglas históricas únicamente como respaldo.
