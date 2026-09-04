@@ -3792,7 +3792,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "V23":
+if st.session_state.get("_extractor_runtime_version") != "V24":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3801,7 +3801,7 @@ if st.session_state.get("_extractor_runtime_version") != "V23":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "V23"
+    st.session_state["_extractor_runtime_version"] = "V24"
 
 
 # =========================================================
@@ -6856,8 +6856,7 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
     )
 
 
-@st.cache_data(show_spinner=False, ttl=86400, max_entries=256)
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V22"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V24"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -6944,6 +6943,7 @@ REGLAS:
         try:
             _diag_vision(nombre_archivo, "envío API", "INTENTO", f"Modelo: {modelo}")
             client = OpenAI(api_key=api_key)
+            _diag_vision(nombre_archivo, "cliente OpenAI", "OK", f"Cliente creado; modelo={modelo}")
             response = client.responses.create(
                 model=modelo,
                 store=False,
@@ -7012,8 +7012,12 @@ REGLAS:
             return resultado
 
         except Exception as exc:
-            ultimo_error = f"{modelo}: {type(exc).__name__}: {str(exc)[:700]}"
+            ultimo_error = f"{modelo}: {type(exc).__name__}: {str(exc)[:1200]}"
             _diag_vision(nombre_archivo, "envío/API", "ERROR", ultimo_error)
+            try:
+                st.session_state["vision_ultimo_error_directo"] = ultimo_error
+            except Exception:
+                pass
 
     try:
         st.session_state.setdefault("errores_vision_api", {})[nombre_archivo] = ultimo_error
@@ -8577,7 +8581,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "V23_BOTON_PROCESAR_FIX_20260903"
+EXTRACTOR_CACHE_VERSION = "V24_API_SIN_CACHE_20260903"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -8618,6 +8622,9 @@ def render_carga_facturas(titulo=True):
         )
 
     st.markdown("#### Diagnóstico técnico de lectura")
+    ultimo_error_directo = st.session_state.get("vision_ultimo_error_directo", "")
+    if ultimo_error_directo:
+        st.error("ERROR DIRECTO DE OPENAI API:\n\n" + ultimo_error_directo)
     debug_map = st.session_state.get("vision_debug", {})
     if not debug_map:
         st.info(
