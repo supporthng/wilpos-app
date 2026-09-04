@@ -3789,73 +3789,165 @@ def _normalizar_ocr(texto):
     texto = re.sub(r"[^a-z0-9]+", " ", texto)
     return re.sub(r"\s+", " ", texto).strip()
 
-def _ocr_imagen(image):
-    """OCR para fotos de facturas: corrige orientación y prueba varios modos de página."""
-    if not OCR_DISPONIBLE:
-        return ""
+def _puntuar_ocr_factura(texto):
+    t = str(texto or "")
+    n = _normalizar_ocr(t)
+    claves = (
+        "factura", "descripcion", "codigo", "cantidad", "precio", "importe",
+        "itbis", "subtotal", "total", "ncf", "material", "item", "ean",
+        "monto neto", "precio neto", "codigo barra", "descuento"
+    )
+    score = len(re.findall(r"[A-Za-zÁÉÍÓÚáéíóúÑñ]{3,}", t))
+    score += 28 * sum(1 for x in claves if x in n)
+    score += 3 * len(re.findall(r"\b\d[\d.,]{2,}\b", t))
+    return score
 
+
+def _preparar_imagen_ocr(image, angulo=0, max_lado=1900):
     try:
-        image = ImageOps.exif_transpose(image).convert("RGB")
+        img = ImageOps.exif_transpose(image).convert("RGB")
     except Exception:
-        try:
-            image = image.convert("RGB")
-        except Exception:
-            pass
+        img = image.convert("RGB")
 
-    # Mantener más resolución porque las tablas tienen tipografía pequeña.
+    if angulo:
+        img = img.rotate(angulo, expand=True)
+
     try:
-        max_lado = 3200
-        mayor = max(image.size)
+        mayor = max(img.size)
         if mayor > max_lado:
-            factor = max_lado / mayor
-            image = image.resize(
-                (max(1, int(image.width * factor)), max(1, int(image.height * factor)))
+            factor = max_lado / float(mayor)
+            img = img.resize(
+                (
+                    max(1, int(img.width * factor)),
+                    max(1, int(img.height * factor)),
+                ),
+                Image.Resampling.LANCZOS,
             )
     except Exception:
         pass
 
-    def _puntuar(texto):
-        t = str(texto or "")
-        n = _normalizar_ocr(t)
-        palabras_clave = (
-            "factura", "descripcion", "codigo", "cantidad", "precio", "importe",
-            "itbis", "subtotal", "total", "ncf", "material", "item", "ean",
-            "monto neto", "precio neto", "codigo barra"
-        )
-        score = len(re.findall(r"[A-Za-zÁÉÍÓÚáéíóúÑñ]{3,}", t))
-        score += 35 * sum(1 for x in palabras_clave if x in n)
-        score += 4 * len(re.findall(r"\b\d[\d.,]{2,}\b", t))
-        return score
+    try:
+        gris = ImageOps.grayscale(img)
+        gris = ImageOps.autocontrast(gris, cutoff=1)
+        return gris
+    except Exception:
+        return img
 
-    # Muchas fotos de WhatsApp llegan físicamente giradas aunque el EXIF parezca correcto.
+
+def _detectar_orientacion_ocr(image):
+    """
+    Primero intenta OSD de Tesseract sobre una imagen pequeña.
+    Si OSD falla, hace solo dos pruebas pequeñas: 0° y 90°.
+    Evita 12 OCR completos por foto.
+    """
+    try:
+        mini = _preparar_imagen_ocr(image, 0, max_lado=950)
+        osd = pytesseract.image_to_osd(mini, config="--psm 0", timeout=7)
+        m = re.search(r"Rotate:\s*(0|90|180|270)", osd)
+        if m:
+            rotar = int(m.group(1))
+            # Tesseract indica cuánto hay que rotar en sentido horario.
+            return (360 - rotar) % 360
+    except Exception:
+        pass
+
     candidatos = []
-    for angulo in (0, 90, 270, 180):
+    for angulo in (0, 90):
         try:
-            img = image if angulo == 0 else image.rotate(angulo, expand=True)
-            textos = []
-            for psm in (6, 4, 11):
-                try:
-                    t = pytesseract.image_to_string(
-                        img,
-                        config=f"--oem 3 --psm {psm} -l spa+eng",
-                    )
-                except Exception:
-                    try:
-                        t = pytesseract.image_to_string(img, config=f"--oem 3 --psm {psm}")
-                    except Exception:
-                        t = ""
-                if t and t.strip():
-                    textos.append(t)
-            combinado = "\n".join(textos)
-            candidatos.append((_puntuar(combinado), combinado))
+            mini = _preparar_imagen_ocr(image, angulo, max_lado=950)
+            try:
+                t = pytesseract.image_to_string(
+                    mini,
+                    config="--oem 3 --psm 11 -l spa+eng",
+                    timeout=8,
+                )
+            except Exception:
+                t = pytesseract.image_to_string(
+                    mini,
+                    config="--oem 3 --psm 11",
+                    timeout=8,
+                )
+            candidatos.append((_puntuar_ocr_factura(t), angulo))
         except Exception:
             continue
 
-    if not candidatos:
+    if candidatos:
+        candidatos.sort(reverse=True)
+        return candidatos[0][1]
+    return 0
+
+
+def _ocr_imagen(image):
+    """
+    OCR optimizado para lotes grandes:
+      1) detecta orientación con miniatura,
+      2) hace una lectura completa PSM 6,
+      3) solo si sale pobre, prueba PSM 11.
+    """
+    if not OCR_DISPONIBLE:
         return ""
 
-    candidatos.sort(key=lambda x: x[0], reverse=True)
-    return candidatos[0][1]
+    angulo = _detectar_orientacion_ocr(image)
+    img = _preparar_imagen_ocr(image, angulo, max_lado=1900)
+
+    lecturas = []
+
+    try:
+        try:
+            t6 = pytesseract.image_to_string(
+                img,
+                config="--oem 3 --psm 6 -l spa+eng",
+                timeout=22,
+            )
+        except Exception:
+            t6 = pytesseract.image_to_string(
+                img,
+                config="--oem 3 --psm 6",
+                timeout=22,
+            )
+        if t6 and t6.strip():
+            lecturas.append((_puntuar_ocr_factura(t6), t6))
+    except Exception:
+        pass
+
+    # Solo una segunda lectura si la primera no tiene suficiente estructura documental.
+    mejor_score = max((x[0] for x in lecturas), default=0)
+    if mejor_score < 240:
+        try:
+            try:
+                t11 = pytesseract.image_to_string(
+                    img,
+                    config="--oem 3 --psm 11 -l spa+eng",
+                    timeout=18,
+                )
+            except Exception:
+                t11 = pytesseract.image_to_string(
+                    img,
+                    config="--oem 3 --psm 11",
+                    timeout=18,
+                )
+            if t11 and t11.strip():
+                lecturas.append((_puntuar_ocr_factura(t11), t11))
+        except Exception:
+            pass
+
+    if not lecturas:
+        return ""
+
+    lecturas.sort(key=lambda x: x[0], reverse=True)
+    return lecturas[0][1]
+
+
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
+def _ocr_imagen_bytes_cache(raw_bytes, cache_version="MP_FAST_OCR_V3"):
+    """La misma imagen no vuelve a pasar por Tesseract en cada rerun."""
+    if not raw_bytes:
+        return ""
+    try:
+        image = Image.open(io.BytesIO(raw_bytes))
+        return _ocr_imagen(image)
+    except Exception:
+        return ""
 
 
 # =========================================================
@@ -4235,8 +4327,7 @@ def extraer_datos_factura(uploaded_file):
             )
         elif raw is not None:
             try:
-                image = Image.open(io.BytesIO(raw))
-                extracted_text = _ocr_imagen(image)
+                extracted_text = _ocr_imagen_bytes_cache(raw)
             except Exception as exc:
                 errores_locales.append(
                     f"No se pudo leer la imagen {uploaded_file.name}: {exc}"
@@ -5433,6 +5524,51 @@ def render_gestor_exclusion_productos(df_productos, key_prefix):
                 st.rerun()
 
 
+
+class _ArchivoBytesOCR:
+    def __init__(self, nombre, raw):
+        self.name = nombre
+        self._raw = raw
+        self._pos = 0
+
+    def read(self, n=-1):
+        if n is None or n < 0:
+            out = self._raw[self._pos:]
+            self._pos = len(self._raw)
+            return out
+        out = self._raw[self._pos:self._pos+n]
+        self._pos += len(out)
+        return out
+
+    def seek(self, pos, whence=0):
+        if whence == 0:
+            self._pos = max(0, int(pos))
+        elif whence == 1:
+            self._pos = max(0, self._pos + int(pos))
+        elif whence == 2:
+            self._pos = max(0, len(self._raw) + int(pos))
+        return self._pos
+
+    def tell(self):
+        return self._pos
+
+
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
+def _extraer_factura_cache_mp(nombre, raw_bytes, cache_version="MP_EXTRACT_V3"):
+    archivo = _ArchivoBytesOCR(nombre, raw_bytes)
+    return extraer_datos_factura(archivo)
+
+
+def _extraer_factura_upload_mp(uploaded_file):
+    try:
+        uploaded_file.seek(0)
+        raw = uploaded_file.read()
+        uploaded_file.seek(0)
+        return _extraer_factura_cache_mp(uploaded_file.name, raw)
+    except Exception:
+        return extraer_datos_factura(uploaded_file)
+
+
 def render_carga_facturas(titulo=True):
     """Carga y procesa facturas con un selector visual robusto basado en botones reales."""
 
@@ -5689,24 +5825,38 @@ def render_carga_facturas(titulo=True):
         # También evita duplicados por factura aunque tengan nombres de archivo distintos.
         firmas_detectadas_en_lote = set()
 
-        with st.spinner("Leyendo y reconociendo facturas..."):
-            for f in archivos_unicos:
-                firma, proveedor, num_fac, fecha_fac, productos = extraer_datos_factura(f)
+        total_ocr = max(1, len(archivos_unicos))
+        barra_ocr = st.progress(0, text=f"Preparando {total_ocr} archivo(s)…")
 
-                if not productos:
-                    archivos_invalidos.append(f.name)
+        for indice_ocr, f in enumerate(archivos_unicos, start=1):
+            barra_ocr.progress(
+                int(((indice_ocr - 1) / total_ocr) * 100),
+                text=f"Leyendo {indice_ocr} de {total_ocr}: {f.name}",
+            )
 
-                elif firma in firmas_detectadas_en_lote:
-                    # Duplicado REAL dentro de los archivos cargados actualmente.
-                    archivos_duplicados.append(
-                        (f.name, proveedor, num_fac)
-                    )
+            firma, proveedor, num_fac, fecha_fac, productos = _extraer_factura_upload_mp(f)
 
-                else:
-                    firmas_detectadas_en_lote.add(firma)
-                    archivos_validos.append(
-                        (f, firma, proveedor, num_fac, fecha_fac, productos)
-                    )
+            if not productos:
+                archivos_invalidos.append(f.name)
+
+            elif firma in firmas_detectadas_en_lote:
+                # Duplicado REAL dentro de los archivos cargados actualmente.
+                archivos_duplicados.append(
+                    (f.name, proveedor, num_fac)
+                )
+
+            else:
+                firmas_detectadas_en_lote.add(firma)
+                archivos_validos.append(
+                    (f, firma, proveedor, num_fac, fecha_fac, productos)
+                )
+
+            barra_ocr.progress(
+                int((indice_ocr / total_ocr) * 100),
+                text=f"Procesado {indice_ocr} de {total_ocr}",
+            )
+
+        barra_ocr.empty()
 
     if uploaded_files:
         # -----------------------------------------------------
