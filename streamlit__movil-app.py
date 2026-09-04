@@ -1,4 +1,6 @@
 import io
+import base64
+import os
 import hashlib
 import re
 import json
@@ -23,6 +25,14 @@ try:
 except ImportError:
     pytesseract = None
     OCR_DISPONIBLE = False
+
+
+try:
+    from openai import OpenAI
+    OPENAI_SDK_DISPONIBLE = True
+except ImportError:
+    OpenAI = None
+    OPENAI_SDK_DISPONIBLE = False
 
 
 # pytesseract puede importar aunque el ejecutable "tesseract" no esté
@@ -3782,7 +3792,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "V18":
+if st.session_state.get("_extractor_runtime_version") != "V19":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3791,7 +3801,7 @@ if st.session_state.get("_extractor_runtime_version") != "V18":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "V18"
+    st.session_state["_extractor_runtime_version"] = "V19"
 
 
 # =========================================================
@@ -6045,7 +6055,7 @@ def _ocr_multilectura(imagen):
     return "\n".join(partes)
 
 
-OCR_CACHE_VERSION = "V18_OCR_20260903"
+OCR_CACHE_VERSION = "V19_OCR_20260903"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=64)
@@ -6647,6 +6657,267 @@ def _fallback_visual_factura_574652(raw_bytes, nombre_archivo=""):
 
 
 
+
+def _obtener_openai_api_key():
+    """
+    Lee la clave únicamente desde Streamlit Secrets o variable de entorno.
+    Nunca se incrusta una clave dentro del código.
+    """
+    key = None
+    try:
+        key = st.secrets.get("OPENAI_API_KEY")
+    except Exception:
+        key = None
+
+    if not key:
+        key = os.environ.get("OPENAI_API_KEY")
+
+    return str(key).strip() if key else ""
+
+
+def _modelo_vision_configurado():
+    try:
+        modelo = st.secrets.get("OPENAI_VISION_MODEL")
+    except Exception:
+        modelo = None
+    return str(modelo or "gpt-5.6-terra").strip()
+
+
+def _mime_imagen(nombre_archivo):
+    n = str(nombre_archivo or "").lower()
+    if n.endswith(".png"):
+        return "image/png"
+    if n.endswith(".webp"):
+        return "image/webp"
+    return "image/jpeg"
+
+
+VISION_FACTURA_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "provider": {"type": "string"},
+        "invoice_number": {"type": ["string", "null"]},
+        "ncf": {"type": ["string", "null"]},
+        "date": {"type": ["string", "null"]},
+        "currency": {
+            "type": "string",
+            "enum": ["DOP", "USD", "OTHER"],
+        },
+        "page_number": {"type": ["integer", "null"]},
+        "total_pages": {"type": ["integer", "null"]},
+        "products": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "barcode": {"type": ["string", "null"]},
+                    "internal_code": {"type": ["string", "null"]},
+                    "description": {"type": "string"},
+                    "quantity_packages": {"type": "number"},
+                    "units_per_package": {"type": "integer"},
+                    "unit_cost_net": {"type": ["number", "null"]},
+                    "line_cost_net": {"type": "number"},
+                    "itbis_rate": {"type": "number"},
+                },
+                "required": [
+                    "barcode",
+                    "internal_code",
+                    "description",
+                    "quantity_packages",
+                    "units_per_package",
+                    "unit_cost_net",
+                    "line_cost_net",
+                    "itbis_rate",
+                ],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": [
+        "provider",
+        "invoice_number",
+        "ncf",
+        "date",
+        "currency",
+        "page_number",
+        "total_pages",
+        "products",
+    ],
+    "additionalProperties": False,
+}
+
+
+def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
+    if not isinstance(data, dict):
+        return None
+
+    proveedor = str(data.get("provider") or "").strip()
+    numero = str(data.get("invoice_number") or "").strip()
+    ncf = str(data.get("ncf") or "").strip()
+    fecha = str(data.get("date") or "").strip()
+    moneda = str(data.get("currency") or "DOP").upper().strip()
+
+    productos = []
+    for item in data.get("products") or []:
+        if not isinstance(item, dict):
+            continue
+
+        barcode = str(item.get("barcode") or "").strip()
+        codigo_interno = str(item.get("internal_code") or "").strip()
+        codigo = barcode or codigo_interno
+        nombre = " ".join(str(item.get("description") or "").split()).strip()
+
+        try:
+            cant = float(item.get("quantity_packages") or 0)
+            emp = max(1, int(item.get("units_per_package") or 1))
+            costo_total = float(item.get("line_cost_net") or 0)
+            itbis = float(item.get("itbis_rate") or 0)
+        except Exception:
+            continue
+
+        if not codigo or not nombre or cant <= 0 or costo_total <= 0:
+            continue
+
+        # ITBIS se guarda como tasa decimal: 18% -> 0.18.
+        if itbis > 1:
+            itbis = itbis / 100.0
+        if itbis < 0 or itbis > 1:
+            itbis = 0.0
+
+        p = {
+            "codigo": codigo,
+            "codigo_interno": codigo_interno,
+            "nombre": nombre,
+            "cant": cant,
+            "emp": emp,
+            "costo_total": costo_total,
+            "itbis": itbis,
+            "cat": _inferir_categoria_generica(nombre),
+            "moneda": moneda if moneda in ("DOP", "USD") else "DOP",
+            "costo_incluia_itbis": False,
+            "itbis_detectado": "vision_api",
+        }
+        productos.append(p)
+
+    if not productos:
+        return None
+
+    if not proveedor:
+        proveedor = "Proveedor no identificado"
+
+    # Para páginas continuadas, el NCF suele mantenerse aun cuando
+    # el número comercial de factura no se repita.
+    firma_doc = ncf or numero
+    if not firma_doc:
+        firma_doc = re.sub(
+            r"[^A-Za-z0-9]+",
+            "-",
+            str(nombre_archivo or "documento"),
+        ).strip("-")[:80]
+
+    numero_visible = numero or ncf or firma_doc
+
+    return (
+        (proveedor, firma_doc),
+        proveedor,
+        numero_visible,
+        fecha,
+        productos,
+    )
+
+
+@st.cache_data(show_spinner=False, ttl=86400, max_entries=256)
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V19"):
+    """
+    Fallback de visión para facturas que el OCR local no puede interpretar.
+    Solo se invoca cuando las rutas locales no producen productos confiables.
+    """
+    if not raw_bytes or not OPENAI_SDK_DISPONIBLE:
+        return None
+
+    api_key = _obtener_openai_api_key()
+    if not api_key:
+        return None
+
+    mime = _mime_imagen(nombre_archivo)
+    b64 = base64.b64encode(raw_bytes).decode("ascii")
+    data_url = f"data:{mime};base64,{b64}"
+
+    instrucciones = """
+Extrae fielmente esta factura o página de factura de compra.
+
+Reglas críticas:
+- Lee la imagen visualmente. Puede estar inclinada, girada o fotografiada con celular.
+- Extrae SOLAMENTE filas reales de productos. No conviertas encabezados, sellos, totales o notas en productos.
+- Si hay Código Barra / EAN / UPC, colócalo en barcode. Si no existe, usa null.
+- internal_code es Material / Item / Código / SAP del proveedor cuando exista.
+- quantity_packages es la cantidad facturada en la columna Cantidad.
+- units_per_package es la cantidad física por caja/paquete cuando esté clara en UdM, tamaño o descripción:
+  ejemplos: CJ12BOT -> 12; 24X330ML -> 24; 6X4X355ML -> 24; 12/75 CL -> 12.
+  Si no se puede determinar con seguridad, usa 1.
+- line_cost_net debe ser el COSTO TOTAL DE LA LÍNEA SIN ITBIS y después de descuentos.
+  Si la factura muestra Precio Neto / Imp. Neto / Monto Neto, úsalo.
+  Si solo muestra precio unitario neto y cantidad, calcula cantidad × precio unitario neto.
+  NO uses el Total con ITBIS como costo neto.
+- itbis_rate debe ser 0.18 para 18%, 0 para exento, o la tasa visible.
+- Si una página es continuación y no repite el número comercial, conserva el NCF.
+- No inventes números o códigos ilegibles. Usa null donde el esquema lo permita.
+- Revisa toda la tabla antes de responder para no omitir filas visibles.
+"""
+
+    try:
+        client = OpenAI(api_key=api_key)
+        response = client.responses.create(
+            model=_modelo_vision_configurado(),
+            reasoning={"effort": "low"},
+            store=False,
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": instrucciones,
+                        },
+                        {
+                            "type": "input_image",
+                            "image_url": data_url,
+                            "detail": "original",
+                        },
+                    ],
+                }
+            ],
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "wilpos_invoice_extraction",
+                    "strict": True,
+                    "schema": VISION_FACTURA_SCHEMA,
+                },
+                "verbosity": "low",
+            },
+        )
+
+        raw_json = str(response.output_text or "").strip()
+        if not raw_json:
+            return None
+
+        data = json.loads(raw_json)
+        return _normalizar_resultado_vision_factura(
+            data,
+            nombre_archivo,
+        )
+
+    except Exception as exc:
+        try:
+            if "errores_vision_api" not in st.session_state:
+                st.session_state["errores_vision_api"] = {}
+            st.session_state["errores_vision_api"][nombre_archivo] = str(exc)[:500]
+        except Exception:
+            pass
+        return None
+
+
 def _producto_extraido_es_valido(prod):
     """
     Validador suave para fallbacks nuevos.
@@ -6905,14 +7176,20 @@ def extraer_datos_factura(uploaded_file):
         uploaded_file.name,
     )
     if resultado_tabla is not None:
-        return resultado_tabla
+        ft, pt, nt, fet, prods_t = resultado_tabla
+        prods_t = [p for p in prods_t if _producto_extraido_es_valido(p)]
+        if len(prods_t) >= 2:
+            return ft, pt, nt, fet, prods_t
 
     resultado_generico = _extraer_generico_factura(
         extracted_text,
         uploaded_file.name,
     )
     if resultado_generico is not None:
-        return resultado_generico
+        fg, pg, ng, feg, prods_g = resultado_generico
+        prods_g = [p for p in prods_g if _producto_extraido_es_valido(p)]
+        if len(prods_g) >= 2:
+            return fg, pg, ng, feg, prods_g
 
     # Fallback directo para fotos de tablas giradas.
     if file_name.endswith((".png", ".jpg", ".jpeg")) and raw is not None:
@@ -7165,6 +7442,22 @@ def extraer_datos_factura(uploaded_file):
         ]
 
     if not productos:
+        # Último fallback: visión multimodal.
+        # Solo se usa si OCR, parser genérico y reglas históricas fallaron.
+        if file_name.endswith((".png", ".jpg", ".jpeg", ".webp")) and raw is not None:
+            resultado_vision = _extraer_factura_con_vision_api(
+                raw,
+                uploaded_file.name,
+            )
+            if resultado_vision is not None:
+                try:
+                    if "diagnostico_vision_api" not in st.session_state:
+                        st.session_state["diagnostico_vision_api"] = {}
+                    st.session_state["diagnostico_vision_api"][uploaded_file.name] = True
+                except Exception:
+                    pass
+                return resultado_vision
+
         return None, None, None, None, []
 
     # Detectar moneda automáticamente desde el documento.
@@ -8163,7 +8456,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "V18_REPARADA_BASE_V17_20260903"
+EXTRACTOR_CACHE_VERSION = "V19_HYBRID_VISION_20260903"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
