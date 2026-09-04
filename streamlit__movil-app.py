@@ -3792,7 +3792,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "V27":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R1":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3801,7 +3801,7 @@ if st.session_state.get("_extractor_runtime_version") != "V27":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "V27"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R1"
 
 
 # =========================================================
@@ -6777,6 +6777,49 @@ VISION_FACTURA_SCHEMA = {
 }
 
 
+
+def _inferir_codigo_desde_descripcion_vision(nombre):
+    """
+    Recupera un código que Vision pudo haber pegado al final de la descripción.
+    Solo acepta patrones con marcadores explícitos (PT, PTA, VIT, COD, ITEM)
+    para no confundir tamaños como 750ML / 75CL con códigos.
+    """
+    texto = " ".join(str(nombre or "").upper().split()).strip()
+    if not texto:
+        return ""
+
+    patrones = [
+        r"\b(?:COD(?:IGO)?|ITEM|VIT|PTA|PT)\s*[:#-]?\s*([A-Z0-9-]{4,16})\s*$",
+        r"\b(?:VIT|PTA|PT)([A-Z0-9-]{4,16})\s*$",
+    ]
+    for patron in patrones:
+        m = re.search(patron, texto, flags=re.IGNORECASE)
+        if not m:
+            continue
+        candidato = re.sub(r"[^A-Z0-9-]", "", m.group(1).upper())
+        if len(candidato) < 4 or not re.search(r"\d", candidato):
+            continue
+        # Evitar que una medida quede como código.
+        if re.fullmatch(r"\d+(?:ML|CL|L|OZ|CC)", candidato):
+            continue
+        return candidato
+    return ""
+
+
+def _codigo_temporal_vision(proveedor, nombre):
+    """
+    Código estable para no perder un producto cuando la factura no deja leer
+    barcode/código interno. Se marca como temporal para revisión posterior.
+    """
+    base = (
+        _nombre_producto_canonico(proveedor)
+        + "|"
+        + _nombre_producto_canonico(nombre)
+    )
+    digest = hashlib.sha1(base.encode("utf-8", errors="ignore")).hexdigest()[:12].upper()
+    return f"TMP-{digest}"
+
+
 def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
     if not isinstance(data, dict):
         return None
@@ -6832,10 +6875,20 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
 
         barcode = str(item.get("barcode") or "").strip()
         codigo_interno = str(item.get("internal_code") or "").strip()
-        codigo = barcode or codigo_interno
         nombre = " ".join(str(item.get("description") or "").split()).strip()
 
+        # Vision a veces lee el código pero lo pega al final de la descripción.
+        if not barcode and not codigo_interno and nombre:
+            codigo_inferido = _inferir_codigo_desde_descripcion_vision(nombre)
+            if codigo_inferido:
+                codigo_interno = codigo_inferido
+
+        codigo = barcode or codigo_interno
+        codigo_temporal = False
+
         razones = []
+        advertencias = []
+
         try:
             cant = float(item.get("quantity_packages") or 0)
         except Exception:
@@ -6846,28 +6899,47 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
             emp = max(1, int(float(item.get("units_per_package") or 1)))
         except Exception:
             emp = 1
-            razones.append("empaque no numérico")
+            advertencias.append("empaque no legible; se usó 1")
 
         try:
             costo_total = float(item.get("line_cost_net") or 0)
         except Exception:
             costo_total = 0
-            razones.append("costo neto no numérico")
+
+        # Recuperación: si line_cost_net faltó pero unit_cost_net sí está,
+        # reconstruir el total neto de la línea.
+        if costo_total <= 0:
+            try:
+                unit_cost_net = float(item.get("unit_cost_net") or 0)
+            except Exception:
+                unit_cost_net = 0
+            if unit_cost_net > 0 and cant > 0:
+                costo_total = round(unit_cost_net * cant, 4)
+                advertencias.append(
+                    "costo neto de línea reconstruido desde costo unitario × cantidad"
+                )
+            else:
+                razones.append("costo neto de línea inválido o no legible")
 
         try:
             itbis = float(item.get("itbis_rate") or 0)
         except Exception:
             itbis = 0
-            razones.append("ITBIS no numérico")
+            advertencias.append("ITBIS no legible; se usó 0")
 
-        if not codigo:
-            razones.append("sin código de barras ni código interno legible")
         if not nombre:
             razones.append("descripción vacía o ilegible")
         if cant <= 0:
             razones.append("cantidad inválida o no legible")
-        if costo_total <= 0:
-            razones.append("costo neto de línea inválido o no legible")
+
+        # IMPORTANTE: no perder un producto solo porque el código no sea legible.
+        # Si descripción, cantidad y costo son válidos, entra con código temporal.
+        if not codigo and nombre and cant > 0 and costo_total > 0:
+            codigo = _codigo_temporal_vision(proveedor, nombre)
+            codigo_temporal = True
+            advertencias.append(
+                "sin código legible; se asignó código temporal para no omitir el producto"
+            )
 
         if razones:
             omitidos.append({
@@ -6896,6 +6968,8 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
             "moneda": moneda if moneda in ("DOP", "USD") else "DOP",
             "costo_incluia_itbis": False,
             "itbis_detectado": "vision_api",
+            "codigo_temporal": codigo_temporal,
+            "advertencias_lectura": list(dict.fromkeys(advertencias)),
         }
         productos.append(p)
 
@@ -6939,6 +7013,17 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
             "filas_devuelta_api": len(productos_api),
             "productos_aceptados": len(productos),
             "productos_omitidos": len(omitidos),
+            "productos_codigo_temporal": sum(
+                1 for p in productos if p.get("codigo_temporal")
+            ),
+            "codigos_temporales": [
+                {
+                    "codigo": p.get("codigo"),
+                    "descripcion": p.get("nombre"),
+                    "motivo": "Código original no legible; se generó uno temporal."
+                }
+                for p in productos if p.get("codigo_temporal")
+            ],
             "omitidos": omitidos,
             "subtotal_sin_itbis_impreso": subtotal_impreso,
             "itbis_total_impreso": itbis_total_impreso,
@@ -6979,7 +7064,7 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
     )
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V27"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R1"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -7064,8 +7149,16 @@ REGLAS:
   net_subtotal_before_tax y subtotal_scope debe ser "page".
 - NO uses "SUBTOTAL NETO PAGINA" si ese valor ya incluye ITBIS.
 - Incluye todas las filas reales de productos visibles.
-- Si ves una fila de producto pero algún dato esencial impide extraerla con seguridad,
-  NO la ocultes: agrégala a omitted_rows explicando exactamente por qué.
+- Si ves una fila de producto, PRIORIDAD ABSOLUTA: no perder la fila.
+- La falta de barcode o internal_code NO es motivo para omitir un producto.
+  Si descripción, cantidad y costo neto son legibles, incluye la fila en products
+  con barcode=null e internal_code=null.
+- Si el código parece estar al final de la descripción (por ejemplo PT 30005,
+  PTA042603, VIT 32923), sepáralo y colócalo en internal_code.
+- Solo usa omitted_rows cuando falte información esencial para calcular el inventario:
+  descripción, cantidad o costo neto de línea.
+- Si line_cost_net no se ve pero unit_cost_net y quantity_packages sí se ven,
+  devuelve ambos correctamente para que el sistema reconstruya el total de línea.
 - Si no omites ninguna fila, devuelve omitted_rows como [].
 - No conviertas encabezados, subtotales, ITBIS, sellos o firmas en productos.
 - barcode = CODIGO DE BARRAS/EAN/UPC cuando exista.
@@ -8729,7 +8822,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "V27_CUADRE_FACTURA_ORIGINAL_20260903"
+EXTRACTOR_CACHE_VERSION = "BASE6_R1_MENOS_OMISIONES_20260904"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -9740,11 +9833,32 @@ if pagina == "🏠 Inicio":
                     for x in resumen_lectura.values()
                 )
 
+                total_codigos_temporales = sum(
+                    int(x.get("productos_codigo_temporal", 0) or 0)
+                    for x in resumen_lectura.values()
+                )
+
                 if total_omitidos == 0:
                     st.success(
                         f"✅ Control de lectura: Vision AI no reportó productos omitidos. "
                         f"{total_aceptados} fila(s) fueron aceptadas por el lector."
                     )
+                if total_codigos_temporales > 0:
+                    st.warning(
+                        f"🟡 {total_codigos_temporales} producto(s) fueron procesados con "
+                        "código temporal porque el código original no se pudo leer. "
+                        "No fueron omitidos."
+                    )
+                    with st.expander(
+                        f"Ver productos con código temporal ({total_codigos_temporales})",
+                        expanded=False,
+                    ):
+                        for archivo_tmp, info_tmp in resumen_lectura.items():
+                            for prod_tmp in info_tmp.get("codigos_temporales", []) or []:
+                                st.write(
+                                    f"• {archivo_tmp} · {prod_tmp.get('codigo')} · "
+                                    f"{prod_tmp.get('descripcion')}"
+                                )
                 else:
                     st.warning(
                         f"⚠️ Control de lectura: {total_omitidos} producto(s)/fila(s) "
