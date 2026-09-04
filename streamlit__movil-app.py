@@ -3793,7 +3793,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R16":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R17":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3802,7 +3802,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R16":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R16"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R17"
 
 
 # =========================================================
@@ -7209,6 +7209,216 @@ def _inferir_unidades_empaque_vision(item, nombre=""):
 
 
 
+
+def _clave_factura_multipagina(proveedor="", numero="", ncf=""):
+    """Clave estable para agrupar páginas de la misma factura."""
+    prov = _nombre_producto_canonico(proveedor)
+    num = re.sub(r"[^A-Z0-9]", "", str(numero or "").upper())
+    ncfn = re.sub(r"[^A-Z0-9]", "", str(ncf or "").upper())
+    return ncfn or (prov + "|" + num if num else prov)
+
+
+def _registrar_pagina_factura_vision(
+    nombre_archivo,
+    proveedor,
+    numero,
+    ncf,
+    pagina_actual=None,
+    total_paginas=None,
+    subtotal_scope="unknown",
+    subtotal_impreso=None,
+    suma_lineas=None,
+    productos_aceptados=0,
+    productos_omitidos=0,
+):
+    """
+    Registra metadatos por página para distinguir:
+    - página individual con subtotal de página;
+    - factura multipágina completa;
+    - factura multipágina incompleta.
+    """
+    if "paginas_facturas_vision" not in st.session_state:
+        st.session_state["paginas_facturas_vision"] = {}
+
+    clave = _clave_factura_multipagina(proveedor, numero, ncf)
+    if not clave:
+        clave = str(nombre_archivo or "documento")
+
+    grupo = st.session_state["paginas_facturas_vision"].setdefault(
+        clave,
+        {
+            "proveedor": proveedor,
+            "numero": numero,
+            "ncf": ncf,
+            "total_paginas_declaradas": None,
+            "paginas": {},
+        },
+    )
+
+    try:
+        pag = int(pagina_actual) if pagina_actual not in (None, "") else None
+    except Exception:
+        pag = None
+    try:
+        total = int(total_paginas) if total_paginas not in (None, "") else None
+    except Exception:
+        total = None
+
+    if total and total > 0:
+        grupo["total_paginas_declaradas"] = max(
+            int(grupo.get("total_paginas_declaradas") or 0),
+            total,
+        )
+
+    # Si no hay número de página, usar el nombre de archivo para no pisar otra foto.
+    key_pag = str(pag) if pag else f"archivo:{nombre_archivo}"
+    grupo["paginas"][key_pag] = {
+        "archivo": nombre_archivo,
+        "pagina": pag,
+        "subtotal_scope": subtotal_scope,
+        "subtotal_impreso": subtotal_impreso,
+        "suma_lineas": suma_lineas,
+        "productos_aceptados": int(productos_aceptados or 0),
+        "productos_omitidos": int(productos_omitidos or 0),
+    }
+
+    total_decl = int(grupo.get("total_paginas_declaradas") or 0)
+    nums_presentes = sorted({
+        int(v["pagina"])
+        for v in grupo["paginas"].values()
+        if isinstance(v, dict) and v.get("pagina")
+    })
+
+    if total_decl > 0:
+        faltantes = [p for p in range(1, total_decl + 1) if p not in nums_presentes]
+        completa = len(faltantes) == 0
+    else:
+        faltantes = []
+        completa = None
+
+    suma_global = round(sum(
+        float(v.get("suma_lineas") or 0)
+        for v in grupo["paginas"].values()
+        if isinstance(v, dict)
+    ), 2)
+
+    subtotales_invoice = [
+        float(v.get("subtotal_impreso"))
+        for v in grupo["paginas"].values()
+        if isinstance(v, dict)
+        and v.get("subtotal_scope") == "invoice"
+        and v.get("subtotal_impreso") is not None
+    ]
+    subtotal_invoice = subtotales_invoice[-1] if subtotales_invoice else None
+
+    return clave, {
+        "total_paginas": total_decl or None,
+        "paginas_presentes": nums_presentes,
+        "paginas_cargadas": len(nums_presentes) if nums_presentes else len(grupo["paginas"]),
+        "paginas_faltantes": faltantes,
+        "completa": completa,
+        "suma_lineas_global": suma_global,
+        "subtotal_invoice": subtotal_invoice,
+    }
+
+
+def _estado_cuadre_multipagina(
+    subtotal_scope,
+    subtotal_impreso,
+    suma_lineas_pagina,
+    info_paginas,
+):
+    """
+    Devuelve (estado, diferencia, tolerancia, mensaje).
+    Evita marcar como error una factura incompleta cuando el subtotal corresponde
+    a la factura completa.
+    """
+    scope = str(subtotal_scope or "unknown").strip().lower()
+    if scope not in ("page", "invoice", "unknown"):
+        scope = "unknown"
+
+    # Subtotal de página: se puede validar de inmediato.
+    if subtotal_impreso is not None and scope == "page":
+        diff = round(float(suma_lineas_pagina or 0) - float(subtotal_impreso), 2)
+        tol = max(1.0, round(abs(float(subtotal_impreso)) * 0.0005, 2))
+        if abs(diff) <= tol:
+            return "CUADRA", diff, tol, "Subtotal de página validado."
+        return "DIFERENCIA", diff, tol, "El subtotal de esta página no cuadra con las líneas extraídas."
+
+    completa = info_paginas.get("completa") if isinstance(info_paginas, dict) else None
+    total_pag = info_paginas.get("total_paginas") if isinstance(info_paginas, dict) else None
+    cargadas = info_paginas.get("paginas_cargadas") if isinstance(info_paginas, dict) else None
+    faltantes = info_paginas.get("paginas_faltantes") if isinstance(info_paginas, dict) else []
+
+    # Subtotal de factura completa + faltan páginas => PENDIENTE, no ERROR.
+    if subtotal_impreso is not None and scope == "invoice":
+        if completa is False:
+            falt_txt = ", ".join(map(str, faltantes)) if faltantes else "desconocidas"
+            return (
+                "PENDIENTE_PAGINAS",
+                None,
+                None,
+                f"Factura incompleta: {cargadas}/{total_pag} páginas cargadas. "
+                f"Faltan: {falt_txt}. El cuadre se hará al completar la factura."
+            )
+        if completa is True:
+            suma_global = info_paginas.get("suma_lineas_global")
+            subtotal_global = info_paginas.get("subtotal_invoice")
+            if subtotal_global is None:
+                subtotal_global = subtotal_impreso
+            if suma_global is not None and subtotal_global is not None:
+                diff = round(float(suma_global) - float(subtotal_global), 2)
+                tol = max(1.0, round(abs(float(subtotal_global)) * 0.0005, 2))
+                if abs(diff) <= tol:
+                    return (
+                        "CUADRA_GLOBAL",
+                        diff,
+                        tol,
+                        f"Factura completa: {cargadas}/{total_pag} páginas. "
+                        "El subtotal de la factura cuadra con todas las páginas consolidadas."
+                    )
+                return (
+                    "DIFERENCIA_GLOBAL",
+                    diff,
+                    tol,
+                    f"Factura completa: {cargadas}/{total_pag} páginas, pero el consolidado "
+                    f"difiere del subtotal de factura por RD${diff:,.2f}."
+                )
+            return (
+                "PENDIENTE_CUADRE_GLOBAL",
+                None,
+                None,
+                "Factura completa, pero falta información suficiente para validar el subtotal global."
+            )
+        return (
+            "PENDIENTE_CUADRE_GLOBAL",
+            None,
+            None,
+            "Subtotal de factura completa detectado; cuadre pendiente de consolidación multipágina."
+        )
+
+    # Scope desconocido con multipágina declarada: ser conservador.
+    if subtotal_impreso is not None and total_pag and total_pag > 1 and completa is False:
+        return (
+            "PENDIENTE_PAGINAS",
+            None,
+            None,
+            f"Factura multipágina incompleta: {cargadas}/{total_pag} páginas cargadas. "
+            "No se marca como descuadre hasta completar las páginas."
+        )
+
+    # Sin subtotal impreso.
+    if subtotal_impreso is None:
+        return "SIN SUBTOTAL IMPRESO", None, None, "No hay subtotal impreso legible para validar."
+
+    # Scope unknown, no multipágina clara: conservar validación local.
+    diff = round(float(suma_lineas_pagina or 0) - float(subtotal_impreso), 2)
+    tol = max(1.0, round(abs(float(subtotal_impreso)) * 0.0005, 2))
+    if abs(diff) <= tol:
+        return "CUADRA", diff, tol, "Subtotal validado."
+    return "DIFERENCIA", diff, tol, "Existe diferencia entre líneas extraídas y subtotal impreso."
+
+
 def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
     if not isinstance(data, dict):
         return None
@@ -7218,6 +7428,15 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
     ncf = str(data.get("ncf") or "").strip()
     fecha = str(data.get("date") or "").strip()
     moneda = str(data.get("currency") or "DOP").upper().strip()
+
+    try:
+        pagina_actual = int(data.get("page_number")) if data.get("page_number") not in (None, "") else None
+    except Exception:
+        pagina_actual = None
+    try:
+        total_paginas = int(data.get("total_pages")) if data.get("total_pages") not in (None, "") else None
+    except Exception:
+        total_paginas = None
 
     productos = []
     omitidos = []
@@ -7433,27 +7652,28 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
             sum(float(p.get("costo_total", 0) or 0) for p in productos),
             2,
         )
-        diferencia_cuadre = None
-        estado_cuadre = "SIN SUBTOTAL IMPRESO"
-        tolerancia_cuadre = None
-
-        # Un subtotal de página se puede comparar directamente con las líneas
-        # extraídas de esta imagen. Un subtotal de factura completa en un
-        # documento multipágina requiere consolidar todas sus páginas.
-        comparable = (
-            subtotal_impreso is not None
-            and subtotal_impreso >= 0
-            and alcance_subtotal in ("page", "unknown")
+        # BASE6-R17: registrar la página y decidir el estado del cuadre
+        # según si el subtotal es de página o de factura completa.
+        _, info_paginas = _registrar_pagina_factura_vision(
+            nombre_archivo=nombre_archivo,
+            proveedor=proveedor,
+            numero=numero,
+            ncf=ncf,
+            pagina_actual=pagina_actual,
+            total_paginas=total_paginas,
+            subtotal_scope=alcance_subtotal,
+            subtotal_impreso=subtotal_impreso,
+            suma_lineas=suma_lineas_sin_itbis,
+            productos_aceptados=len(productos),
+            productos_omitidos=len(omitidos),
         )
-        if comparable:
-            diferencia_cuadre = round(suma_lineas_sin_itbis - subtotal_impreso, 2)
-            tolerancia_cuadre = max(1.0, round(abs(subtotal_impreso) * 0.0005, 2))
-            if abs(diferencia_cuadre) <= tolerancia_cuadre:
-                estado_cuadre = "CUADRA"
-            else:
-                estado_cuadre = "DIFERENCIA"
-        elif subtotal_impreso is not None and alcance_subtotal == "invoice":
-            estado_cuadre = "SUBTOTAL DE FACTURA COMPLETA"
+
+        estado_cuadre, diferencia_cuadre, tolerancia_cuadre, mensaje_cuadre = _estado_cuadre_multipagina(
+            alcance_subtotal,
+            subtotal_impreso,
+            suma_lineas_sin_itbis,
+            info_paginas,
+        )
 
         st.session_state["resumen_lectura_productos"][nombre_archivo] = {
             "filas_visibles_estimadas": visibles,
@@ -7489,6 +7709,14 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
             "diferencia_cuadre": diferencia_cuadre,
             "tolerancia_cuadre": tolerancia_cuadre,
             "estado_cuadre": estado_cuadre,
+            "mensaje_cuadre": mensaje_cuadre,
+            "pagina_actual": pagina_actual,
+            "total_paginas": total_paginas,
+            "paginas_cargadas": info_paginas.get("paginas_cargadas"),
+            "paginas_faltantes": info_paginas.get("paginas_faltantes"),
+            "factura_completa": info_paginas.get("completa"),
+            "suma_lineas_factura": info_paginas.get("suma_lineas_global"),
+            "subtotal_factura_impreso": info_paginas.get("subtotal_invoice"),
         }
     except Exception:
         pass
@@ -8111,7 +8339,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R16"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R17"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -8207,6 +8435,9 @@ REGLAS:
   * grand_total = total con ITBIS.
   * subtotal_scope = "page" si el subtotal corresponde solo a esta página,
     "invoice" si corresponde a toda la factura, o "unknown" si no se puede determinar.
+  * Lee page_number y total_pages cuando aparezca "Página 2/5", "Pág. 4/5", etc.
+  * En una factura multipágina, NO marques una página como descuadrada solo porque
+    el subtotal impreso sea de la factura completa. Ese cuadre se hace al consolidar todas las páginas.
 - Si la factura usa etiquetas como "SUBTOTAL GRAVADO PAGINA", ese valor es
   net_subtotal_before_tax y subtotal_scope debe ser "page".
 - NO uses "SUBTOTAL NETO PAGINA" si ese valor ya incluye ITBIS.
@@ -9697,6 +9928,34 @@ def modal_confirmacion(validas, duplicadas_count, margen):
 
 
 
+
+def _mostrar_estado_cuadre_factura_ui(resumen):
+    """Muestra un estado claro: OK, pendiente por páginas o error real."""
+    if not isinstance(resumen, dict):
+        return
+
+    estado = str(resumen.get("estado_cuadre") or "").upper()
+    msg = str(resumen.get("mensaje_cuadre") or "").strip()
+    omitidos = int(resumen.get("productos_omitidos") or 0)
+    visibles = int(resumen.get("filas_visibles_estimadas") or 0)
+    aceptados = int(resumen.get("productos_aceptados") or 0)
+
+    extra = ""
+    if omitidos:
+        extra = f" · {omitidos} producto(s) omitido(s)"
+        if visibles:
+            extra += f" · {aceptados} aceptados de {visibles} filas visibles"
+
+    if estado in ("CUADRA", "CUADRA_GLOBAL"):
+        st.success("✅ FACTURA CUADRA" + (f" — {msg}" if msg else "") + extra)
+    elif estado in ("PENDIENTE_PAGINAS", "PENDIENTE_CUADRE_GLOBAL"):
+        st.info("🧾 CUADRE PENDIENTE" + (f" — {msg}" if msg else "") + extra)
+    elif estado in ("DIFERENCIA", "DIFERENCIA_GLOBAL"):
+        st.warning("⚠️ FACTURA NO CUADRA" + (f" — {msg}" if msg else "") + extra)
+    elif estado == "SIN SUBTOTAL IMPRESO":
+        st.caption("Sin subtotal impreso para validar." + extra)
+
+
 def _resumen_duplicados_archivos_ui(archivos):
     """Devuelve (total, unicos, duplicados, detalle) usando SHA256 del contenido."""
     import hashlib
@@ -10081,7 +10340,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R16_RESUMEN_DUPLICADOS_20260904"
+EXTRACTOR_CACHE_VERSION = "BASE6_R17_MULTIPAGINA_CUADRE_GLOBAL_20260904"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -11243,32 +11502,28 @@ if pagina == "🏠 Inicio":
                         dif_total = round(total_doc - (subtotal_doc + itbis_doc), 2)
                         ok_total = abs(dif_total) <= 1.0
 
+                    pagina_actual_ui = info_res.get("pagina_actual")
+                    total_paginas_ui = info_res.get("total_paginas")
+                    paginas_cargadas_ui = info_res.get("paginas_cargadas")
+
                     c1,c2,c3,c4 = st.columns(4)
-                    c1.metric("Productos", aceptados_n)
+                    if total_paginas_ui and int(total_paginas_ui) > 1:
+                        c1.metric(
+                            "Páginas",
+                            f"{paginas_cargadas_ui or 1}/{total_paginas_ui}",
+                            help="Páginas de esta factura detectadas en el lote."
+                        )
+                    else:
+                        c1.metric("Productos", aceptados_n)
+                    if total_paginas_ui and int(total_paginas_ui) > 1:
+                        st.caption(f"Productos aceptados en esta página: {aceptados_n}")
                     c2.metric("Subtotal sin ITBIS", f"RD${subtotal_doc:,.2f}")
                     c3.metric("ITBIS", f"RD${float(itbis_doc):,.2f}" if itbis_doc is not None else "No leído")
                     c4.metric("Total original", f"RD${float(total_doc):,.2f}" if total_doc is not None else "No leído")
 
-                    cuadrada = alcance in ("page","unknown") and ok_sub and ok_rows and ok_total
-                    if cuadrada:
-                        st.success("✅ FACTURA CUADRADA — productos/importes, subtotal sin ITBIS, ITBIS y total original coinciden.")
-                    else:
-                        problemas=[]
-                        if alcance == "invoice":
-                            problemas.append("subtotal corresponde a factura completa; faltan páginas para cuadre definitivo")
-                        elif not ok_sub:
-                            problemas.append(f"líneas RD${suma_lineas:,.2f} vs subtotal RD${subtotal_doc:,.2f} (dif. RD${dif_sub:,.2f})")
-                        if omitidos_n:
-                            problemas.append(f"{omitidos_n} producto(s) omitido(s)")
-                        if visibles_n and aceptados_n < visibles_n:
-                            problemas.append(f"{aceptados_n} productos aceptados de {visibles_n} filas visibles")
-                        if itbis_doc is None:
-                            problemas.append("ITBIS no leído")
-                        if total_doc is None:
-                            problemas.append("total original no leído")
-                        elif not ok_total:
-                            problemas.append(f"subtotal + ITBIS difiere del total por RD${float(dif_total):,.2f}")
-                        st.error("⚠️ FACTURA NO CUADRA — " + "; ".join(problemas))
+                    # BASE6-R17: usar el estado multipágina calculado durante la lectura.
+                    # Faltan páginas => información/pendiente, no error.
+                    _mostrar_estado_cuadre_factura_ui(info_res)
 
                     if itbis_doc is not None and total_doc is not None:
                         st.caption(
