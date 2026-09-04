@@ -5823,68 +5823,6 @@ def _extraer_generico_factura(texto, nombre_archivo=""):
 
 
 
-def _preparar_variantes_ocr_imagen(imagen):
-    """
-    Genera varias versiones de una foto para mejorar OCR en:
-    - fotos tomadas a monitores/pantallas
-    - documentos con perspectiva leve
-    - texto pequeño
-    - bajo contraste / moiré
-    No altera el archivo original.
-    """
-    variantes = []
-    try:
-        from PIL import Image, ImageEnhance, ImageFilter, ImageOps
-
-        if not isinstance(imagen, Image.Image):
-            imagen = Image.open(imagen)
-
-        base_original = ImageOps.exif_transpose(imagen).convert("RGB")
-
-        # Probar las cuatro orientaciones. WhatsApp/cámara a veces elimina
-        # la información EXIF y la factura queda físicamente girada.
-        for angulo in (0, 90, 180, 270):
-            base = base_original.rotate(angulo, expand=True) if angulo else base_original.copy()
-
-            # Aumentar tamaño cuando la foto tiene texto pequeño.
-            w, h = base.size
-            lado_largo = max(w, h)
-            escala = 1.0
-            if lado_largo < 2600:
-                escala = min(2.2, 2600.0 / max(lado_largo, 1))
-            if escala > 1.05:
-                base = base.resize(
-                    (int(w * escala), int(h * escala)),
-                    Image.Resampling.LANCZOS,
-                )
-
-            sufijo = f"rot{angulo}"
-            variantes.append((f"original_{sufijo}", base))
-
-            # Escala de grises + autocontraste.
-            gris = ImageOps.grayscale(base)
-            gris = ImageOps.autocontrast(gris, cutoff=1)
-            gris = ImageEnhance.Contrast(gris).enhance(1.45)
-            gris = ImageEnhance.Sharpness(gris).enhance(1.35)
-            variantes.append((f"gris_{sufijo}", gris))
-
-            # Mediana ayuda a reducir ruido/moiré.
-            suave = gris.filter(ImageFilter.MedianFilter(size=3))
-            suave = ImageEnhance.Contrast(suave).enhance(1.35)
-            variantes.append((f"antiruido_{sufijo}", suave))
-
-            # Binarización para tablas.
-            umbral = suave.point(lambda p: 255 if p > 168 else 0)
-            variantes.append((f"binaria_{sufijo}", umbral))
-
-    except Exception:
-        try:
-            variantes.append(("original", imagen))
-        except Exception:
-            pass
-
-    return variantes
-
 
 def _puntuar_texto_ocr_factura(texto):
     """Prioriza la lectura que más se parece a una factura/cotización."""
@@ -5892,7 +5830,7 @@ def _puntuar_texto_ocr_factura(texto):
     if not t:
         return -1
 
-    score = min(len(t) / 80.0, 20.0)
+    score = min(len(t) / 90.0, 18.0)
     claves = {
         "CODIGO": 6,
         "CODIGO DE BARRAS": 10,
@@ -5905,7 +5843,7 @@ def _puntuar_texto_ocr_factura(texto):
         "SUBTOTAL": 4,
         "ITBIS": 5,
         "TOTAL": 4,
-        "FACTURA": 3,
+        "FACTURA": 4,
         "COTIZACION": 5,
         "MONEDA": 3,
         "FECHA": 3,
@@ -5915,71 +5853,166 @@ def _puntuar_texto_ocr_factura(texto):
         if clave in t:
             score += puntos
 
-    # Premio especial si aparece una cabecera de tabla reconocible.
     if (
         "CODIGO" in t
         and "DESCRIPCION" in t
-        and "CANTIDAD" in t
         and ("PRECIO" in t or "IMPORTE" in t)
     ):
-        score += 25
+        score += 22
 
-    # Las líneas con varios números suelen representar productos.
     lineas_tabla = 0
     for linea in (texto or "").splitlines():
         nums = re.findall(r"\d+(?:[.,]\d+)?", linea)
         if len(nums) >= 3:
             lineas_tabla += 1
-    score += min(lineas_tabla, 12) * 1.5
+    score += min(lineas_tabla, 12) * 1.4
 
     return score
 
 
+def _normalizar_imagen_ocr(imagen, angulo=0, lado_largo=2300):
+    """Rota, escala y mejora una imagen para OCR."""
+    from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+
+    if not isinstance(imagen, Image.Image):
+        imagen = Image.open(imagen)
+
+    base = ImageOps.exif_transpose(imagen).convert("RGB")
+    if angulo:
+        base = base.rotate(angulo, expand=True)
+
+    w, h = base.size
+    actual = max(w, h)
+    if actual > 0 and actual != lado_largo:
+        escala = lado_largo / float(actual)
+        # No ampliar exageradamente fotos ya grandes.
+        escala = min(max(escala, 0.55), 1.65)
+        if abs(escala - 1.0) > 0.04:
+            base = base.resize(
+                (max(1, int(w * escala)), max(1, int(h * escala))),
+                Image.Resampling.LANCZOS,
+            )
+
+    gris = ImageOps.grayscale(base)
+    gris = ImageOps.autocontrast(gris, cutoff=1)
+    gris = gris.filter(ImageFilter.MedianFilter(size=3))
+    gris = ImageEnhance.Contrast(gris).enhance(1.35)
+    gris = ImageEnhance.Sharpness(gris).enhance(1.25)
+    return gris
+
+
+def _detectar_mejor_rotacion_ocr(imagen):
+    """
+    Detecta orientación usando OCR liviano sobre miniaturas.
+    Solo 4 pasadas pequeñas, una por orientación.
+    """
+    mejores = []
+
+    for angulo in (0, 90, 180, 270):
+        try:
+            mini = _normalizar_imagen_ocr(imagen, angulo=angulo, lado_largo=1150)
+            txt = pytesseract.image_to_string(
+                mini,
+                lang="eng",
+                config="--oem 3 --psm 11",
+                timeout=12,
+            )
+            score = _puntuar_texto_ocr_factura(txt)
+            mejores.append((score, angulo, txt))
+        except Exception:
+            continue
+
+    if not mejores:
+        return 0
+
+    mejores.sort(key=lambda x: x[0], reverse=True)
+    return mejores[0][1]
+
+
 def _ocr_multilectura(imagen):
     """
-    Ejecuta OCR sobre varias versiones y configuraciones.
-    Devuelve la lectura con mejor puntuación documental.
-    """
-    lecturas = []
-    variantes = _preparar_variantes_ocr_imagen(imagen)
+    OCR optimizado para fotos de facturas.
 
-    for nombre, variante in variantes:
-        for psm in (6, 4, 11):
-            try:
-                txt = pytesseract.image_to_string(
-                    variante,
-                    lang="eng",
-                    config=f"--oem 3 --psm {psm}",
-                )
-                lecturas.append(
-                    (_puntuar_texto_ocr_factura(txt), nombre, psm, txt)
-                )
-            except Exception:
-                continue
+    Etapa 1:
+      - 4 lecturas pequeñas para detectar orientación.
+
+    Etapa 2:
+      - solo 3 lecturas completas sobre la orientación ganadora.
+
+    Esto reduce drásticamente el tiempo frente a probar todas las
+    variantes y todos los PSM en las cuatro rotaciones.
+    """
+    if not OCR_DISPONIBLE:
+        return ""
+
+    angulo = _detectar_mejor_rotacion_ocr(imagen)
+
+    try:
+        base = _normalizar_imagen_ocr(imagen, angulo=angulo, lado_largo=2450)
+    except Exception:
+        base = imagen
+
+    lecturas = []
+    for psm in (6, 4, 11):
+        try:
+            txt = pytesseract.image_to_string(
+                base,
+                lang="eng",
+                config=f"--oem 3 --psm {psm}",
+                timeout=22,
+            )
+            lecturas.append(
+                (_puntuar_texto_ocr_factura(txt), psm, txt)
+            )
+        except Exception:
+            continue
 
     if not lecturas:
         return ""
 
     lecturas.sort(key=lambda x: x[0], reverse=True)
 
-    # Un solo pase puede reconocer bien el encabezado pero perder filas.
-    # Combinar las mejores lecturas aumenta la posibilidad de conservar
-    # códigos de barras, descripciones e importes.
-    mejores = lecturas[:4]
+    # Combinar únicamente las 2 mejores lecturas para evitar ruido excesivo.
     partes = []
-    vistos = set()
-
-    for score, nombre, psm, txt in mejores:
+    firmas = set()
+    for _, psm, txt in lecturas[:2]:
         limpio = (txt or "").strip()
         if not limpio:
             continue
-        huella = re.sub(r"\s+", " ", limpio)[:500]
-        if huella in vistos:
+        firma = re.sub(r"\s+", " ", limpio)[:500]
+        if firma in firmas:
             continue
-        vistos.add(huella)
+        firmas.add(firma)
         partes.append(limpio)
 
     return "\n".join(partes)
+
+
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=64)
+def _ocr_imagen_desde_bytes_cache(raw_bytes):
+    """
+    Cachea el OCR por contenido de archivo.
+    Streamlit puede hacer varios reruns; la misma foto no debe pasar
+    nuevamente por Tesseract en cada uno.
+    """
+    if not raw_bytes:
+        return ""
+
+    try:
+        imagen = Image.open(io.BytesIO(raw_bytes))
+        return _ocr_multilectura(imagen)
+    except Exception:
+        return ""
+
+
+def _ocr_imagen(image):
+    """Compatibilidad con llamadas históricas."""
+    if not OCR_DISPONIBLE:
+        return ""
+    try:
+        return _ocr_multilectura(image)
+    except Exception:
+        return ""
 
 
 def extraer_datos_factura(uploaded_file):
@@ -6015,7 +6048,9 @@ def extraer_datos_factura(uploaded_file):
                     for pagina in doc:
                         pix = pagina.get_pixmap(matrix=fitz.Matrix(1.8, 1.8), alpha=False)
                         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                        extracted_text += "\n" + _ocr_multilectura(img)
+                        buffer_img = io.BytesIO()
+                        img.save(buffer_img, format="PNG")
+                        extracted_text += "\n" + _ocr_imagen_desde_bytes_cache(buffer_img.getvalue())
                     doc.close()
                 except Exception as exc:
                     errores_locales.append(
@@ -6033,9 +6068,9 @@ def extraer_datos_factura(uploaded_file):
             )
         elif raw is not None:
             try:
-                image = Image.open(io.BytesIO(raw))
-                # Fotos de celular: usar OCR multilectura con rotación automática.
-                extracted_text = _ocr_multilectura(image)
+                # Cache por bytes: la misma foto no se vuelve a procesar
+                # en cada rerun de Streamlit.
+                extracted_text = _ocr_imagen_desde_bytes_cache(raw)
             except Exception as exc:
                 errores_locales.append(
                     f"No se pudo leer la imagen {uploaded_file.name}: {exc}"
@@ -7260,6 +7295,59 @@ def render_gestor_exclusion_productos(df_productos, key_prefix):
                 st.rerun()
 
 
+
+class _ArchivoBytesCache:
+    """Adaptador mínimo para reutilizar extraer_datos_factura desde bytes."""
+    def __init__(self, nombre, raw):
+        self.name = nombre
+        self._raw = raw
+        self._pos = 0
+
+    def read(self, *args):
+        if args:
+            n = args[0]
+            if n is None or n < 0:
+                salida = self._raw[self._pos:]
+                self._pos = len(self._raw)
+                return salida
+            salida = self._raw[self._pos:self._pos+n]
+            self._pos += len(salida)
+            return salida
+        salida = self._raw[self._pos:]
+        self._pos = len(self._raw)
+        return salida
+
+    def seek(self, pos, whence=0):
+        if whence == 0:
+            self._pos = max(0, pos)
+        elif whence == 1:
+            self._pos = max(0, self._pos + pos)
+        elif whence == 2:
+            self._pos = max(0, len(self._raw) + pos)
+        return self._pos
+
+    def tell(self):
+        return self._pos
+
+
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
+def _extraer_factura_cacheada(nombre_archivo, raw_bytes):
+    """Evita repetir extracción/OCR de la misma factura en reruns."""
+    archivo = _ArchivoBytesCache(nombre_archivo, raw_bytes)
+    return extraer_datos_factura(archivo)
+
+
+def _extraer_factura_upload_cache(uploaded_file):
+    try:
+        uploaded_file.seek(0)
+        raw = uploaded_file.read()
+        uploaded_file.seek(0)
+    except Exception:
+        return extraer_datos_factura(uploaded_file)
+
+    return _extraer_factura_cacheada(uploaded_file.name, raw)
+
+
 def render_carga_facturas(titulo=True):
     """Carga y procesa facturas conservando toda la lógica original."""
 
@@ -7424,42 +7512,51 @@ def render_carga_facturas(titulo=True):
                 round(float(p.get("costo_total", 0) or 0), 2),
             )
 
-        with st.spinner("Leyendo y reconociendo facturas..."):
-            for f in archivos_unicos:
-                firma, proveedor, num_fac, fecha_fac, productos = extraer_datos_factura(f)
+        progreso_ocr = st.progress(0, text="Preparando lectura de facturas…")
+        total_archivos_ocr = max(1, len(archivos_unicos))
 
-                if not productos:
-                    archivos_invalidos.append(f.name)
-                    continue
+        for indice_ocr, f in enumerate(archivos_unicos, start=1):
+            progreso_ocr.progress(
+            min(99, int(((indice_ocr - 1) / total_archivos_ocr) * 100)),
+            text=f"Leyendo {indice_ocr} de {total_archivos_ocr}: {f.name}",
+            )
+            firma, proveedor, num_fac, fecha_fac, productos = _extraer_factura_upload_cache(f)
 
-                if firma not in firma_a_indice:
-                    firma_a_indice[firma] = len(archivos_validos)
-                    archivos_validos.append(
-                        (f, firma, proveedor, num_fac, fecha_fac, productos)
-                    )
-                    continue
+            if not productos:
+                archivos_invalidos.append(f.name)
+                continue
 
-                # Ya existe la misma factura: determinar si es página adicional.
-                idx_existente = firma_a_indice[firma]
-                f0, firma0, prov0, num0, fecha0, productos0 = archivos_validos[idx_existente]
+            if firma not in firma_a_indice:
+                firma_a_indice[firma] = len(archivos_validos)
+                archivos_validos.append(
+                    (f, firma, proveedor, num_fac, fecha_fac, productos)
+                )
+                continue
 
-                sig0 = {_firma_producto_pagina(p) for p in productos0}
-                sig1 = {_firma_producto_pagina(p) for p in productos}
+            # Ya existe la misma factura: determinar si es página adicional.
+            idx_existente = firma_a_indice[firma]
+            f0, firma0, prov0, num0, fecha0, productos0 = archivos_validos[idx_existente]
 
-                nuevos = [p for p in productos if _firma_producto_pagina(p) not in sig0]
+            sig0 = {_firma_producto_pagina(p) for p in productos0}
+            sig1 = {_firma_producto_pagina(p) for p in productos}
 
-                if nuevos:
-                    # Página adicional de la misma factura: unir productos.
-                    combinados = list(productos0) + nuevos
-                    archivos_validos[idx_existente] = (
-                        f0, firma0, prov0 or proveedor, num0 or num_fac,
-                        fecha0 or fecha_fac, combinados
-                    )
-                else:
-                    # Mismo contenido: duplicado real.
-                    archivos_duplicados.append(
-                        (f.name, proveedor, num_fac)
-                    )
+            nuevos = [p for p in productos if _firma_producto_pagina(p) not in sig0]
+
+            if nuevos:
+                # Página adicional de la misma factura: unir productos.
+                combinados = list(productos0) + nuevos
+                archivos_validos[idx_existente] = (
+                    f0, firma0, prov0 or proveedor, num0 or num_fac,
+                    fecha0 or fecha_fac, combinados
+                )
+            else:
+                # Mismo contenido: duplicado real.
+                archivos_duplicados.append(
+                    (f.name, proveedor, num_fac)
+                )
+
+        progreso_ocr.progress(100, text="Lectura completada")
+        progreso_ocr.empty()
 
         # Acción principal visible inmediatamente después de leer la factura.
         st.markdown("<div class='v3-process-top'></div>", unsafe_allow_html=True)
