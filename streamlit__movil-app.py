@@ -3773,6 +3773,7 @@ DEFAULTS = {
     "archivos_ocultos_ui": set(),
     "origen_productos_facturas": {},
     "productos_excluidos": set(),
+    "paginas_lote_detectadas": {},
     "modo_oscuro": False,
 }
 
@@ -7502,6 +7503,10 @@ def generar_excel_wilpos(df_prod):
 
 def totales_dashboard():
     total_facturas = len(st.session_state.detalle_facturas_procesadas)
+    total_archivos = int(sum(
+        info.get("archivos_origen", 1)
+        for info in st.session_state.detalle_facturas_procesadas.values()
+    ))
     total_productos = len(construir_df_productos())
     total_lineas = int(sum(
         info.get("cantidad_articulos", 0)
@@ -7517,7 +7522,14 @@ def totales_dashboard():
         for codigo, x in st.session_state.inventario_acumulado.items()
         if not producto_esta_excluido(codigo, x.get("nombre", ""))
     ))
-    return total_facturas, total_productos, total_lineas, total_unidades, valor_compra
+    return (
+        total_facturas,
+        total_archivos,
+        total_productos,
+        total_lineas,
+        total_unidades,
+        valor_compra,
+    )
 
 
 def resetear_todo():
@@ -7530,6 +7542,7 @@ def resetear_todo():
     st.session_state.uploader_key += 1
     st.session_state.archivos_ocultos_ui = set()
     st.session_state.origen_productos_facturas = {}
+    st.session_state.paginas_lote_detectadas = {}
     st.session_state.productos_excluidos = set()
     st.session_state.camera_key += 1
 
@@ -7619,6 +7632,9 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                     "num_factura": num_fac,
                     "fecha": fecha_fac,
                     "cantidad_articulos": len(productos_en_archivo),
+                    "archivos_origen": int(
+                        st.session_state.get("paginas_lote_detectadas", {}).get(firma, 1)
+                    ),
                     "moneda": (
                         "USD"
                         if any(str(p.get("moneda", "DOP")).upper() == "USD" for p in productos_en_archivo)
@@ -8192,6 +8208,7 @@ def render_carga_facturas(titulo=True):
         # Mismo número de factura puede venir fotografiado en varias páginas.
         # Solo se omite si la segunda imagen contiene esencialmente los mismos productos.
         firma_a_indice = {}
+        st.session_state.paginas_lote_detectadas = {}
 
         def _firma_producto_pagina(p):
             return (
@@ -8220,6 +8237,7 @@ def render_carga_facturas(titulo=True):
                 archivos_validos.append(
                     (f, firma, proveedor, num_fac, fecha_fac, productos)
                 )
+                st.session_state.paginas_lote_detectadas[firma] = 1
                 continue
 
             # Ya existe la misma factura: determinar si es página adicional.
@@ -8237,6 +8255,9 @@ def render_carga_facturas(titulo=True):
                 archivos_validos[idx_existente] = (
                     f0, firma0, prov0 or proveedor, num0 or num_fac,
                     fecha0 or fecha_fac, combinados
+                )
+                st.session_state.paginas_lote_detectadas[firma0] = (
+                    int(st.session_state.paginas_lote_detectadas.get(firma0, 1)) + 1
                 )
             else:
                 # Mismo contenido: duplicado real.
@@ -8549,7 +8570,14 @@ def render_carga_facturas(titulo=True):
 # =========================================================
 # SIDEBAR
 # =========================================================
-total_facturas, total_productos, total_lineas, total_unidades, valor_compra = totales_dashboard()
+(
+    total_facturas,
+    total_archivos,
+    total_productos,
+    total_lineas,
+    total_unidades,
+    valor_compra,
+) = totales_dashboard()
 
 with st.sidebar:
     st.markdown(
@@ -8860,7 +8888,11 @@ if pagina == "🏠 Inicio":
 <div class="v3-kpi-grid">
   <div class="v3-kpi-card">
     <div class="v3-kpi-icon blue">🧾</div>
-    <div><span>Facturas procesadas</span><strong>{total_facturas}</strong><small>archivos</small></div>
+    <div>
+      <span>Facturas únicas</span>
+      <strong>{total_facturas}</strong>
+      <small>{total_archivos} archivo(s)/página(s)</small>
+    </div>
   </div>
   <div class="v3-kpi-card">
     <div class="v3-kpi-icon green">📦</div>
@@ -8881,6 +8913,12 @@ if pagina == "🏠 Inicio":
 </div>
 """
     st.markdown(kpi_html, unsafe_allow_html=True)
+
+    if total_archivos > total_facturas:
+        st.caption(
+            f"📄 {total_archivos} archivos/páginas procesados corresponden a "
+            f"{total_facturas} factura(s) única(s)."
+        )
 
     upload_col, preview_col = st.columns([.92, 1.65], gap="medium")
 
