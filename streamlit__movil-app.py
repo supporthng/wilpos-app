@@ -3793,7 +3793,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R14":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R15":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3802,7 +3802,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R14":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R14"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R15"
 
 
 # =========================================================
@@ -8111,7 +8111,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R14"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R15"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -10004,7 +10004,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R14_UI_HORIZONTAL_COMPACTA_20260904"
+EXTRACTOR_CACHE_VERSION = "BASE6_R15_HTML_COMPACTO_FIX_20260904"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -10173,32 +10173,32 @@ def render_carga_facturas(titulo=True):
             tam = len(datos)
             tam_txt = f"{tam/1024/1024:.1f} MB" if tam >= 1024*1024 else f"{tam/1024:.1f} KB"
             chips.append(
-                f"""
-                <div style="
-                    flex:0 0 auto; min-width:170px; max-width:220px;
-                    border:1px solid var(--border); border-radius:12px;
-                    padding:8px 10px; background:var(--panel);
-                " title="{html.escape(nombre)}">
-                    <div style="
-                        font-weight:700; font-size:.86rem;
-                        white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-                    ">{icono} {html.escape(nombre)}</div>
-                    <div style="font-size:.74rem; color:var(--muted); margin-top:2px;">
-                        {tam_txt} · {tipo}
-                    </div>
-                </div>
-                """
+                (
+                    '<div style="'
+                    'flex:0 0 auto; min-width:170px; max-width:220px;'
+                    'border:1px solid var(--border); border-radius:12px;'
+                    'padding:8px 10px; background:var(--panel);'
+                    f'" title="{html.escape(nombre)}">'
+                    '<div style="'
+                    'font-weight:700; font-size:.86rem;'
+                    'white-space:nowrap; overflow:hidden; text-overflow:ellipsis;'
+                    f'">{icono} {html.escape(nombre)}</div>'
+                    '<div style="font-size:.74rem; color:var(--muted); margin-top:2px;">'
+                    f'{tam_txt} · {tipo}</div>'
+                    '</div>'
+                )
             )
 
-        st.markdown(
-            """
-            <div style="
-                display:flex; gap:8px; overflow-x:auto; overflow-y:hidden;
-                padding:4px 1px 8px 1px; -webkit-overflow-scrolling:touch;
-            ">
-            """ + "".join(chips) + "</div>",
-            unsafe_allow_html=True,
+        st.caption(f"📎 {len(uploaded_files)} archivo(s) cargado(s)")
+        html_archivos = (
+            '<div style="'
+            'display:flex; gap:8px; overflow-x:auto; overflow-y:hidden;'
+            'padding:4px 1px 8px 1px; -webkit-overflow-scrolling:touch;'
+            '">'
+            + "".join(chips)
+            + '</div>'
         )
+        st.markdown(html_archivos, unsafe_allow_html=True)
 
         # Acciones menos frecuentes quedan plegadas para no ocupar espacio.
         with st.expander("Administrar archivos cargados", expanded=False):
