@@ -3793,7 +3793,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R17":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R18":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3802,7 +3802,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R17":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R17"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R18"
 
 
 # =========================================================
@@ -8339,7 +8339,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R17"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R18"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -10340,7 +10340,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R17_MULTIPAGINA_CUADRE_GLOBAL_20260904"
+EXTRACTOR_CACHE_VERSION = "BASE6_R18_TRAZABILIDAD_FALLOS_20260904"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -10365,6 +10365,132 @@ def _extraer_factura_upload_cache(uploaded_file):
         uploaded_file.name,
         raw,
         EXTRACTOR_CACHE_VERSION,
+    )
+
+
+
+def _motivo_fallo_archivo(nombre_archivo):
+    """Obtiene el motivo más útil disponible cuando un archivo no produjo productos."""
+    nombre = str(nombre_archivo or "")
+    errores_v = st.session_state.get("errores_vision_api", {}) or {}
+    err_v = str(errores_v.get(nombre, "") or "").strip()
+
+    if err_v:
+        low = err_v.lower()
+        if "timeout" in low or "timed out" in low or "apitimeouterror" in low:
+            return (
+                "timeout",
+                "La lectura avanzada excedió el tiempo máximo de espera de la API.",
+                "Procesar este archivo por separado."
+            )
+        if "rate" in low and ("limit" in low or "429" in low):
+            return (
+                "limite_api",
+                "La API alcanzó temporalmente un límite de solicitudes.",
+                "Esperar unos segundos y procesar este archivo por separado."
+            )
+        return (
+            "error_api",
+            f"Error de lectura avanzada: {err_v[:260]}",
+            "Procesar este archivo por separado; si se repite, revisar conexión/API."
+        )
+
+    errores_ocr = st.session_state.get("errores_ocr", []) or []
+    for item in errores_ocr:
+        txt = str(item or "")
+        if nombre and nombre in txt:
+            return (
+                "ocr",
+                txt[:300],
+                "Procesar por separado o usar una foto más nítida."
+            )
+
+    return (
+        "sin_productos",
+        "No se pudieron extraer productos válidos de este archivo.",
+        "Procesar este archivo por separado y revisar la calidad/encuadre."
+    )
+
+
+def _guardar_resultado_archivo_lote(nombre, estado, **kwargs):
+    st.session_state.setdefault("resultado_archivos_lote", {})
+    item = {"archivo": str(nombre or ""), "estado": str(estado or "")}
+    item.update(kwargs)
+    st.session_state["resultado_archivos_lote"][str(nombre or "")] = item
+
+
+def _resumen_trazabilidad_lote():
+    resultados = st.session_state.get("resultado_archivos_lote", {}) or {}
+    valores = list(resultados.values())
+
+    def n(estado):
+        return sum(1 for x in valores if x.get("estado") == estado)
+
+    return {
+        "archivos_intentados": len(valores),
+        "archivos_reconocidos": n("factura_nueva") + n("pagina_adicional"),
+        "facturas_nuevas": n("factura_nueva"),
+        "paginas_adicionales": n("pagina_adicional"),
+        "duplicados_contenido": n("duplicado_contenido"),
+        "no_reconocidos": n("no_reconocido"),
+        "timeouts": n("timeout"),
+        "errores_api": n("error_api") + n("limite_api"),
+    }
+
+
+def _mostrar_archivos_no_procesados_ui():
+    resultados = st.session_state.get("resultado_archivos_lote", {}) or {}
+    fallidos = [
+        x for x in resultados.values()
+        if x.get("estado") in ("no_reconocido", "timeout", "error_api", "limite_api")
+    ]
+    if not fallidos:
+        return
+
+    st.warning(
+        f"⚠️ {len(fallidos)} archivo(s) no pudieron procesarse. "
+        "Puedes identificarlos abajo y volver a procesarlos por separado."
+    )
+
+    with st.expander(
+        f"Ver archivos no procesados y motivo ({len(fallidos)})",
+        expanded=True,
+    ):
+        filas = []
+        for x in fallidos:
+            estado = x.get("estado")
+            etiqueta = {
+                "timeout": "TIEMPO AGOTADO",
+                "limite_api": "LÍMITE API",
+                "error_api": "ERROR API",
+                "no_reconocido": "NO RECONOCIDO",
+            }.get(estado, estado.upper())
+            filas.append({
+                "Archivo": x.get("archivo", ""),
+                "Estado": etiqueta,
+                "Motivo": x.get("motivo", ""),
+                "Qué hacer": x.get("accion", "Procesar por separado."),
+            })
+
+        st.dataframe(pd.DataFrame(filas), use_container_width=True, hide_index=True)
+
+
+def _mostrar_resumen_procesamiento_archivos_ui(total_cargados, total_duplicados_binarios):
+    r = _resumen_trazabilidad_lote()
+    no_proc = r["no_reconocidos"] + r["timeouts"] + r["errores_api"]
+    st.markdown(
+        f"""
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin:.3rem 0 .5rem 0;">
+          <span style="padding:5px 9px;border:1px solid var(--border);border-radius:999px;">📎 <b>{int(total_cargados)}</b> cargados</span>
+          <span style="padding:5px 9px;border:1px solid var(--border);border-radius:999px;">🧪 <b>{r['archivos_intentados']}</b> intentados</span>
+          <span style="padding:5px 9px;border:1px solid var(--border);border-radius:999px;">✅ <b>{r['archivos_reconocidos']}</b> archivos/páginas reconocidos</span>
+          <span style="padding:5px 9px;border:1px solid var(--border);border-radius:999px;">🧾 <b>{r['facturas_nuevas']}</b> facturas únicas</span>
+          <span style="padding:5px 9px;border:1px solid var(--border);border-radius:999px;">📑 <b>{r['paginas_adicionales']}</b> páginas adicionales</span>
+          <span style="padding:5px 9px;border:1px solid var(--border);border-radius:999px;">♻️ <b>{int(total_duplicados_binarios) + r['duplicados_contenido']}</b> duplicados</span>
+          <span style="padding:5px 9px;border:1px solid var(--border);border-radius:999px;">⚠️ <b>{no_proc}</b> no procesados</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
 
@@ -10578,6 +10704,7 @@ def render_carga_facturas(titulo=True):
 
     if uploaded_files:
         st.session_state.errores_ocr = []
+        st.session_state["resultado_archivos_lote"] = {}
 
         # Evita procesar dos veces el mismo nombre de archivo dentro del lote.
         archivos_por_nombre = {}
@@ -10585,6 +10712,12 @@ def render_carga_facturas(titulo=True):
             if f.name in archivos_por_nombre:
                 archivos_duplicados.append(
                     (f.name, "Archivo repetido en esta carga", "")
+                )
+                _guardar_resultado_archivo_lote(
+                    f.name,
+                    "duplicado_contenido",
+                    motivo="Nombre de archivo repetido dentro del lote.",
+                    accion="No requiere reprocesamiento si el contenido es el mismo.",
                 )
             else:
                 archivos_por_nombre[f.name] = f
@@ -10616,6 +10749,14 @@ def render_carga_facturas(titulo=True):
 
             if not productos:
                 archivos_invalidos.append(f.name)
+                tipo_fallo, motivo_fallo, accion_fallo = _motivo_fallo_archivo(f.name)
+                estado_fallo = tipo_fallo if tipo_fallo in ("timeout", "limite_api", "error_api") else "no_reconocido"
+                _guardar_resultado_archivo_lote(
+                    f.name,
+                    estado_fallo,
+                    motivo=motivo_fallo,
+                    accion=accion_fallo,
+                )
                 continue
 
             if firma not in firma_a_indice:
@@ -10624,6 +10765,14 @@ def render_carga_facturas(titulo=True):
                     (f, firma, proveedor, num_fac, fecha_fac, productos)
                 )
                 st.session_state.paginas_lote_detectadas[firma] = 1
+                _guardar_resultado_archivo_lote(
+                    f.name,
+                    "factura_nueva",
+                    proveedor=proveedor,
+                    factura=num_fac,
+                    productos=len(productos),
+                    motivo="Factura reconocida correctamente.",
+                )
                 continue
 
             # Ya existe la misma factura: determinar si es página adicional.
@@ -10645,14 +10794,38 @@ def render_carga_facturas(titulo=True):
                 st.session_state.paginas_lote_detectadas[firma0] = (
                     int(st.session_state.paginas_lote_detectadas.get(firma0, 1)) + 1
                 )
+                _guardar_resultado_archivo_lote(
+                    f.name,
+                    "pagina_adicional",
+                    proveedor=proveedor or prov0,
+                    factura=num_fac or num0,
+                    productos=len(productos),
+                    productos_nuevos=len(nuevos),
+                    motivo="Página adicional reconocida y unida a la misma factura.",
+                )
             else:
                 # Mismo contenido: duplicado real.
                 archivos_duplicados.append(
                     (f.name, proveedor, num_fac)
                 )
+                _guardar_resultado_archivo_lote(
+                    f.name,
+                    "duplicado_contenido",
+                    proveedor=proveedor,
+                    factura=num_fac,
+                    motivo="El contenido coincide con una página/factura ya leída.",
+                    accion="No necesita reprocesarse.",
+                )
 
         progreso_ocr.progress(100, text="Lectura completada")
         progreso_ocr.empty()
+
+        _dup_binarios = _resumen_duplicados_archivos_ui(uploaded_files)[2]
+        _mostrar_resumen_procesamiento_archivos_ui(
+            total_cargados=len(uploaded_files),
+            total_duplicados_binarios=_dup_binarios,
+        )
+        _mostrar_archivos_no_procesados_ui()
 
         _eventos_directos = st.session_state.get("fallback_574652_eventos", {})
         for _nombre_directo, _info_directo in _eventos_directos.items():
@@ -10862,7 +11035,7 @@ def render_carga_facturas(titulo=True):
                 '<div class="process-ready-icon">✨</div>'
                 '<div class="validation-summary-body">'
                 '<div class="validation-row valid-row">'
-                '<span class="validation-label">Facturas Válidas</span>'
+                '<span class="validation-label">Facturas únicas reconocidas</span>'
                 f'<span class="validation-value">{total_validas}</span>'
                 '</div>'
                 '<div class="validation-row omitted-row">'
@@ -10903,15 +11076,21 @@ def render_carga_facturas(titulo=True):
                     )
 
                 for nombre_archivo in archivos_invalidos:
+                    _r_arch = (st.session_state.get("resultado_archivos_lote", {}) or {}).get(nombre_archivo, {})
+                    _motivo_arch = _r_arch.get("motivo") or "No se pudieron extraer productos válidos."
+                    _estado_arch = _r_arch.get("estado") or "no_reconocido"
+                    _etiqueta_arch = "TIEMPO AGOTADO" if _estado_arch == "timeout" else (
+                        "ERROR API" if _estado_arch in ("error_api", "limite_api") else "NO RECONOCIDA"
+                    )
                     detalle_items.append(
                         '<div class="duplicate-mobile-card invalid-mobile-card">'
                         '<div class="duplicate-mobile-head">'
-                        '<span class="duplicate-mobile-status invalid-status">NO RECONOCIDA</span>'
+                        f'<span class="duplicate-mobile-status invalid-status">{html_lib.escape(_etiqueta_arch)}</span>'
                         '</div>'
                         f'<div class="duplicate-mobile-row"><b>Archivo</b><span>{html_lib.escape(str(nombre_archivo))}</span></div>'
                         '<div class="duplicate-mobile-row"><b>Proveedor</b><span>—</span></div>'
                         '<div class="duplicate-mobile-row"><b>Factura</b><span>—</span></div>'
-                        '<div class="duplicate-mobile-row duplicate-mobile-reason"><b>Motivo</b><span>No se pudieron extraer productos válidos.</span></div>'
+                        f'<div class="duplicate-mobile-row duplicate-mobile-reason"><b>Motivo</b><span>{html_lib.escape(str(_motivo_arch))}</span></div>'
                         '</div>'
                     )
 
@@ -10928,8 +11107,15 @@ def render_carga_facturas(titulo=True):
                 )
                 st.markdown(detalle_html, unsafe_allow_html=True)
 
+            _tr = _resumen_trazabilidad_lote()
             st.caption(
-                "Se omiten automáticamente las facturas duplicadas antes de consolidar."
+                "Importante: una factura puede tener varias fotos/páginas. "
+                f"En este lote se reconocieron {_tr['archivos_reconocidos']} archivo(s)/página(s) "
+                f"que corresponden a {_tr['facturas_nuevas']} factura(s) única(s), "
+                f"incluyendo {_tr['paginas_adicionales']} página(s) adicional(es)."
+            )
+            st.caption(
+                "Se omiten automáticamente los duplicados antes de consolidar."
             )
 
         st.markdown('</div>', unsafe_allow_html=True)
