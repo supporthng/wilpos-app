@@ -3792,7 +3792,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "V19":
+if st.session_state.get("_extractor_runtime_version") != "V20":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3801,7 +3801,7 @@ if st.session_state.get("_extractor_runtime_version") != "V19":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "V19"
+    st.session_state["_extractor_runtime_version"] = "V20"
 
 
 # =========================================================
@@ -6055,7 +6055,7 @@ def _ocr_multilectura(imagen):
     return "\n".join(partes)
 
 
-OCR_CACHE_VERSION = "V19_OCR_20260903"
+OCR_CACHE_VERSION = "V20_OCR_20260903"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=64)
@@ -6675,6 +6675,15 @@ def _obtener_openai_api_key():
     return str(key).strip() if key else ""
 
 
+
+def _estado_vision_api():
+    if not OPENAI_SDK_DISPONIBLE:
+        return False, "Falta instalar el paquete openai."
+    if not _obtener_openai_api_key():
+        return False, "No existe OPENAI_API_KEY en Streamlit Secrets."
+    return True, "Visión AI conectada."
+
+
 def _modelo_vision_configurado():
     try:
         modelo = st.secrets.get("OPENAI_VISION_MODEL")
@@ -6827,7 +6836,7 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
 
 
 @st.cache_data(show_spinner=False, ttl=86400, max_entries=256)
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V19"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V20"):
     """
     Fallback de visión para facturas que el OCR local no puede interpretar.
     Solo se invoca cuando las rutas locales no producen productos confiables.
@@ -6912,7 +6921,9 @@ Reglas críticas:
         try:
             if "errores_vision_api" not in st.session_state:
                 st.session_state["errores_vision_api"] = {}
-            st.session_state["errores_vision_api"][nombre_archivo] = str(exc)[:500]
+            st.session_state["errores_vision_api"][nombre_archivo] = (
+                f"{type(exc).__name__}: {str(exc)[:700]}"
+            )
         except Exception:
             pass
         return None
@@ -8456,7 +8467,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "V19_HYBRID_VISION_20260903"
+EXTRACTOR_CACHE_VERSION = "V20_VISION_DIAGNOSTICO_20260903"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -8485,6 +8496,23 @@ def _extraer_factura_upload_cache(uploaded_file):
 
 
 def render_carga_facturas(titulo=True):
+    # Estado visible del fallback de visión.
+    vision_ok, vision_msg = _estado_vision_api()
+    if vision_ok:
+        st.caption("🟢 Lectura avanzada por visión: activa")
+    else:
+        st.warning(
+            "⚠️ Lectura avanzada por visión NO está activa. "
+            + vision_msg
+            + " Las facturas desconocidas dependerán solamente del OCR local."
+        )
+
+    errores_v = st.session_state.get("errores_vision_api", {})
+    if errores_v:
+        with st.expander("Diagnóstico de lectura avanzada"):
+            for archivo_v, error_v in list(errores_v.items())[-5:]:
+                st.error(f"{archivo_v}: {error_v}")
+
     """Carga y procesa facturas conservando toda la lógica original."""
 
     with st.container(border=True):
