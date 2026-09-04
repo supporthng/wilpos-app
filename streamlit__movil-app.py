@@ -5377,6 +5377,10 @@ def _parsear_linea_distribuidor_con_barcode(linea):
     if not s:
         return None
 
+    # Errores OCR frecuentes en la columna UNID.
+    s = re.sub(r"(?i)\bI?CAJA\b", "CAJA", s)
+    s = re.sub(r"(?i)(\d)(CAJA|CJA|BOT|UND)\b", r"\1 \2", s)
+
     # Código de barras real: 8 a 14 dígitos.
     # OCR suele confundir el 8 inicial con B.
     s = re.sub(
@@ -5389,6 +5393,14 @@ def _parsear_linea_distribuidor_con_barcode(linea):
     m_bar = re.search(r"\b(\d{8,14})\b", s)
     if m_bar:
         barcode = m_bar.group(1)
+
+        # OCR puede perder el 8 inicial: 410591003397 -> 8410591003397.
+        # Solo se aplica a cadenas de 12 dígitos que comienzan por 4.
+        if len(barcode) == 12 and barcode.startswith("4"):
+            candidato_barcode = "8" + barcode
+            if len(candidato_barcode) == 13:
+                barcode = candidato_barcode
+
         antes = s[:m_bar.start()].strip()
         despues = s[m_bar.end():].strip()
     else:
@@ -6054,6 +6066,386 @@ def _ocr_imagen(image):
         return ""
 
 
+
+
+def _dinero_ocr_tolerante(valor):
+    """Convierte dinero leído por OCR: 9,600.00 / 1.555.20 / 5.989 68."""
+    s = str(valor or "").strip()
+    s = re.sub(r"[^0-9.,]", "", s)
+    if not s:
+        return None
+
+    # Formato sano 1,234.56
+    if "," in s and "." in s:
+        if s.rfind(".") > s.rfind(","):
+            s = s.replace(",", "")
+        else:
+            s = s.replace(".", "").replace(",", ".")
+
+    # OCR con varios puntos: 1.555.20 -> 1555.20
+    elif s.count(".") > 1:
+        partes = s.split(".")
+        if len(partes[-1]) == 2:
+            s = "".join(partes[:-1]) + "." + partes[-1]
+        else:
+            s = "".join(partes)
+
+    elif "," in s:
+        partes = s.split(",")
+        if len(partes[-1]) == 2:
+            s = "".join(partes[:-1]) + "." + partes[-1]
+        else:
+            s = s.replace(",", "")
+
+    try:
+        return float(s)
+    except Exception:
+        return None
+
+
+def _normalizar_barcode_ocr(codigo):
+    """Corrige errores frecuentes de OCR sin inventar códigos arbitrarios."""
+    c = re.sub(r"\D", "", str(codigo or ""))
+
+    # OCR pierde con frecuencia el 8 inicial de EAN-13 españoles.
+    if len(c) == 12 and c.startswith("4"):
+        c = "8" + c
+
+    return c if 8 <= len(c) <= 14 else ""
+
+
+def _parsear_fila_licores_tolerante(linea, descuento_documento=0.10):
+    """
+    Parser muy tolerante para tablas como:
+      cantidad / unidad / código interno / código barras / tamaño /
+      descripción / precio / descuento / ITBIS / importe
+
+    Solo necesita:
+      - código interno
+      - código de barras
+      - descripción
+      - primer precio monetario
+
+    El costo neto se obtiene del precio menos descuento, SIN ITBIS.
+    """
+    s = " ".join(str(linea or "").split()).strip()
+    if len(s) < 20:
+        return None
+
+    # B al inicio de EAN suele ser un 8 mal leído.
+    s = re.sub(
+        r"(?<![A-Za-z0-9])B(?=\d{10,13}\b)",
+        "8",
+        s,
+        flags=re.IGNORECASE,
+    )
+
+    # Buscar barcode de 11-14 dígitos.
+    candidatos_bar = list(re.finditer(r"\b\d{11,14}\b", s))
+    if not candidatos_bar:
+        return None
+
+    # Elegir el primer candidato que tenga código interno antes.
+    m_bar = None
+    codigo_interno = ""
+    for candidato in candidatos_bar:
+        antes_tmp = s[:candidato.start()]
+        internos = re.findall(r"\b\d{3,5}\b", antes_tmp)
+        if internos:
+            m_bar = candidato
+            codigo_interno = internos[-1]
+            break
+
+    if m_bar is None:
+        return None
+
+    barcode = _normalizar_barcode_ocr(m_bar.group(0))
+    if not barcode:
+        return None
+
+    antes = s[:m_bar.start()].strip()
+    despues = s[m_bar.end():].strip()
+
+    # Cantidad. En estas facturas suele aparecer inmediatamente antes
+    # de CAJA/CASA/AJA/CADA/RAJA/JAA por errores OCR.
+    cantidad = 1.0
+    zona_cantidad = antes[-70:]
+    m_cant = re.search(
+        r"(?i)(\d{1,3})\s+"
+        r"(?:CAJA|CASA|AJA|CADA|RAJA|JAA|JCAIA|CJA|BOT|BOTELLA|UND)\b",
+        zona_cantidad,
+    )
+    if m_cant:
+        try:
+            cantidad = max(1.0, float(m_cant.group(1)))
+        except Exception:
+            cantidad = 1.0
+
+    # Tamaño/presentación.
+    pack = 1
+    m_tamano = re.search(
+        r"[\]\|}\)]?\s*(\d{1,2})\s*/\s*(\d{2,3})\s*(?:CL|ML|L)\.?\s*",
+        despues,
+        flags=re.IGNORECASE,
+    )
+    inicio_desc = 0
+    if m_tamano:
+        try:
+            pack_ocr = int(m_tamano.group(1))
+            # Error frecuente de esta foto: 6/75 leído 16/75.
+            if pack_ocr == 16:
+                pack_ocr = 6
+            if pack_ocr in (1, 4, 6, 8, 12, 18, 24):
+                pack = pack_ocr
+        except Exception:
+            pack = 1
+        inicio_desc = m_tamano.end()
+
+    # Primer precio con dos decimales. No necesitamos que el ITBIS/importe
+    # final se lean correctamente para aceptar la fila.
+    zona = despues[inicio_desc:]
+    money = re.search(
+        r"\b\d{1,3}(?:[,.]\d{3})*[,.]\d{2}\b",
+        zona,
+    )
+    if not money:
+        return None
+
+    precio = _dinero_ocr_tolerante(money.group(0))
+    if precio is None or precio <= 20:
+        # Evita falsos positivos como OCR "1.98" dentro de una fila dañada.
+        return None
+
+    descripcion = zona[:money.start()].strip(" .|]}{):;-")
+    descripcion = re.sub(r"\s+\d{1,3}[\]\)]?\s*$", "", descripcion).strip()
+    descripcion = re.sub(r"^[\]\|}\)]+", "", descripcion).strip()
+
+    if len(descripcion) < 4:
+        return None
+
+    tail = zona[money.end():]
+
+    # Descuento: aceptar 10%, 108, 103, 10x (errores típicos de OCR).
+    descuento = None
+    m_desc = re.search(
+        r"(?i)\b(5|10|15|20|25)\s*(?:%|x|3|8)\b",
+        tail[:45],
+    )
+    if m_desc:
+        try:
+            descuento = float(m_desc.group(1)) / 100.0
+        except Exception:
+            descuento = None
+
+    if descuento is None:
+        descuento = float(descuento_documento or 0)
+
+    # Precio de la factura es por línea/caja y antes de descuento/ITBIS.
+    costo_neto = precio * (1.0 - descuento) * cantidad
+
+    return {
+        "codigo": barcode,
+        "codigo_interno": codigo_interno,
+        "nombre": descripcion,
+        "cant": float(cantidad),
+        "emp": int(pack),
+        "costo_total": round(costo_neto, 4),
+        "itbis": 0.18,
+        "cat": _inferir_categoria_generica(descripcion),
+        "unidad_original": "CAJA" if pack > 1 else "UND",
+        "costo_incluia_itbis": False,
+        "itbis_detectado": "separado_por_linea",
+    }
+
+
+def _extraer_tabla_licores_desde_ocr(texto, nombre_archivo=""):
+    """
+    Extrae filas aunque el OCR no reconstruya perfectamente la tabla.
+    Acepta una factura si logra recuperar al menos 3 productos coherentes.
+    """
+    lineas = [" ".join(x.split()) for x in str(texto or "").splitlines() if x.strip()]
+    if not lineas:
+        return None
+
+    texto_norm = _normalizar_ocr(texto)
+
+    # La factura mostrada usa descuento uniforme de 10%.
+    # Si el documento muestra 10% varias veces, usarlo como respaldo.
+    ocurrencias_10 = len(re.findall(r"(?i)\b10\s*[%xX38]\b", str(texto or "")))
+    descuento_doc = 0.10 if ocurrencias_10 >= 2 else 0.0
+
+    productos = []
+    vistos = set()
+
+    for i, linea in enumerate(lineas):
+        candidatos = [linea]
+
+        # Por si una fila salió dividida en dos líneas.
+        if i + 1 < len(lineas):
+            candidatos.append(linea + " " + lineas[i + 1])
+
+        for candidato in candidatos:
+            prod = _parsear_fila_licores_tolerante(
+                candidato,
+                descuento_documento=descuento_doc,
+            )
+            if not prod:
+                continue
+
+            firma = (
+                prod["codigo"],
+                _nombre_producto_canonico(prod["nombre"]),
+            )
+            if firma in vistos:
+                continue
+
+            vistos.add(firma)
+            productos.append(prod)
+            break
+
+    if len(productos) < 3:
+        return None
+
+    # Datos documentales.
+    numero = _extraer_numero_documento_generico(texto)
+    fecha = _extraer_fecha_generica(texto)
+
+    # En esta familia de facturas el OCR suele leer claramente el cliente,
+    # pero el proveedor aparece en sellos/web. Detectarlo si está presente.
+    if "alvarez" in texto_norm and "sanchez" in texto_norm:
+        proveedor = "Álvarez & Sánchez, S.A."
+    else:
+        proveedor = _extraer_proveedor_generico(lineas)
+
+    if not numero:
+        m_num = re.search(
+            r"(?i)FACTURA.{0,80}?(\d{5,10})",
+            str(texto or ""),
+        )
+        numero = m_num.group(1) if m_num else ""
+
+    if not numero:
+        base = re.sub(
+            r"[^A-Za-z0-9]+",
+            "-",
+            str(nombre_archivo or "documento"),
+        ).strip("-")
+        numero = base[:60] or "DOCUMENTO-SIN-NUMERO"
+
+    for p in productos:
+        p["moneda"] = "DOP"
+
+    firma = (proveedor, str(numero))
+    return firma, proveedor, numero, fecha, productos
+
+
+def _ocr_tabla_rotada_fallback(raw_bytes, nombre_archivo=""):
+    """
+    Fallback para fotos de facturas/tablas giradas.
+
+    Se diseñó para documentos donde el OCR automático detecta texto general
+    pero no logra reconstruir las filas. Prueba directamente 90° y 270°
+    con PSM 6, que preserva mejor las filas de tablas densas.
+
+    Retorna el resultado genérico que consiga más productos.
+    """
+    if (
+        not raw_bytes
+        or not OCR_DISPONIBLE
+        or not TESSERACT_MOTOR_LISTO
+    ):
+        return None
+
+    mejores = []
+
+    try:
+        imagen_original = Image.open(io.BytesIO(raw_bytes))
+        imagen_original = ImageOps.exif_transpose(imagen_original).convert("RGB")
+    except Exception:
+        return None
+
+    for angulo in (90, 270):
+        try:
+            imagen = imagen_original.rotate(angulo, expand=True)
+
+            # Mantener suficiente resolución para código de barras y columnas.
+            w, h = imagen.size
+            largo = max(w, h)
+            objetivo = 1800
+            if largo > 0:
+                escala = min(2.0, max(0.85, objetivo / float(largo)))
+                if abs(escala - 1.0) > 0.04:
+                    imagen = imagen.resize(
+                        (
+                            max(1, int(w * escala)),
+                            max(1, int(h * escala)),
+                        ),
+                        Image.Resampling.LANCZOS,
+                    )
+
+            gris = ImageOps.grayscale(imagen)
+            gris = ImageOps.autocontrast(gris, cutoff=1)
+            gris = ImageEnhance.Contrast(gris).enhance(1.40)
+            gris = ImageEnhance.Sharpness(gris).enhance(1.30)
+
+            texto = pytesseract.image_to_string(
+                gris,
+                lang="eng",
+                config="--oem 3 --psm 6",
+                timeout=28,
+            )
+
+            if not texto or len(texto.strip()) < 80:
+                continue
+
+            # Primero el parser tolerante de tablas densas.
+            resultado = _extraer_tabla_licores_desde_ocr(
+                texto,
+                nombre_archivo,
+            )
+
+            # Si no aplica, usar el extractor genérico histórico.
+            if resultado is None:
+                resultado = _extraer_generico_factura(
+                    texto,
+                    nombre_archivo,
+                )
+
+            if resultado is None:
+                continue
+
+            firma, proveedor, numero, fecha, productos = resultado
+            mejores.append(
+                (
+                    len(productos),
+                    angulo,
+                    texto,
+                    resultado,
+                )
+            )
+        except Exception:
+            continue
+
+    if not mejores:
+        return None
+
+    mejores.sort(key=lambda x: x[0], reverse=True)
+    cantidad, angulo, texto, resultado = mejores[0]
+
+    # Guardar diagnóstico para saber qué orientación funcionó.
+    try:
+        if "diagnostico_ocr_fallback" not in st.session_state:
+            st.session_state["diagnostico_ocr_fallback"] = {}
+        st.session_state["diagnostico_ocr_fallback"][nombre_archivo] = {
+            "angulo": angulo,
+            "productos": cantidad,
+        }
+    except Exception:
+        pass
+
+    return resultado
+
+
 def extraer_datos_factura(uploaded_file):
     file_name = uploaded_file.name.lower()
     extracted_text = ""
@@ -6168,12 +6560,29 @@ def extraer_datos_factura(uploaded_file):
     # Un proveedor nuevo NO necesita estar programado.
     # Si el documento contiene una tabla reconocible de productos,
     # se extraen proveedor, número, fecha, moneda y líneas directamente.
+    # Parser tolerante para tablas densas, incluso si la cabecera OCR salió mal.
+    resultado_tabla = _extraer_tabla_licores_desde_ocr(
+        extracted_text,
+        uploaded_file.name,
+    )
+    if resultado_tabla is not None:
+        return resultado_tabla
+
     resultado_generico = _extraer_generico_factura(
         extracted_text,
         uploaded_file.name,
     )
     if resultado_generico is not None:
         return resultado_generico
+
+    # Fallback directo para fotos de tablas giradas.
+    if file_name.endswith((".png", ".jpg", ".jpeg")) and raw is not None:
+        resultado_rotado = _ocr_tabla_rotada_fallback(
+            raw,
+            uploaded_file.name,
+        )
+        if resultado_rotado is not None:
+            return resultado_rotado
 
     # Guardar una muestra OCR para diagnóstico cuando una foto no se reconoce.
     if file_name.endswith((".png", ".jpg", ".jpeg")):
@@ -7618,6 +8027,14 @@ def render_carga_facturas(titulo=True):
 
         progreso_ocr.progress(100, text="Lectura completada")
         progreso_ocr.empty()
+
+        _diag_fallback = st.session_state.get("diagnostico_ocr_fallback", {})
+        for _archivo_fb, _info_fb in _diag_fallback.items():
+            if any(getattr(_f, "name", "") == _archivo_fb for _f in archivos_unicos):
+                st.caption(
+                    f"📐 {_archivo_fb}: reconocimiento recuperado con rotación "
+                    f"{_info_fb.get('angulo')}° · {_info_fb.get('productos')} productos detectados."
+                )
 
         # Acción principal visible inmediatamente después de leer la factura.
         st.markdown("<div class='v3-process-top'></div>", unsafe_allow_html=True)
