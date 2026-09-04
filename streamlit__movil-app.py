@@ -3792,7 +3792,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "V25":
+if st.session_state.get("_extractor_runtime_version") != "V26":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3801,7 +3801,7 @@ if st.session_state.get("_extractor_runtime_version") != "V25":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "V25"
+    st.session_state["_extractor_runtime_version"] = "V26"
 
 
 # =========================================================
@@ -6790,6 +6790,24 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
     productos = []
     omitidos = []
 
+    def _float_seguro(valor):
+        if valor is None or valor == "":
+            return None
+        try:
+            if isinstance(valor, str):
+                limpio = re.sub(r"[^0-9,.-]", "", valor).replace(",", "")
+                return float(limpio) if limpio not in ("", "-", ".", "-.") else None
+            return float(valor)
+        except Exception:
+            return None
+
+    subtotal_impreso = _float_seguro(data.get("net_subtotal_before_tax"))
+    itbis_total_impreso = _float_seguro(data.get("tax_total"))
+    total_general_impreso = _float_seguro(data.get("grand_total"))
+    alcance_subtotal = str(data.get("subtotal_scope") or "unknown").strip().lower()
+    if alcance_subtotal not in ("page", "invoice", "unknown"):
+        alcance_subtotal = "unknown"
+
     # Omitidos que el propio lector visual detectó en la factura
     # pero no pudo leer con seguridad.
     for item in data.get("omitted_rows") or []:
@@ -6890,12 +6908,46 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
     try:
         if "resumen_lectura_productos" not in st.session_state:
             st.session_state["resumen_lectura_productos"] = {}
+        suma_lineas_sin_itbis = round(
+            sum(float(p.get("costo_total", 0) or 0) for p in productos),
+            2,
+        )
+        diferencia_cuadre = None
+        estado_cuadre = "SIN SUBTOTAL IMPRESO"
+        tolerancia_cuadre = None
+
+        # Un subtotal de página se puede comparar directamente con las líneas
+        # extraídas de esta imagen. Un subtotal de factura completa en un
+        # documento multipágina requiere consolidar todas sus páginas.
+        comparable = (
+            subtotal_impreso is not None
+            and subtotal_impreso >= 0
+            and alcance_subtotal in ("page", "unknown")
+        )
+        if comparable:
+            diferencia_cuadre = round(suma_lineas_sin_itbis - subtotal_impreso, 2)
+            tolerancia_cuadre = max(1.0, round(abs(subtotal_impreso) * 0.0005, 2))
+            if abs(diferencia_cuadre) <= tolerancia_cuadre:
+                estado_cuadre = "CUADRA"
+            else:
+                estado_cuadre = "DIFERENCIA"
+        elif subtotal_impreso is not None and alcance_subtotal == "invoice":
+            estado_cuadre = "SUBTOTAL DE FACTURA COMPLETA"
+
         st.session_state["resumen_lectura_productos"][nombre_archivo] = {
             "filas_visibles_estimadas": visibles,
             "filas_devuelta_api": len(productos_api),
             "productos_aceptados": len(productos),
             "productos_omitidos": len(omitidos),
             "omitidos": omitidos,
+            "subtotal_sin_itbis_impreso": subtotal_impreso,
+            "itbis_total_impreso": itbis_total_impreso,
+            "total_general_impreso": total_general_impreso,
+            "alcance_subtotal": alcance_subtotal,
+            "suma_lineas_sin_itbis": suma_lineas_sin_itbis,
+            "diferencia_cuadre": diferencia_cuadre,
+            "tolerancia_cuadre": tolerancia_cuadre,
+            "estado_cuadre": estado_cuadre,
         }
     except Exception:
         pass
@@ -6927,7 +6979,7 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
     )
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V25"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V26"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -6975,6 +7027,10 @@ Formato exacto:
   "page_number": 1,
   "total_pages": 1,
   "visible_product_rows": 0,
+  "net_subtotal_before_tax": null,
+  "tax_total": null,
+  "grand_total": null,
+  "subtotal_scope": "page",
   "products": [
     {
       "barcode": "codigo de barras o null",
@@ -6998,6 +7054,15 @@ Formato exacto:
 
 REGLAS:
 - Cuenta TODAS las filas de productos visibles y coloca ese total en visible_product_rows.
+- Lee también los totales impresos cuando existan:
+  * net_subtotal_before_tax = subtotal neto de mercancía ANTES de ITBIS, después de descuentos.
+  * tax_total = ITBIS total impreso.
+  * grand_total = total con ITBIS.
+  * subtotal_scope = "page" si el subtotal corresponde solo a esta página,
+    "invoice" si corresponde a toda la factura, o "unknown" si no se puede determinar.
+- Si la factura usa etiquetas como "SUBTOTAL GRAVADO PAGINA", ese valor es
+  net_subtotal_before_tax y subtotal_scope debe ser "page".
+- NO uses "SUBTOTAL NETO PAGINA" si ese valor ya incluye ITBIS.
 - Incluye todas las filas reales de productos visibles.
 - Si ves una fila de producto pero algún dato esencial impide extraerla con seguridad,
   NO la ocultes: agrégala a omitted_rows explicando exactamente por qué.
@@ -8664,7 +8729,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "V25_SCROLL_CONTROL_OMISIONES_20260903"
+EXTRACTOR_CACHE_VERSION = "V26_CUADRE_COSTO_SIN_ITBIS_20260903"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -9717,6 +9782,57 @@ if pagina == "🏠 Inicio":
                         "🚨 Posible omisión silenciosa detectada:\n\n"
                         + "\n\n".join(alertas_conteo)
                     )
+
+
+                # Cuadre automático de costo sin ITBIS vs subtotal impreso.
+                st.markdown("##### Cuadre de costo sin ITBIS")
+                for archivo_res, info_res in resumen_lectura.items():
+                    suma_lineas = info_res.get("suma_lineas_sin_itbis")
+                    subtotal_doc = info_res.get("subtotal_sin_itbis_impreso")
+                    estado = info_res.get("estado_cuadre", "SIN SUBTOTAL IMPRESO")
+                    diferencia = info_res.get("diferencia_cuadre")
+                    alcance = info_res.get("alcance_subtotal", "unknown")
+                    omitidos_n = int(info_res.get("productos_omitidos", 0) or 0)
+
+                    st.markdown(f"**{archivo_res}**")
+
+                    if subtotal_doc is None:
+                        st.info(
+                            "No se encontró un subtotal sin ITBIS claramente impreso "
+                            "en esta página; no se puede hacer el cuadre automático."
+                        )
+                    elif estado == "CUADRA":
+                        st.success(
+                            f"✅ CUADRE CORRECTO — Líneas leídas sin ITBIS: "
+                            f"RD${float(suma_lineas or 0):,.2f} · "
+                            f"Subtotal impreso sin ITBIS: RD${float(subtotal_doc):,.2f} · "
+                            f"Diferencia: RD${float(diferencia or 0):,.2f}"
+                        )
+                    elif estado == "DIFERENCIA":
+                        posible_causa = (
+                            " Hay productos omitidos reportados; revisa ese panel."
+                            if omitidos_n > 0 else
+                            " No hay productos omitidos reportados, por lo que conviene "
+                            "revisar cantidades, descuentos o importes leídos."
+                        )
+                        st.error(
+                            f"⚠️ NO CUADRA — Líneas leídas sin ITBIS: "
+                            f"RD${float(suma_lineas or 0):,.2f} · "
+                            f"Subtotal impreso sin ITBIS: RD${float(subtotal_doc):,.2f} · "
+                            f"Diferencia: RD${float(diferencia or 0):,.2f}."
+                            + posible_causa
+                        )
+                    elif estado == "SUBTOTAL DE FACTURA COMPLETA":
+                        st.warning(
+                            f"El subtotal impreso RD${float(subtotal_doc):,.2f} corresponde "
+                            "a la factura completa, no solamente a esta página. "
+                            "El cuadre definitivo se hará cuando estén cargadas todas las páginas."
+                        )
+                    else:
+                        st.info(
+                            f"Subtotal detectado: RD${float(subtotal_doc):,.2f} "
+                            f"(alcance: {alcance})."
+                        )
         else:
             empty_df = pd.DataFrame(
                 columns=[
