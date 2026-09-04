@@ -1,5 +1,4 @@
 import io
-import hashlib
 import re
 import json
 import html as html_lib
@@ -24,25 +23,11 @@ except ImportError:
     pytesseract = None
     OCR_DISPONIBLE = False
 
-
-# pytesseract puede importar aunque el ejecutable "tesseract" no esté
-# instalado en el servidor.
-TESSERACT_MOTOR_LISTO = False
-TESSERACT_ERROR = ""
-
-if OCR_DISPONIBLE:
-    try:
-        pytesseract.get_tesseract_version()
-        TESSERACT_MOTOR_LISTO = True
-    except Exception as exc:
-        TESSERACT_MOTOR_LISTO = False
-        TESSERACT_ERROR = str(exc)
-
 st.set_page_config(
 page_title="WilPOS Móvil | Procesador de Facturas",
     page_icon="📦",
     layout="wide",
-    initial_sidebar_state="auto",
+    initial_sidebar_state="expanded",
 )
 
 # =========================================================
@@ -3763,7 +3748,7 @@ div[data-testid="stDialog"] img{
 DEFAULTS = {
     "inventario_acumulado": {},
     "firmas_facturas_procesadas": set(),
-    "margen_usado": 25.0,
+    "margen_usado": 35.0,
     "detalle_facturas_procesadas": {},
     "uploader_key": 0,
     "camera_key": 0,
@@ -3773,1392 +3758,11 @@ DEFAULTS = {
     "archivos_ocultos_ui": set(),
     "origen_productos_facturas": {},
     "productos_excluidos": set(),
-    "paginas_lote_detectadas": {},
-    "modo_oscuro": False,
 }
 
 for key, value in DEFAULTS.items():
     if key not in st.session_state:
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
-
-
-if st.session_state.get("_extractor_runtime_version") != "V15":
-    for _k in (
-        "errores_ocr_archivos",
-        "diagnostico_ocr",
-        "diagnostico_ocr_fallback",
-        "diagnostico_visual_directo",
-        "fallback_574652_eventos",
-    ):
-        st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "V15"
-
-
-# =========================================================
-# TEMA VISUAL CLARO / OSCURO
-# =========================================================
-def aplicar_tema_visual():
-    oscuro = bool(st.session_state.get("modo_oscuro", False))
-
-    if oscuro:
-        colores = {
-            "bg": "#07111f",
-            "bg_soft": "#0b1728",
-            "panel": "#101d30",
-            "panel2": "#14243a",
-            "border": "#263850",
-            "text": "#f1f5f9",
-            "muted": "#9fb0c5",
-            "header": "rgba(7,17,31,.92)",
-            "input": "#0c192a",
-            "table_head": "#16263d",
-            "table_alt": "#0d1a2b",
-            "shadow": "rgba(0,0,0,.28)",
-            "hero1": "#101f35",
-            "hero2": "#0b1728",
-            "accent_soft": "rgba(37,99,235,.14)",
-            "sidebar1": "#030b16",
-            "sidebar2": "#071a33",
-        }
-    else:
-        colores = {
-            "bg": "#f4f7fb",
-            "bg_soft": "#eef4fb",
-            "panel": "#ffffff",
-            "panel2": "#f8fbff",
-            "border": "#dce6f2",
-            "text": "#0f172a",
-            "muted": "#64748b",
-            "header": "rgba(244,247,251,.92)",
-            "input": "#ffffff",
-            "table_head": "#f3f7fc",
-            "table_alt": "#fbfdff",
-            "shadow": "rgba(15,23,42,.08)",
-            "hero1": "#ffffff",
-            "hero2": "#edf5ff",
-            "accent_soft": "#eff6ff",
-            "sidebar1": "#06172d",
-            "sidebar2": "#0b2a50",
-        }
-
-    st.markdown(
-        f"""
-        <style>
-        :root {{
-            --bg:{colores["bg"]};
-            --panel:{colores["panel"]};
-            --border:{colores["border"]};
-            --text:{colores["text"]};
-            --muted:{colores["muted"]};
-            --navy:{colores["sidebar1"]};
-            --navy2:{colores["sidebar2"]};
-            color-scheme: {"dark" if oscuro else "light"};
-        }}
-
-        html, body, .stApp {{
-            background:{colores["bg"]} !important;
-            color:{colores["text"]} !important;
-        }}
-
-        [data-testid="stHeader"] {{
-            background:{colores["header"]} !important;
-            border-bottom:1px solid {colores["border"]};
-            backdrop-filter:blur(12px);
-        }}
-
-        [data-testid="stSidebar"] {{
-            background:
-                radial-gradient(circle at 15% 0%, rgba(37,99,235,.22), transparent 28%),
-                linear-gradient(180deg,{colores["sidebar1"]} 0%, {colores["sidebar2"]} 100%) !important;
-        }}
-
-        /* Tarjetas principales */
-        .hero-card,
-        .stats-card,
-        .section-card,
-        .main-card,
-        .inventory-card,
-        .file-card,
-        .file-action-card,
-        .selected-file-card,
-        .preview-file-card,
-        .validation-summary,
-        .duplicate-details-box,
-        .duplicate-mobile-card,
-        .invalid-mobile-card,
-        .empty-state,
-        .process-ready,
-        .process-waiting,
-        .info-strip,
-        .wilpos-products-wrap {{
-            background:{colores["panel"]} !important;
-            border-color:{colores["border"]} !important;
-            color:{colores["text"]} !important;
-            box-shadow:0 10px 30px {colores["shadow"]} !important;
-        }}
-
-        .hero-card {{
-            background:
-                radial-gradient(circle at 88% 18%, rgba(37,99,235,.14), transparent 29%),
-                linear-gradient(135deg,{colores["hero1"]} 0%, {colores["hero2"]} 100%) !important;
-        }}
-
-        .hero-card h1,
-        .hero-card .subtitle,
-        .stats-title,
-        .inventory-title,
-        .main-card-header,
-        .load-title,
-        .margin-heading,
-        .selected-file-name,
-        .preview-file-card,
-        .file-action-name,
-        .file-click-name,
-        .validation-value,
-        .products-count-line {{
-            color:{colores["text"]} !important;
-        }}
-
-        .hero-card p,
-        .mode-caption,
-        .file-action-meta,
-        .file-click-meta,
-        .selected-file-meta,
-        .validation-label,
-        .validation-reason,
-        .process-note,
-        .home-products-note,
-        .products-scroll-hint {{
-            color:{colores["muted"]} !important;
-        }}
-
-        /* Formularios */
-        .stTextInput input,
-        .stNumberInput input,
-        .stDateInput input,
-        .stTextArea textarea,
-        [data-baseweb="select"] > div,
-        [data-testid="stFileUploaderDropzone"] {{
-            background:{colores["input"]} !important;
-            color:{colores["text"]} !important;
-            border-color:{colores["border"]} !important;
-        }}
-
-        [data-testid="stFileUploaderDropzone"] * {{
-            color:{colores["text"]} !important;
-        }}
-
-        /* Expansores */
-        [data-testid="stExpander"] {{
-            background:{colores["panel"]} !important;
-            border:1px solid {colores["border"]} !important;
-            border-radius:14px !important;
-        }}
-        [data-testid="stExpander"] summary,
-        [data-testid="stExpander"] p {{
-            color:{colores["text"]} !important;
-        }}
-
-        /* Dataframes y tablas */
-        [data-testid="stDataFrame"],
-        [data-testid="stTable"] {{
-            border:1px solid {colores["border"]} !important;
-            border-radius:14px !important;
-            overflow:hidden;
-            background:{colores["panel"]} !important;
-        }}
-
-        .wilpos-scroll-table th {{
-            background:{colores["table_head"]} !important;
-            color:{colores["text"]} !important;
-            border-color:{colores["border"]} !important;
-        }}
-        .wilpos-scroll-table td {{
-            background:{colores["panel"]} !important;
-            color:{colores["text"]} !important;
-            border-color:{colores["border"]} !important;
-        }}
-        .wilpos-scroll-table tbody tr:nth-child(even) td {{
-            background:{colores["table_alt"]} !important;
-        }}
-
-        /* Métricas */
-        [data-testid="stMetric"] {{
-            background:{colores["panel"]};
-            border:1px solid {colores["border"]};
-            border-radius:16px;
-            padding:.75rem 1rem;
-            box-shadow:0 8px 24px {colores["shadow"]};
-        }}
-        [data-testid="stMetricLabel"],
-        [data-testid="stMetricValue"] {{
-            color:{colores["text"]} !important;
-        }}
-
-        /* Separadores y texto general */
-        hr {{
-            border-color:{colores["border"]} !important;
-        }}
-        .stMarkdown, .stMarkdown p, .stMarkdown li,
-        [data-testid="stCaptionContainer"] {{
-            color:{colores["text"]};
-        }}
-        [data-testid="stCaptionContainer"] {{
-            opacity:.72;
-        }}
-
-        /* Botones secundarios */
-        .stButton button:not([kind="primary"]),
-        .stDownloadButton button {{
-            background:{colores["panel"]} !important;
-            color:{colores["text"]} !important;
-            border-color:{colores["border"]} !important;
-            border-radius:12px !important;
-        }}
-        .stButton button:not([kind="primary"]):hover,
-        .stDownloadButton button:hover {{
-            border-color:#3b82f6 !important;
-            background:{colores["accent_soft"]} !important;
-        }}
-
-        /* Botones principales */
-        .stButton button[kind="primary"] {{
-            border-radius:12px !important;
-            box-shadow:0 8px 18px rgba(37,99,235,.23) !important;
-        }}
-
-        /* Toggle de apariencia */
-        [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {{
-            color:#dbeafe !important;
-            font-weight:700 !important;
-        }}
-        [data-testid="stSidebar"] [data-testid="stToggle"] {{
-            padding:.25rem .1rem .65rem .1rem;
-        }}
-
-        /* Scroll */
-        ::-webkit-scrollbar {{
-            width:9px;
-            height:9px;
-        }}
-        ::-webkit-scrollbar-thumb {{
-            background:{"#344963" if oscuro else "#c7d5e5"};
-            border-radius:20px;
-        }}
-        ::-webkit-scrollbar-track {{
-            background:transparent;
-        }}
-
-        @media (max-width:700px) {{
-            .block-container {{
-                padding-top:.65rem !important;
-            }}
-            .hero-card,
-            .stats-card,
-            .section-card,
-            .main-card {{
-                border-radius:16px !important;
-            }}
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # Capa visual moderna. Solo CSS: no cambia la lógica de la app.
-    st.markdown(
-        f"""
-        <style>
-        /* =====================================================
-           WILPOS - REDISEÑO VISUAL MODERNO
-           ===================================================== */
-
-        .block-container {{
-            max-width: 1500px !important;
-            padding-top: 1.15rem !important;
-            padding-left: 1.4rem !important;
-            padding-right: 1.4rem !important;
-            padding-bottom: 2rem !important;
-        }}
-
-        /* Sidebar */
-        [data-testid="stSidebar"] {{
-            border-right: 1px solid rgba(148,163,184,.16);
-            box-shadow: 10px 0 35px rgba(2,6,23,.08);
-        }}
-
-        [data-testid="stSidebar"] > div:first-child {{
-            padding-top: .45rem;
-        }}
-
-        [data-testid="stSidebar"] .stRadio > label {{
-            display:none;
-        }}
-
-        [data-testid="stSidebar"] .stRadio div[role="radiogroup"] {{
-            gap: .32rem;
-        }}
-
-        [data-testid="stSidebar"] .stRadio div[role="radiogroup"] label {{
-            border-radius: 11px !important;
-            padding: .55rem .72rem !important;
-            transition: all .18s ease;
-        }}
-
-        [data-testid="stSidebar"] .stRadio div[role="radiogroup"] label:hover {{
-            background: rgba(59,130,246,.15) !important;
-        }}
-
-        [data-testid="stSidebar"] .stRadio div[role="radiogroup"] label:has(input:checked) {{
-            background: linear-gradient(135deg,#2563eb,#0f6ae8) !important;
-            box-shadow: 0 8px 18px rgba(37,99,235,.28);
-        }}
-
-        [data-testid="stSidebar"] .stRadio div[role="radiogroup"] label:has(input:checked) p {{
-            color: white !important;
-            font-weight: 800 !important;
-        }}
-
-        /* Encabezados */
-        h1 {{
-            font-size: clamp(1.65rem, 2.4vw, 2.45rem) !important;
-            line-height:1.08 !important;
-            letter-spacing:-.035em !important;
-            color:{colores["text"]} !important;
-            margin-bottom:.35rem !important;
-        }}
-
-        h2 {{
-            letter-spacing:-.025em !important;
-        }}
-
-        h3 {{
-            letter-spacing:-.018em !important;
-        }}
-
-        /* Hero */
-        .hero-grid {{
-            gap: 1rem !important;
-            align-items: stretch !important;
-            margin-bottom: 1rem !important;
-        }}
-
-        .hero-card {{
-            min-height: 220px !important;
-            border-radius: 22px !important;
-            padding: 1.45rem 1.55rem !important;
-            overflow: hidden !important;
-            position: relative !important;
-        }}
-
-        .hero-card:before {{
-            content:"";
-            position:absolute;
-            width:220px;
-            height:220px;
-            border-radius:50%;
-            right:-85px;
-            top:-90px;
-            background:radial-gradient(circle,rgba(37,99,235,.18),transparent 68%);
-            pointer-events:none;
-        }}
-
-        .hero-copy {{
-            position:relative;
-            z-index:3;
-            max-width:68%;
-        }}
-
-        .hero-copy h1 {{
-            margin-top:.12rem !important;
-        }}
-
-        .hero-copy .subtitle {{
-            font-size:.98rem !important;
-            line-height:1.55 !important;
-            max-width:720px;
-        }}
-
-        .hero-brand-zone {{
-            right: 1.5rem !important;
-            top: 1.25rem !important;
-        }}
-
-        .wilpos-hero-logo {{
-            max-width: 180px !important;
-            max-height: 72px !important;
-            object-fit: contain !important;
-            filter: {"brightness(1.08)" if oscuro else "none"};
-        }}
-
-        /* Statistics card */
-        .stats-card {{
-            border-radius:22px !important;
-            padding:1.15rem 1.2rem !important;
-            min-height:220px !important;
-        }}
-
-        .stats-title {{
-            font-size:.78rem !important;
-            letter-spacing:.08em !important;
-            text-transform:uppercase;
-            color:{colores["muted"]} !important;
-        }}
-
-        /* Cards */
-        .section-card,
-        .main-card,
-        .inventory-card {{
-            border-radius:20px !important;
-            padding:1.15rem 1.2rem !important;
-        }}
-
-        .file-action-card,
-        .file-card,
-        .selected-file-card,
-        .preview-file-card,
-        .duplicate-mobile-card,
-        .invalid-mobile-card {{
-            border-radius:16px !important;
-            transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease;
-        }}
-
-        .file-action-card:hover,
-        .file-card:hover {{
-            transform:translateY(-2px);
-            border-color:rgba(59,130,246,.55) !important;
-            box-shadow:0 14px 28px {colores["shadow"]} !important;
-        }}
-
-        /* Métricas nativas */
-        [data-testid="stMetric"] {{
-            border-radius:16px !important;
-            min-height: 105px;
-            display:flex;
-            flex-direction:column;
-            justify-content:center;
-        }}
-
-        [data-testid="stMetricValue"] {{
-            font-size:1.55rem !important;
-            letter-spacing:-.025em !important;
-        }}
-
-        [data-testid="stMetricLabel"] p {{
-            font-size:.76rem !important;
-            font-weight:750 !important;
-            color:{colores["muted"]} !important;
-        }}
-
-        /* File uploader */
-        [data-testid="stFileUploaderDropzone"] {{
-            border:1.5px dashed {"#35506d" if oscuro else "#cbd8e8"} !important;
-            border-radius:16px !important;
-            padding:1rem !important;
-            transition:.18s ease;
-        }}
-
-        [data-testid="stFileUploaderDropzone"]:hover {{
-            border-color:#3b82f6 !important;
-            box-shadow:inset 0 0 0 1px rgba(59,130,246,.12);
-        }}
-
-        /* Inputs */
-        .stNumberInput input,
-        .stTextInput input,
-        .stDateInput input,
-        .stTextArea textarea,
-        [data-baseweb="select"] > div {{
-            border-radius:11px !important;
-            min-height:42px !important;
-        }}
-
-        .stNumberInput button {{
-            border-color:{colores["border"]} !important;
-        }}
-
-        /* Botones */
-        .stButton button,
-        .stDownloadButton button {{
-            min-height:42px !important;
-            font-weight:800 !important;
-            border-radius:11px !important;
-            transition:transform .14s ease, box-shadow .14s ease;
-        }}
-
-        .stButton button:hover,
-        .stDownloadButton button:hover {{
-            transform:translateY(-1px);
-        }}
-
-        .stButton button[kind="primary"] {{
-            background:linear-gradient(135deg,#1769e0,#0b7af3) !important;
-            border:0 !important;
-            color:white !important;
-            box-shadow:0 10px 24px rgba(37,99,235,.22) !important;
-        }}
-
-        .stButton button[kind="primary"]:hover {{
-            box-shadow:0 13px 28px rgba(37,99,235,.30) !important;
-        }}
-
-        /* Dataframes */
-        [data-testid="stDataFrame"] {{
-            border-radius:16px !important;
-            box-shadow:0 8px 24px {colores["shadow"]} !important;
-        }}
-
-        .wilpos-products-wrap {{
-            border-radius:18px !important;
-            overflow:hidden;
-        }}
-
-        .wilpos-scroll-table {{
-            border-collapse:separate !important;
-            border-spacing:0 !important;
-        }}
-
-        .wilpos-scroll-table th {{
-            position:sticky;
-            top:0;
-            z-index:2;
-            font-size:.72rem !important;
-            text-transform:uppercase;
-            letter-spacing:.045em;
-        }}
-
-        .wilpos-scroll-table td {{
-            font-size:.83rem !important;
-        }}
-
-        /* Expander */
-        [data-testid="stExpander"] {{
-            border-radius:15px !important;
-            overflow:hidden;
-        }}
-
-        /* Alertas */
-        [data-testid="stAlert"] {{
-            border-radius:14px !important;
-        }}
-
-        /* Tabs */
-        .stTabs [data-baseweb="tab-list"] {{
-            gap:.35rem;
-            background:{colores["panel"]};
-            border:1px solid {colores["border"]};
-            padding:.3rem;
-            border-radius:14px;
-        }}
-
-        .stTabs [data-baseweb="tab"] {{
-            border-radius:10px;
-            padding:.45rem .8rem;
-        }}
-
-        /* Toggle tema */
-        [data-testid="stSidebar"] [data-testid="stToggle"] {{
-            background:rgba(255,255,255,.03);
-            border:1px solid rgba(255,255,255,.07);
-            border-radius:12px;
-            padding:.58rem .72rem !important;
-            margin-top:.35rem;
-        }}
-
-        /* Footer / captions */
-        [data-testid="stCaptionContainer"] {{
-            font-size:.76rem !important;
-        }}
-
-        /* Mobile */
-        @media (max-width: 900px) {{
-            .block-container {{
-                padding-left:.85rem !important;
-                padding-right:.85rem !important;
-            }}
-
-            .hero-grid {{
-                grid-template-columns:1fr !important;
-            }}
-
-            .hero-card,
-            .stats-card {{
-                min-height:auto !important;
-            }}
-
-            .hero-copy {{
-                max-width:100% !important;
-                padding-right:0 !important;
-            }}
-
-            .hero-brand-zone {{
-                position:relative !important;
-                right:auto !important;
-                top:auto !important;
-                margin-top:.85rem !important;
-                justify-content:flex-start !important;
-            }}
-
-            .hero-visual {{
-                opacity:.28 !important;
-                transform:scale(.82);
-                transform-origin:right bottom;
-            }}
-        }}
-
-        @media (max-width: 640px) {{
-            .block-container {{
-                padding-top:.5rem !important;
-            }}
-
-            h1 {{
-                font-size:1.62rem !important;
-            }}
-
-            .hero-card {{
-                padding:1.05rem !important;
-                border-radius:17px !important;
-            }}
-
-            .section-card,
-            .main-card,
-            .inventory-card {{
-                padding:.9rem !important;
-                border-radius:16px !important;
-            }}
-
-            [data-testid="stMetric"] {{
-                min-height:92px;
-            }}
-
-            .stButton button,
-            .stDownloadButton button {{
-                min-height:44px !important;
-            }}
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-aplicar_tema_visual()
-
-
-
-# =========================================================
-# DISEÑO ESTRUCTURAL V2
-# =========================================================
-def aplicar_layout_v2():
-    oscuro = bool(st.session_state.get("modo_oscuro", False))
-    bg = "#07111f" if oscuro else "#f5f8fc"
-    panel = "#0e1b2d" if oscuro else "#ffffff"
-    panel_soft = "#122239" if oscuro else "#f8fbff"
-    border = "#263850" if oscuro else "#dbe5f0"
-    textc = "#f4f7fb" if oscuro else "#10203a"
-    muted = "#9fb0c5" if oscuro else "#66758a"
-    shadow = "rgba(0,0,0,.24)" if oscuro else "rgba(32,57,91,.08)"
-
-    st.markdown(
-        f"""
-        <style>
-        /* --- fondo principal --- */
-        .stApp {{
-            background:{bg} !important;
-        }}
-
-        .block-container {{
-            max-width:1450px !important;
-            padding-top:1.5rem !important;
-        }}
-
-        /* --- sidebar completamente nuevo --- */
-        [data-testid="stSidebar"] {{
-            width:245px !important;
-            background:
-                radial-gradient(circle at 10% 4%,rgba(45,119,246,.20),transparent 25%),
-                linear-gradient(180deg,#07172b 0%,#0a2441 100%) !important;
-        }}
-
-        .modern-side-brand {{
-            display:flex;
-            align-items:center;
-            gap:.75rem;
-            padding:.8rem .35rem 1.4rem .35rem;
-        }}
-
-        .modern-side-mark {{
-            width:42px;
-            height:42px;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            border-radius:12px;
-            color:white;
-            font-size:1.25rem;
-            font-weight:900;
-            background:linear-gradient(135deg,#2879f5,#1156d8);
-            box-shadow:0 10px 20px rgba(22,95,226,.35);
-        }}
-
-        .modern-side-name {{
-            color:white;
-            font-size:1.08rem;
-            font-weight:900;
-            letter-spacing:-.02em;
-        }}
-
-        .modern-side-sub {{
-            color:#8fa7c3;
-            font-size:.64rem;
-            font-weight:650;
-            margin-top:.08rem;
-        }}
-
-        .modern-side-label {{
-            color:#7890ac;
-            font-size:.63rem;
-            font-weight:850;
-            letter-spacing:.11em;
-            margin:.15rem .35rem .55rem .35rem;
-        }}
-
-        .modern-side-divider {{
-            height:1px;
-            background:rgba(255,255,255,.09);
-            margin:1.15rem .25rem .95rem .25rem;
-        }}
-
-        .modern-mini-status {{
-            display:flex;
-            gap:.45rem;
-            align-items:center;
-            color:#8fa7c3;
-            font-size:.68rem;
-            padding:.35rem .45rem;
-        }}
-
-        .modern-side-spacer {{
-            height:1.1rem;
-        }}
-
-        /* --- header nuevo --- */
-        .modern-page-header {{
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            gap:1.5rem;
-            margin-bottom:1.15rem;
-        }}
-
-        .modern-eyebrow {{
-            font-size:.68rem;
-            font-weight:850;
-            letter-spacing:.11em;
-            color:#2b73df;
-            margin-bottom:.4rem;
-        }}
-
-        .modern-page-header h1 {{
-            margin:0 !important;
-            font-size:2.2rem !important;
-        }}
-
-        .modern-page-header p {{
-            margin:.42rem 0 0 0;
-            color:{muted};
-            font-size:.95rem;
-            max-width:760px;
-        }}
-
-        .modern-header-logo img {{
-            width:145px;
-            max-height:62px;
-            object-fit:contain;
-            filter:{"brightness(1.15)" if oscuro else "none"};
-        }}
-
-        /* --- KPI row --- */
-        .modern-kpi-grid {{
-            display:grid;
-            grid-template-columns:repeat(4,minmax(0,1fr));
-            gap:.85rem;
-            margin-bottom:1.15rem;
-        }}
-
-        .modern-kpi-card {{
-            display:flex;
-            align-items:center;
-            gap:.85rem;
-            min-height:108px;
-            padding:1rem 1.05rem;
-            background:{panel};
-            border:1px solid {border};
-            border-radius:17px;
-            box-shadow:0 8px 22px {shadow};
-        }}
-
-        .modern-kpi-icon {{
-            width:46px;
-            height:46px;
-            flex:0 0 46px;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            border-radius:14px;
-            font-size:1.2rem;
-        }}
-
-        .modern-kpi-icon.blue {{ background:rgba(37,99,235,.12); }}
-        .modern-kpi-icon.green {{ background:rgba(34,197,94,.12); }}
-        .modern-kpi-icon.purple {{ background:rgba(139,92,246,.12); }}
-        .modern-kpi-icon.orange {{ background:rgba(249,115,22,.12); }}
-
-        .modern-kpi-label {{
-            font-size:.73rem;
-            color:{muted};
-            font-weight:720;
-        }}
-
-        .modern-kpi-value {{
-            color:{textc};
-            font-size:1.65rem;
-            line-height:1.1;
-            font-weight:900;
-            letter-spacing:-.025em;
-            margin-top:.17rem;
-        }}
-
-        .modern-kpi-note {{
-            color:{muted};
-            font-size:.64rem;
-            margin-top:.2rem;
-        }}
-
-        /* --- bloque de carga: ahora parece panel de aplicación --- */
-        .load-title {{
-            font-size:1rem !important;
-            font-weight:900 !important;
-            color:{textc} !important;
-            margin:.15rem 0 .1rem 0 !important;
-        }}
-
-        /* Toda la zona de carga queda visualmente en paneles más compactos */
-        [data-testid="stFileUploader"] {{
-            background:{panel};
-            border:1px solid {border};
-            border-radius:17px;
-            padding:.75rem .85rem;
-            box-shadow:0 8px 22px {shadow};
-        }}
-
-        [data-testid="stCameraInput"] {{
-            background:{panel};
-            border:1px solid {border};
-            border-radius:17px;
-            padding:.75rem .85rem;
-        }}
-
-        .mode-icon {{
-            height:38px !important;
-            font-size:1.35rem !important;
-            border:1px solid {border};
-            border-bottom:0;
-            border-radius:14px 14px 0 0;
-            background:{panel_soft};
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            padding:.45rem 0 !important;
-        }}
-
-        .mode-caption {{
-            border:1px solid {border};
-            border-top:0;
-            border-radius:0 0 14px 14px;
-            padding:.48rem .4rem !important;
-            margin-top:0 !important;
-            background:{panel_soft};
-            font-size:.67rem !important;
-        }}
-
-        .margin-heading {{
-            font-size:.78rem !important;
-            color:{muted} !important;
-            text-transform:uppercase;
-            letter-spacing:.07em;
-        }}
-
-        /* esconder visual viejo de hero/stats si quedara algún residuo */
-        .hero-grid,
-        .hero-card,
-        .stats-card {{
-            display:none !important;
-        }}
-
-        /* botones más tipo app */
-        .stButton button[kind="primary"] {{
-            background:linear-gradient(135deg,#1768e8,#0c7cf5) !important;
-            min-height:44px !important;
-        }}
-
-        /* Responsive */
-        @media(max-width:1050px) {{
-            .modern-kpi-grid {{
-                grid-template-columns:repeat(2,minmax(0,1fr));
-            }}
-        }}
-
-        @media(max-width:700px) {{
-            [data-testid="stSidebar"] {{
-                width:250px !important;
-            }}
-
-            .modern-page-header {{
-                align-items:flex-start;
-            }}
-
-            .modern-header-logo {{
-                display:none;
-            }}
-
-            .modern-page-header h1 {{
-                font-size:1.65rem !important;
-            }}
-
-            .modern-kpi-grid {{
-                grid-template-columns:1fr 1fr;
-                gap:.55rem;
-            }}
-
-            .modern-kpi-card {{
-                min-height:92px;
-                padding:.78rem;
-            }}
-
-            .modern-kpi-icon {{
-                width:38px;
-                height:38px;
-                flex-basis:38px;
-            }}
-
-            .modern-kpi-value {{
-                font-size:1.25rem;
-            }}
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-aplicar_layout_v2()
-
-
-# =========================================================
-# TEMA V3 — DASHBOARD COMPACTO
-# =========================================================
-def aplicar_layout_v3():
-    dark = bool(st.session_state.get("modo_oscuro", False))
-    bg = "#07111e" if dark else "#f7f9fc"
-    panel = "#0d1b2c" if dark else "#ffffff"
-    panel2 = "#0b1726" if dark else "#fbfdff"
-    border = "#233750" if dark else "#dbe5f0"
-    txt = "#eef5ff" if dark else "#10203a"
-    muted = "#9aabc0" if dark else "#62728a"
-    shadow = "rgba(0,0,0,.22)" if dark else "rgba(39,67,104,.08)"
-
-    st.markdown(
-        f"""
-<style>
-.stApp {{background:{bg} !important;}}
-.block-container {{max-width:1500px !important;padding:1.15rem 1.35rem 2rem 1.35rem !important;}}
-[data-testid="stHeader"] {{background:transparent !important;}}
-
-[data-testid="stSidebar"] {{
-  width:228px !important;
-  background:{"linear-gradient(180deg,#07172b,#061321)" if dark else "#ffffff"} !important;
-  border-right:1px solid {border} !important;
-  box-shadow:none !important;
-}}
-.v3-side-brand {{padding:.55rem .35rem 1.1rem .35rem;}}
-.v3-side-brand img {{width:150px;max-height:52px;object-fit:contain;object-position:left center;}}
-.v3-side-label {{
-  color:{"#8297b2" if dark else "#44556d"};font-size:.68rem;font-weight:850;
-  letter-spacing:.08em;margin:.25rem .35rem .45rem .35rem;
-}}
-.v3-side-divider {{height:1px;background:{border};margin:1.1rem .25rem 1rem .25rem;}}
-.v3-side-bottom-gap {{height:1rem;}}
-[data-testid="stSidebar"] .stRadio div[role="radiogroup"] {{gap:.18rem !important;}}
-[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label {{
-  border-radius:9px !important;padding:.52rem .65rem !important;
-}}
-[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label:has(input:checked) {{
-  background:linear-gradient(135deg,#1d67e8,#124ed5) !important;box-shadow:none !important;
-}}
-[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label p {{font-size:.79rem !important;}}
-[data-testid="stSidebar"] [data-testid="stToggle"] {{
-  border:none !important;background:transparent !important;padding:.3rem .35rem !important;
-}}
-
-.v3-page-title h1 {{
-  font-size:1.75rem !important;margin:0 !important;color:{txt} !important;letter-spacing:-.035em;
-}}
-.v3-page-title p {{margin:.22rem 0 0 0;color:{muted};font-size:.82rem;}}
-.v3-top-label {{font-size:.66rem;font-weight:780;color:{txt};margin:.1rem 0 .28rem .12rem;}}
-.v3-top-itbis {{
-  height:70px;display:flex;flex-direction:column;justify-content:center;padding:.55rem .7rem;
-  border-radius:10px;border:1px solid rgba(59,130,246,.23);
-  background:{"#0b2445" if dark else "#edf5ff"};
-}}
-.v3-top-itbis span {{color:{"#7fb2ff" if dark else "#1d4ed8"};font-size:.64rem;font-weight:750;}}
-.v3-top-itbis strong {{color:{"#53a8ff" if dark else "#1d4ed8"};font-size:1.28rem;margin-top:.15rem;}}
-
-.v3-kpi-grid {{
-  display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.7rem;margin:1rem 0 .85rem 0;
-}}
-.v3-kpi-card {{
-  min-height:100px;display:flex;align-items:center;gap:.72rem;padding:.85rem .82rem;
-  border:1px solid {border};border-radius:12px;background:{panel};box-shadow:0 5px 16px {shadow};
-}}
-.v3-kpi-icon {{
-  width:42px;height:42px;flex:0 0 42px;display:flex;align-items:center;justify-content:center;
-  border-radius:50%;font-size:1rem;font-weight:900;
-}}
-.v3-kpi-icon.blue {{background:rgba(37,99,235,.13);}}
-.v3-kpi-icon.green {{background:rgba(34,197,94,.13);}}
-.v3-kpi-icon.purple {{background:rgba(139,92,246,.13);}}
-.v3-kpi-icon.orange {{background:rgba(249,115,22,.13);}}
-.v3-kpi-icon.teal {{background:rgba(20,184,166,.13);}}
-.v3-kpi-card span {{display:block;color:{muted};font-size:.65rem;font-weight:720;}}
-.v3-kpi-card strong {{
-  display:block;color:{txt};font-size:1.15rem;line-height:1.18;margin:.16rem 0;
-  letter-spacing:-.02em;white-space:nowrap;
-}}
-.v3-kpi-card small {{color:{muted};font-size:.61rem;}}
-
-[data-testid="stVerticalBlockBorderWrapper"] {{
-  border-color:{border} !important;border-radius:12px !important;background:{panel} !important;
-  box-shadow:0 5px 16px {shadow};
-}}
-.v3-panel-title {{color:{txt};font-size:.86rem;font-weight:850;margin:0 0 .55rem 0;}}
-.v3-drop-heading {{
-  display:flex;align-items:center;gap:.7rem;padding:.55rem .65rem;border:1px dashed {border};
-  border-radius:9px;background:{panel2};margin-bottom:.45rem;
-}}
-.v3-cloud {{
-  width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:50%;
-  background:rgba(37,99,235,.12);
-}}
-.v3-drop-heading b {{display:block;color:{txt};font-size:.72rem;}}
-.v3-drop-heading span {{display:block;color:{muted};font-size:.61rem;margin-top:.1rem;}}
-[data-testid="stFileUploaderDropzone"] {{
-  min-height:52px !important;padding:.45rem .65rem !important;border-radius:8px !important;
-  border-color:{border} !important;background:{panel2} !important;
-}}
-.v3-config-label {{margin:.85rem 0 .16rem 0;color:{txt};font-size:.69rem;font-weight:850;}}
-.v3-itbis-box {{
-  height:64px;display:flex;flex-direction:column;justify-content:center;border:1px solid rgba(59,130,246,.22);
-  border-radius:8px;padding:.42rem .52rem;background:{"#0b2445" if dark else "#eff6ff"};margin-top:1.55rem;
-}}
-.v3-itbis-box span {{font-size:.58rem;color:{"#8ab8f7" if dark else "#295eb2"};}}
-.v3-itbis-box strong {{font-size:1.05rem;color:{"#55a7ff" if dark else "#1d4ed8"};}}
-.v3-valid {{
-  margin:.45rem 0;padding:.45rem .55rem;border-radius:8px;font-size:.64rem;color:#14833b;
-  border:1px solid rgba(34,197,94,.25);background:rgba(34,197,94,.07);
-}}
-.v3-invalid {{
-  margin:.45rem 0;padding:.45rem .55rem;border-radius:8px;font-size:.64rem;color:#b42318;
-  border:1px solid rgba(239,68,68,.25);background:rgba(239,68,68,.07);
-}}
-
-[data-testid="stDataFrame"] {{
-  border:1px solid {border} !important;border-radius:9px !important;overflow:hidden;background:{panel} !important;
-}}
-[data-testid="stDataFrame"] * {{font-size:.72rem !important;}}
-.stButton button,.stDownloadButton button {{
-  min-height:36px !important;border-radius:8px !important;font-size:.72rem !important;
-}}
-.stButton button[kind="primary"] {{background:linear-gradient(135deg,#1e63df,#144dd4) !important;}}
-
-.hero-grid,.hero-card,.stats-card,.modern-page-header,.modern-kpi-grid {{display:none !important;}}
-
-@media(max-width:1100px) {{
-  .v3-kpi-grid {{grid-template-columns:repeat(2,minmax(0,1fr));}}
-}}
-@media(max-width:700px) {{
-  .block-container {{padding:.65rem .7rem 1.5rem .7rem !important;}}
-  .v3-page-title h1 {{font-size:1.42rem !important;}}
-  .v3-kpi-grid {{grid-template-columns:1fr 1fr;gap:.45rem;}}
-  .v3-kpi-card {{min-height:82px;padding:.65rem;}}
-  .v3-kpi-card strong {{font-size:.94rem;}}
-  .v3-kpi-icon {{width:34px;height:34px;flex-basis:34px;}}
-}}
-
-/* Contraste final del sidebar: prevalece sobre estilos heredados */
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label p,
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label [data-testid="stMarkdownContainer"],
-[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {{
-  color:{{"#dbeafe" if dark else "#17324d"}} !important;
-  opacity:1 !important;
-  font-weight:750 !important;
-}}
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) p,
-[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) [data-testid="stMarkdownContainer"] {{
-  color:#ffffff !important;
-}}
-[data-testid="stSidebar"] .stButton button {{
-  color:{{"#eef6ff" if dark else "#17324d"}} !important;
-  opacity:1 !important;
-}}
-.v3-formula-only {{
-  color:{muted};
-  font-size:.64rem;
-  line-height:1.35;
-  padding:.35rem .1rem .15rem .1rem;
-}}
-.v3-process-top {{
-  height:.18rem;
-}}
-</style>
-""",
-        unsafe_allow_html=True,
-    )
-
-
-aplicar_layout_v3()
-
-
-# =========================================================
-# V4 — ENCABEZADO + SIDEBAR LEGIBLE
-# =========================================================
-def aplicar_layout_v4():
-    dark = bool(st.session_state.get("modo_oscuro", False))
-
-    sidebar_text = "#e7f0fb" if dark else "#17324d"
-    sidebar_muted = "#a8bdd4" if dark else "#52677f"
-    header_bg = (
-        "linear-gradient(135deg,#0b1d33,#102c4c)"
-        if dark
-        else "linear-gradient(135deg,#ffffff,#eef5ff)"
-    )
-    header_border = "#233750" if dark else "#dbe5f0"
-    header_text = "#eef5ff" if dark else "#10203a"
-    header_muted = "#9aabc0" if dark else "#62728a"
-    header_status_bg = "rgba(255,255,255,.05)" if dark else "#ffffff"
-    header_shadow = "rgba(0,0,0,.22)" if dark else "rgba(39,67,104,.08)"
-    sidebar_bg = (
-        "linear-gradient(180deg,#07172b,#061321)"
-        if dark
-        else "linear-gradient(180deg,#f7fbff,#edf4fb)"
-    )
-
-    st.markdown(
-        f"""
-<style>
-/* Quitar barra superior nativa y espacio vacío */
-[data-testid="stHeader"] {{
-  display:none !important;
-  height:0 !important;
-}}
-[data-testid="stToolbar"] {{
-  display:none !important;
-}}
-.block-container {{
-  padding-top:.75rem !important;
-}}
-
-/* Sidebar */
-[data-testid="stSidebar"] {{
-  background:{sidebar_bg} !important;
-  opacity:1 !important;
-}}
-
-/* Forzar texto visible en todas las opciones */
-[data-testid="stSidebar"] div[role="radiogroup"] label p,
-[data-testid="stSidebar"] div[role="radiogroup"] label span,
-[data-testid="stSidebar"] div[role="radiogroup"] label div {{
-  color:{sidebar_text} !important;
-  -webkit-text-fill-color:{sidebar_text} !important;
-  opacity:1 !important;
-  font-weight:760 !important;
-}}
-
-[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) p,
-[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) span,
-[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) div {{
-  color:#ffffff !important;
-  -webkit-text-fill-color:#ffffff !important;
-  opacity:1 !important;
-  font-weight:850 !important;
-}}
-
-/* Streamlit baja la opacidad de opciones deshabilitadas */
-[data-testid="stSidebar"] [aria-disabled="true"],
-[data-testid="stSidebar"] [disabled],
-[data-testid="stSidebar"] label:has(input:disabled) {{
-  opacity:1 !important;
-  filter:none !important;
-}}
-
-[data-testid="stSidebar"] label:has(input:disabled) p,
-[data-testid="stSidebar"] label:has(input:disabled) span,
-[data-testid="stSidebar"] label:has(input:disabled) div {{
-  color:{sidebar_muted} !important;
-  -webkit-text-fill-color:{sidebar_muted} !important;
-  opacity:1 !important;
-  font-weight:700 !important;
-}}
-
-/* Texto de apariencia */
-[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
-[data-testid="stSidebar"] [data-testid="stToggle"] p,
-[data-testid="stSidebar"] [data-testid="stToggle"] span {{
-  color:{sidebar_text} !important;
-  -webkit-text-fill-color:{sidebar_text} !important;
-  opacity:1 !important;
-  font-weight:760 !important;
-}}
-
-/* Botón reiniciar */
-[data-testid="stSidebar"] .stButton button,
-[data-testid="stSidebar"] .stButton button p {{
-  color:{sidebar_text} !important;
-  -webkit-text-fill-color:{sidebar_text} !important;
-  opacity:1 !important;
-  font-weight:800 !important;
-}}
-
-/* Labels MENÚ / APARIENCIA */
-.v3-side-label {{
-  color:{sidebar_muted} !important;
-  opacity:1 !important;
-}}
-
-/* Encabezado WilPOS */
-.v4-app-header {{
-  width:100%;
-  min-height:50px;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:1rem;
-  padding:.42rem .72rem;
-  margin:0 0 .35rem 0;
-  border-radius:14px;
-  border:1px solid {header_border};
-  background:{header_bg};
-  box-shadow:0 7px 22px {header_shadow};
-}}
-
-.v4-header-copy {{
-  display:flex;
-  flex-direction:column;
-  min-width:0;
-}}
-
-.v4-header-copy strong {{
-  color:{header_text} !important;
-  font-size:.93rem;
-  font-weight:900;
-  letter-spacing:-.015em;
-}}
-
-.v4-header-copy span {{
-  color:{header_muted} !important;
-  font-size:.66rem;
-  margin-top:.08rem;
-}}
-
-.v4-header-status {{
-  display:flex;
-  align-items:center;
-  gap:.45rem;
-  padding:.42rem .62rem;
-  border-radius:999px;
-  color:{header_text} !important;
-  border:1px solid {header_border};
-  background:{header_status_bg};
-  font-size:.66rem;
-  font-weight:760;
-  white-space:nowrap;
-}}
-
-.v4-status-dot {{
-  width:7px;
-  height:7px;
-  border-radius:50%;
-  background:#22c55e;
-  box-shadow:0 0 0 4px rgba(34,197,94,.12);
-}}
-
-@media(max-width:700px) {{
-  .v4-app-header {{
-    min-height:66px;
-    padding:.65rem .7rem;
-  }}
-  .v4-header-copy span {{
-    display:none;
-  }}
-  .v4-header-status {{
-    font-size:.58rem;
-    padding:.34rem .45rem;
-  }}
-}}
-</style>
-""",
-        unsafe_allow_html=True,
-    )
-
-
-aplicar_layout_v4()
-
-# Override final: elimina la franja superior reservada por Streamlit.
-st.markdown(
-    """
-<style>
-html, body {
-  margin-top:0 !important;
-  padding-top:0 !important;
-}
-[data-testid="stHeader"],
-[data-testid="stToolbar"],
-[data-testid="stDecoration"] {
-  display:none !important;
-  height:0 !important;
-  min-height:0 !important;
-}
-[data-testid="stAppViewContainer"],
-[data-testid="stAppViewContainer"] > .main,
-[data-testid="stMain"],
-section.main {
-  padding-top:0 !important;
-  margin-top:0 !important;
-}
-[data-testid="stMainBlockContainer"],
-.main .block-container,
-.block-container {
-  padding-top:.20rem !important;
-  margin-top:0 !important;
-}
-.v4-app-header {
-  min-height:50px !important;
-  padding:.42rem .72rem !important;
-  margin-top:0 !important;
-  margin-bottom:.35rem !important;
-}
-
-/* Solo el logo del sidebar debe mostrarse en la navegación */
-.v3-side-brand img {
-  display:block !important;
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-
-
 
 
 
@@ -5186,34 +3790,72 @@ def _normalizar_ocr(texto):
     return re.sub(r"\s+", " ", texto).strip()
 
 def _ocr_imagen(image):
-    """
-    Compatibilidad con funciones antiguas.
-    Usa el OCR mejorado cuando ya está disponible.
-    """
+    """OCR para fotos de facturas: corrige orientación y prueba varios modos de página."""
     if not OCR_DISPONIBLE:
         return ""
 
-    # _ocr_multilectura se define más abajo y se resuelve al ejecutar la función.
     try:
-        return _ocr_multilectura(image)
+        image = ImageOps.exif_transpose(image).convert("RGB")
     except Exception:
         try:
-            image = ImageOps.exif_transpose(image)
+            image = image.convert("RGB")
         except Exception:
             pass
 
-        textos = []
-        for psm in (3, 4, 6, 11, 12):
-            try:
-                t = pytesseract.image_to_string(
-                    image,
-                    config=f"--oem 3 --psm {psm}",
-                )
+    # Mantener más resolución porque las tablas tienen tipografía pequeña.
+    try:
+        max_lado = 3200
+        mayor = max(image.size)
+        if mayor > max_lado:
+            factor = max_lado / mayor
+            image = image.resize(
+                (max(1, int(image.width * factor)), max(1, int(image.height * factor)))
+            )
+    except Exception:
+        pass
+
+    def _puntuar(texto):
+        t = str(texto or "")
+        n = _normalizar_ocr(t)
+        palabras_clave = (
+            "factura", "descripcion", "codigo", "cantidad", "precio", "importe",
+            "itbis", "subtotal", "total", "ncf", "material", "item", "ean",
+            "monto neto", "precio neto", "codigo barra"
+        )
+        score = len(re.findall(r"[A-Za-zÁÉÍÓÚáéíóúÑñ]{3,}", t))
+        score += 35 * sum(1 for x in palabras_clave if x in n)
+        score += 4 * len(re.findall(r"\b\d[\d.,]{2,}\b", t))
+        return score
+
+    # Muchas fotos de WhatsApp llegan físicamente giradas aunque el EXIF parezca correcto.
+    candidatos = []
+    for angulo in (0, 90, 270, 180):
+        try:
+            img = image if angulo == 0 else image.rotate(angulo, expand=True)
+            textos = []
+            for psm in (6, 4, 11):
+                try:
+                    t = pytesseract.image_to_string(
+                        img,
+                        config=f"--oem 3 --psm {psm} -l spa+eng",
+                    )
+                except Exception:
+                    try:
+                        t = pytesseract.image_to_string(img, config=f"--oem 3 --psm {psm}")
+                    except Exception:
+                        t = ""
                 if t and t.strip():
                     textos.append(t)
-            except Exception:
-                pass
-        return "\n".join(textos)
+            combinado = "\n".join(textos)
+            candidatos.append((_puntuar(combinado), combinado))
+        except Exception:
+            continue
+
+    if not candidatos:
+        return ""
+
+    candidatos.sort(key=lambda x: x[0], reverse=True)
+    return candidatos[0][1]
 
 
 # =========================================================
@@ -5245,16 +3887,6 @@ def _numero_documento_a_float(valor):
             s = ".".join(partes)
         else:
             s = "".join(partes)
-
-    # OCR puede devolver "13.062.60": conservar el último separador como decimal.
-    if s.count(".") > 1 and "," not in s:
-        partes = s.split(".")
-        if len(partes[-1]) == 2:
-            s = "".join(partes[:-1]) + "." + partes[-1]
-    elif s.count(",") > 1 and "." not in s:
-        partes = s.split(",")
-        if len(partes[-1]) == 2:
-            s = "".join(partes[:-1]) + "." + partes[-1]
 
     return float(s)
 
@@ -5313,7 +3945,6 @@ def _extraer_proveedor_generico(lineas):
 
 def _extraer_numero_documento_generico(texto):
     patrones = [
-        r"(?im)\bfactura(?:\s+de\s+credito\s+fiscal)?(?:\s+electronica)?\s*[:#\-]?\s*([A-Z0-9\-]{4,})",
         r"(?im)\b(?:factura|fact\.?|no\.?\s*factura|n[uú]mero\s+factura)\s*[:#\-]?\s*([A-Z0-9\-]{4,})",
         r"(?im)\b(?:cotizaci[oó]n|cotizacion)\s*(?:no\.?|n[uú]mero)?\s*[:#\-]?\s*([A-Z0-9\-]{4,})",
         r"(?im)^\s*No\.\s*:\s*([A-Z0-9\-]{4,})\s*$",
@@ -5345,269 +3976,142 @@ def _extraer_fecha_generica(texto):
 
 
 def _buscar_header_productos(lineas):
-    """
-    Identifica una línea de encabezado de tabla por significado, no por proveedor.
-    """
+    """Localiza encabezados aunque el proveedor use nombres distintos para las columnas."""
+    aliases_desc = ("descripcion", "detalle", "producto", "articulo")
+    aliases_cant = ("cantidad", "cant", "qty")
+    aliases_precio = ("precio", "importe", "valor", "monto", "total posicion", "imp neto")
+    aliases_codigo = ("codigo", "item", "material", "ean", "barra", "sap")
+
+    mejor = None
+    mejor_score = 0
     for idx, raw in enumerate(lineas):
         n = _normalizar_ocr(raw)
-
-        tiene_desc = any(x in n for x in ("descripcion", "detalle", "producto", "articulo", "descr"))
-        tiene_cant = any(x in n for x in ("cantidad", "cant.", " cant ", "qty"))
-        tiene_precio = any(x in n for x in ("precio", "p.unit", "precio unit", "importe", "total"))
-        tiene_barra = any(x in n for x in ("codigo de barras", "barras", "barcode"))
-
-        if tiene_desc and tiene_cant and tiene_precio:
-            return idx
-        if tiene_barra and tiene_desc and tiene_precio:
-            return idx
-
-    return None
+        score = 0
+        score += 2 if any(x in n for x in aliases_desc) else 0
+        score += 1 if any(x in n for x in aliases_cant) else 0
+        score += 1 if any(x in n for x in aliases_precio) else 0
+        score += 1 if any(x in n for x in aliases_codigo) else 0
+        if score > mejor_score:
+            mejor, mejor_score = idx, score
+    return mejor if mejor_score >= 3 else None
 
 
-
-def _extraer_empaque_desde_tamano(texto):
-    """
-    Ej.: 6/75 CL -> 6 unidades por caja; 12/70 CL -> 12.
-    Si no hay presentación múltiple, devuelve 1.
-    """
-    t = str(texto or "").upper()
-    m = re.search(r"\b(\d{1,3})\s*/\s*\d+(?:[.,]\d+)?\s*(?:CL|ML|L)\b", t)
-    if m:
-        try:
-            return max(1, int(m.group(1)))
-        except Exception:
-            pass
-    return 1
+def _es_linea_fin_tabla(linea):
+    n = _normalizar_ocr(linea)
+    return bool(re.match(
+        r"^(subtotal|total bruto|total descuento|importe bruto|importe neto|"
+        r"itbis total|notas|observaciones|factura aceptada|firma|recibido por|"
+        r"conductor|peso bruto|bultos|codigo seguridad)\b", n
+    ))
 
 
-def _parsear_linea_distribuidor_con_barcode(linea):
-    """
-    Reconoce tablas del tipo:
-      1 CAJA 3633 841... 12/75 CL. VINO ... 3,840.00 10% 384.00 18% 622.08 4,078.08
-
-    Devuelve costo SIN ITBIS por línea.
-    """
-    s = " ".join(str(linea or "").split()).strip()
-    if not s:
-        return None
-
-    # Errores OCR frecuentes en la columna UNID.
-    s = re.sub(r"(?i)\bI?CAJA\b", "CAJA", s)
-    s = re.sub(r"(?i)(\d)(CAJA|CJA|BOT|UND)\b", r"\1 \2", s)
-
-    # Código de barras real: 8 a 14 dígitos.
-    # OCR suele confundir el 8 inicial con B.
-    s = re.sub(
-        r"(?<![A-Za-z0-9])B(?=\d{7,13}\b)",
-        "8",
-        s,
-        flags=re.IGNORECASE,
-    )
-
-    m_bar = re.search(r"\b(\d{8,14})\b", s)
-    if m_bar:
-        barcode = m_bar.group(1)
-
-        # OCR puede perder el 8 inicial: 410591003397 -> 8410591003397.
-        # Solo se aplica a cadenas de 12 dígitos que comienzan por 4.
-        if len(barcode) == 12 and barcode.startswith("4"):
-            candidato_barcode = "8" + barcode
-            if len(candidato_barcode) == 13:
-                barcode = candidato_barcode
-
-        antes = s[:m_bar.start()].strip()
-        despues = s[m_bar.end():].strip()
-    else:
-        m_sep = re.search(
-            r"(?<!\d)((?:\d[\s\-]*){8,14})(?!\d)",
-            s,
-        )
-        if not m_sep:
-            return None
-        barcode = re.sub(r"\D", "", m_sep.group(1))
-        if not (8 <= len(barcode) <= 14):
-            return None
-        antes = s[:m_sep.start()].strip()
-        despues = s[m_sep.end():].strip()
-
-    # Debe haber un código interno cerca del barcode.
-    internos = re.findall(r"\b(\d{3,7})\b", antes)
-    if not internos:
-        return None
-    codigo_interno = internos[-1]
-
-    # Cantidad + unidad antes del código interno. OCR tolerante.
-    cantidad = 1.0
-    unidad_txt = "UND"
-    m_cant = re.search(
-        r"(?i)(\d+(?:[.,]\d+)?)\s+"
-        r"(CAJA|CJA|CJ|BOT(?:ELLA)?S?|UND|UNID(?:AD(?:ES)?)?|PAQ|PACK|PCS?)"
-        r"(?:\s+\S+)?\s*$",
-        antes[:antes.rfind(codigo_interno)].strip(),
-    )
-    if m_cant:
-        try:
-            cantidad = _numero_documento_a_float(m_cant.group(1))
-            unidad_txt = m_cant.group(2).upper()
-        except Exception:
-            cantidad = 1.0
-
-    # Localizar importes monetarios con decimales. El último es importe final.
-    money_matches = list(re.finditer(r"\b\d{1,3}(?:[.,]\d{3})*[.,]\d{2}\b", despues))
-    if len(money_matches) < 2:
-        return None
-
-    primer_money = money_matches[0]
-    descripcion_raw = despues[:primer_money.start()].strip(" -|")
-
-    # Limpiar tamaño inicial y número de columna PREPARADO/DIGITADO al final.
-    descripcion = re.sub(
-        r"(?i)^\s*\d{1,3}\s*/\s*\d+(?:[.,]\d+)?\s*(?:CL|ML|L)\.?\s*",
-        "",
-        descripcion_raw,
-    )
-    descripcion = re.sub(r"(?i)^\s*\d+(?:[.,]\d+)?\s*(?:CL|ML|L)\.?\s*", "", descripcion)
-    descripcion = re.sub(r"\s+\d{1,3}\s*$", "", descripcion).strip(" -|")
-
-    if len(descripcion) < 3:
-        return None
-
-    valores = []
-    for mm in money_matches:
-        try:
-            valores.append(_numero_documento_a_float(mm.group(0)))
-        except Exception:
-            pass
-    if len(valores) < 2:
-        return None
-
-    importe_final = float(valores[-1])
-
-    # Detectar tasa ITBIS en el texto posterior.
-    tasas = re.findall(r"\b(18|16|0)\s*%", despues)
-    tasa_itbis = (float(tasas[-1]) / 100.0) if tasas else 0.18
-
-    # Si existe valor de ITBIS separado, el penúltimo monetario suele ser ITBIS.
-    # Costo neto = importe final - ITBIS. Es más seguro que dividir cuando hay descuento.
-    costo_neto = importe_final
-    if tasa_itbis > 0 and len(valores) >= 3:
-        posible_itbis = float(valores[-2])
-        posible_neto = importe_final - posible_itbis
-        if posible_neto > 0:
-            # Validar relación aproximada impuesto/neto.
-            tasa_calc = posible_itbis / posible_neto
-            if abs(tasa_calc - tasa_itbis) <= 0.035:
-                costo_neto = posible_neto
-            else:
-                costo_neto = importe_final / (1.0 + tasa_itbis)
-        else:
-            costo_neto = importe_final / (1.0 + tasa_itbis)
-    elif tasa_itbis > 0:
-        costo_neto = importe_final / (1.0 + tasa_itbis)
-
-    # Presentación/empaque a partir de 6/75 CL, 12/70 CL, etc.
-    empaque = _extraer_empaque_desde_tamano(descripcion_raw)
-
-    # Si factura dice BOT/BOTELLA, la cantidad ya está en unidades físicas.
-    if unidad_txt.startswith("BOT") or unidad_txt.startswith("UND"):
-        empaque = 1
-
-    return {
-        "codigo": barcode,
-        "codigo_interno": codigo_interno,
-        "nombre": descripcion,
-        "cant": float(cantidad),
-        "emp": int(empaque),
-        "costo_total": round(float(costo_neto), 4),
-        "itbis": float(tasa_itbis),
-        "cat": _inferir_categoria_generica(descripcion),
-        "unidad_original": unidad_txt,
-        "costo_incluia_itbis": False,
-        "itbis_detectado": "separado_por_linea",
-    }
+def _tokens_numericos(linea):
+    return re.findall(r"(?<![A-Za-z])[-+]?\d[\d.,]*(?:\s*%)?", str(linea or ""))
 
 
 def _parsear_linea_producto_generica(linea):
     """
-    Parseo flexible de líneas comunes:
-      CODIGO DESCRIPCION CANTIDAD UNIDAD PRECIO IMPORTE
-      CODIGO DESCRIPCION CANTIDAD PRECIO IMPORTE
+    Parser tolerante para OCR de tablas. No depende del proveedor.
+    Busca: código al inicio, descripción textual, cantidad y valores monetarios.
     """
     linea = " ".join(str(linea or "").split()).strip()
-    if not linea:
+    if not linea or _es_linea_fin_tabla(linea):
         return None
 
-    # Ignorar totales y secciones posteriores.
-    if re.match(
-        r"(?i)^(subtotal|itbis|i\.?t\.?b\.?i\.?s|impuesto|total|comentarios?|"
-        r"notas?|observaciones?|pagos?|cuentas?\s+bancarias|entregas?|"
-        r"devoluciones?|validez|representante|firma)\b",
-        linea,
-    ):
+    # Debe comenzar con un identificador de producto razonable.
+    m_codigo = re.match(r"^\s*([A-Z0-9][A-Z0-9./_-]{2,})\s+(.+)$", linea, flags=re.I)
+    if not m_codigo:
         return None
 
-    num = r"[-+]?\d[\d.,]*"
-    unidad = r"(?:UND|UDS?|UNID(?:AD(?:ES)?)?|EA|PCS?|PZA|CAJAS?|CJ|PAQ(?:UETE)?S?|PACK|LB|KG|LT|L|ML|GAL|SERV)"
+    codigo = m_codigo.group(1).strip()
+    resto = m_codigo.group(2).strip()
 
-    patrones = [
-        # Código + descripción + cantidad + unidad + precio + importe
-        re.compile(
-            rf"^\s*(\S+)\s+(.+?)\s+({num})\s+({unidad})\s+({num})\s+({num})\s*$",
-            re.IGNORECASE,
-        ),
-        # Código + descripción + cantidad + precio + importe
-        re.compile(
-            rf"^\s*(\S+)\s+(.+?)\s+({num})\s+({num})\s+({num})\s*$",
-            re.IGNORECASE,
-        ),
-    ]
+    # Evitar encabezados y metadatos.
+    nc = _normalizar_ocr(codigo + " " + resto)
+    if any(nc.startswith(x) for x in (
+        "codigo descripcion", "material codigo", "item descripcion",
+        "ncf ", "rnc ", "fecha ", "pagina "
+    )):
+        return None
 
-    for i, patron in enumerate(patrones):
-        m = patron.match(linea)
-        if not m:
+    nums = list(re.finditer(r"[-+]?\d[\d.,]*(?:\s*%)?", resto))
+    if len(nums) < 2:
+        return None
+
+    # La descripción termina antes del primer número que parece columna de cantidad/precio.
+    # En OCR algunas descripciones contienen 750ML/12X70; por eso preferimos el primer
+    # número separado por espacios y con texto suficiente delante.
+    corte = None
+    for mm in nums:
+        antes = resto[:mm.start()].strip()
+        if len(re.sub(r"[^A-Za-zÁÉÍÓÚáéíóúÑñ]", "", antes)) >= 4:
+            corte = mm.start()
+            break
+    if corte is None:
+        return None
+
+    nombre = resto[:corte].strip(" -|")
+    cola = resto[corte:]
+    valores_txt = re.findall(r"[-+]?\d[\d.,]*(?:\s*%)?", cola)
+    valores = []
+    for v in valores_txt:
+        if "%" in v:
             continue
-
         try:
-            if i == 0:
-                codigo, nombre, cantidad, unidad_txt, precio, importe = m.groups()
-            else:
-                codigo, nombre, cantidad, precio, importe = m.groups()
-                unidad_txt = "UND"
-
-            cantidad = _numero_documento_a_float(cantidad)
-            precio = _numero_documento_a_float(precio)
-            importe = _numero_documento_a_float(importe)
-
-            if cantidad <= 0 or importe < 0:
-                return None
-
-            # Control de coherencia. Se tolera redondeo/impuestos/descuentos moderados.
-            esperado = cantidad * precio
-            if esperado > 0:
-                diferencia = abs(importe - esperado) / max(abs(importe), abs(esperado), 1)
-                if diferencia > 0.35:
-                    return None
-
-            codigo = str(codigo).strip()
-            nombre = str(nombre).strip(" -")
-
-            if len(nombre) < 2:
-                return None
-
-            return {
-                "codigo": codigo,
-                "nombre": nombre,
-                "cant": float(cantidad),
-                "emp": 1,
-                "costo_total": float(importe),
-                "itbis": 0.18,
-                "cat": _inferir_categoria_generica(nombre),
-                "unidad_original": unidad_txt,
-            }
+            valores.append(_numero_documento_a_float(v))
         except Exception:
-            continue
+            pass
 
-    return None
+    if len(valores) < 2 or len(nombre) < 3:
+        return None
+
+    # Primera cifra suele ser cantidad. En tablas con UND antes de cantidad sigue siendo
+    # la primera cifra útil después de la descripción.
+    cantidad = valores[0]
+    if cantidad <= 0 or cantidad > 100000:
+        return None
+
+    # El costo neto de línea suele ser el último valor antes de ITBIS/total.
+    # Elegimos por coherencia cantidad * precio y preferimos importes SIN ITBIS.
+    candidatos = [v for v in valores[1:] if v >= 0]
+    if not candidatos:
+        return None
+
+    precio_unit = None
+    costo_total = None
+    mejor_error = 10**18
+    for precio in candidatos:
+        esperado = cantidad * precio
+        for imp in candidatos:
+            if imp <= 0:
+                continue
+            err = abs(esperado - imp) / max(abs(imp), abs(esperado), 1)
+            if err < mejor_error:
+                mejor_error = err
+                precio_unit = precio
+                costo_total = imp
+
+    if costo_total is None:
+        costo_total = candidatos[-1]
+
+    # Si no hubo pareja coherente, tomar un importe intermedio/grande, evitando el total
+    # con ITBIS cuando hay varias columnas monetarias.
+    if mejor_error > 0.18:
+        positivos = [v for v in candidatos if v > 0]
+        if not positivos:
+            return None
+        costo_total = positivos[-2] if len(positivos) >= 2 else positivos[-1]
+
+    return {
+        "codigo": codigo,
+        "nombre": nombre,
+        "cant": float(cantidad),
+        "emp": 1,
+        "costo_total": float(costo_total),
+        "itbis": 0.18,
+        "cat": _inferir_categoria_generica(nombre),
+        "unidad_original": "UND",
+    }
 
 
 def _extraer_productos_genericos(texto):
@@ -5616,235 +4120,32 @@ def _extraer_productos_genericos(texto):
         return []
 
     header_idx = _buscar_header_productos(lineas)
-    if header_idx is None:
-        # OCR puede fragmentar la cabecera. Buscarla en ventanas de líneas.
-        header_idx = 0
-        encontrada = False
-        for i in range(max(0, len(lineas) - 4)):
-            bloque = " ".join(lineas[i:i+4])
-            n = _normalizar_ocr(bloque)
-            if (
-                ("descripcion" in n or "descr" in n)
-                and ("precio" in n or "importe" in n)
-                and ("codigo" in n or "barras" in n)
-            ):
-                header_idx = i
-                encontrada = True
-                break
-        if not encontrada:
-            # Incluso sin cabecera perfecta, intentar detectar filas por barcode.
-            header_idx = 0
 
+    # Si OCR destruyó el encabezado, también exploramos todo el documento.
+    inicio = (header_idx + 1) if header_idx is not None else 0
     productos = []
-    firmas_productos = set()
-    i = header_idx + 1
+    vistos = set()
+    fallos = 0
 
-    def agregar_si_valido(prod):
-        if not prod:
-            return False
-        firma = (
-            _codigo_producto_canonico(prod.get("codigo", "")),
-            _nombre_producto_canonico(prod.get("nombre", "")),
-            round(float(prod.get("costo_total", 0) or 0), 2),
-        )
-        if firma in firmas_productos:
-            return False
-        firmas_productos.add(firma)
-        productos.append(prod)
-        return True
-
-    while i < len(lineas):
-        linea = lineas[i]
-
-        # No cortar demasiado pronto por "TOTAL" si todavía estamos en una
-        # lectura OCR combinada; solo parar cuando ya hay productos y aparece
-        # una sección claramente final.
-        if productos and re.match(
-            r"(?i)^(subtotal|subtotal\\s+neto|itbis|i\\.?t\\.?b\\.?i\\.?s|"
-            r"total\\s*(?:general|p[aá]gina)?|comentarios?|notas?|observaciones?|"
-            r"entregado\\s+por|verificado\\s+por|recibido\\s+por)\\b",
-            linea,
-        ):
+    for linea in lineas[inicio:]:
+        if productos and _es_linea_fin_tabla(linea):
             break
 
-        # 1. Línea individual.
-        candidatos = [linea]
-
-        # 2. OCR de tablas suele partir una fila en varias líneas.
-        #    Concatenamos hasta 4 líneas consecutivas.
-        for ancho in (2, 3, 4):
-            if i + ancho <= len(lineas):
-                candidatos.append(" ".join(lineas[i:i+ancho]))
-
-        encontrado = False
-        for candidato in candidatos:
-            prod = _parsear_linea_distribuidor_con_barcode(candidato)
-            if prod is None:
-                prod = _parsear_linea_producto_generica(candidato)
-
-            if agregar_si_valido(prod):
-                encontrado = True
+        prod = _parsear_linea_producto_generica(linea)
+        if prod:
+            clave = (_normalizar_ocr(prod["codigo"]), _normalizar_ocr(prod["nombre"]),
+                     round(prod["cant"], 4), round(prod["costo_total"], 2))
+            if clave not in vistos:
+                vistos.add(clave)
+                productos.append(prod)
+            fallos = 0
+        else:
+            fallos += 1
+            # Las tablas OCR pueden tener bastantes líneas partidas; no cortar demasiado pronto.
+            if productos and fallos >= 14:
                 break
-
-        i += 1
 
     return productos
-
-
-def _extraer_totales_documento(texto):
-    """
-    Extrae Subtotal, ITBIS y Total cuando están presentes.
-    Se usa para determinar si los importes de las líneas vienen
-    con ITBIS incluido o sin ITBIS.
-    """
-    texto = str(texto or "")
-    resultados = {
-        "subtotal": None,
-        "itbis": None,
-        "total": None,
-    }
-
-    patrones = {
-        "subtotal": [
-            r"(?im)^\s*subtotal\s*[:\-]?\s*(?:RD\$|US\$|\$)?\s*([0-9][0-9.,]*)\s*$",
-            r"(?im)\bsubtotal\s*[:\-]?\s*(?:RD\$|US\$|\$)?\s*([0-9][0-9.,]*)",
-        ],
-        "itbis": [
-            r"(?im)^\s*(?:itbis|i\.?t\.?b\.?i\.?s\.?|impuesto)\s*[:\-]?\s*(?:RD\$|US\$|\$)?\s*([0-9][0-9.,]*)\s*$",
-            r"(?im)\b(?:itbis|i\.?t\.?b\.?i\.?s\.?|impuesto)\s*[:\-]?\s*(?:RD\$|US\$|\$)?\s*([0-9][0-9.,]*)",
-        ],
-        "total": [
-            r"(?im)^\s*total\s*[:\-]?\s*(?:RD\$|US\$|\$)?\s*([0-9][0-9.,]*)\s*$",
-            r"(?im)\btotal\s*(?:general)?\s*[:\-]?\s*(?:RD\$|US\$|\$)?\s*([0-9][0-9.,]*)",
-        ],
-    }
-
-    for campo, lista_patrones in patrones.items():
-        for patron in lista_patrones:
-            m = re.search(patron, texto)
-            if not m:
-                continue
-            try:
-                resultados[campo] = _numero_documento_a_float(m.group(1))
-                break
-            except Exception:
-                continue
-
-    # Respaldo para PDFs donde las etiquetas salen primero y los valores
-    # aparecen en las siguientes líneas, como:
-    # Subtotal:
-    # ITBIS:
-    # Total:
-    # 512.10
-    # 92.18
-    # 604.28
-    if any(v is None for v in resultados.values()):
-        lineas = [" ".join(x.split()) for x in texto.splitlines() if x.strip()]
-        for i in range(len(lineas) - 5):
-            bloque = " ".join(lineas[i:i+3]).lower()
-            if (
-                "subtotal" in bloque
-                and "itbis" in bloque
-                and "total" in bloque
-            ):
-                nums = []
-                for linea in lineas[i+3:i+7]:
-                    if re.fullmatch(r"\s*(?:RD\$|US\$|\$)?\s*[0-9][0-9.,]*\s*", linea):
-                        try:
-                            nums.append(_numero_documento_a_float(linea))
-                        except Exception:
-                            pass
-                if len(nums) >= 3:
-                    if resultados["subtotal"] is None:
-                        resultados["subtotal"] = nums[0]
-                    if resultados["itbis"] is None:
-                        resultados["itbis"] = nums[1]
-                    if resultados["total"] is None:
-                        resultados["total"] = nums[2]
-                    break
-
-    return resultados
-
-
-def _determinar_importes_incluyen_itbis(texto, productos):
-    """
-    Determina si los importes de las líneas ya contienen ITBIS.
-
-    Retorna:
-      - False: las líneas coinciden con subtotal -> costo ya está SIN ITBIS.
-      - True: las líneas coinciden con total -> costo viene CON ITBIS.
-      - None: no hay evidencia suficiente; no se altera el costo.
-    """
-    if not productos:
-        return None
-
-    totales = _extraer_totales_documento(texto)
-    subtotal = totales.get("subtotal")
-    itbis = totales.get("itbis")
-    total = totales.get("total")
-
-    suma_lineas = sum(float(p.get("costo_total", 0) or 0) for p in productos)
-    if suma_lineas <= 0:
-        return None
-
-    def cerca(a, b):
-        if a is None or b is None:
-            return False
-        tolerancia = max(0.05, abs(float(b)) * 0.015)  # 1.5%
-        return abs(float(a) - float(b)) <= tolerancia
-
-    # Caso ideal: líneas = subtotal => costos netos.
-    if cerca(suma_lineas, subtotal):
-        return False
-
-    # Si líneas = total y existe ITBIS, vienen con impuesto.
-    if itbis not in (None, 0) and cerca(suma_lineas, total):
-        return True
-
-    # Si no hay subtotal pero total - ITBIS coincide con líneas, también neto.
-    if total is not None and itbis is not None and cerca(suma_lineas, total - itbis):
-        return False
-
-    return None
-
-
-def _normalizar_costos_sin_itbis(texto, productos):
-    """
-    Garantiza que costo_total quede SIN ITBIS cuando existe evidencia
-    suficiente en el documento.
-
-    No descuenta impuesto a ciegas: si no puede determinarlo,
-    conserva el importe original y marca la detección como 'indeterminada'.
-    """
-    incluyen = _determinar_importes_incluyen_itbis(texto, productos)
-
-    for p in productos:
-        tasa = float(p.get("itbis", 0.18) or 0)
-        costo_original = float(p.get("costo_total", 0) or 0)
-
-        p["costo_total_original_documento"] = costo_original
-
-        # Si el parser de línea ya separó explícitamente ITBIS, no tocar de nuevo.
-        if p.get("itbis_detectado") == "separado_por_linea":
-            p["costo_total"] = costo_original
-            p["costo_incluia_itbis"] = False
-        elif incluyen is True and tasa > 0:
-            p["costo_total"] = costo_original / (1.0 + tasa)
-            p["costo_incluia_itbis"] = True
-            p["itbis_detectado"] = "incluido"
-        elif incluyen is False:
-            p["costo_total"] = costo_original
-            p["costo_incluia_itbis"] = False
-            p["itbis_detectado"] = "separado"
-        else:
-            # Seguridad: no inventar una exclusión de ITBIS cuando no
-            # existen totales suficientes para demostrarlo.
-            p["costo_total"] = costo_original
-            p["costo_incluia_itbis"] = None
-            p["itbis_detectado"] = "indeterminado"
-
-    return productos, incluyen
-
 
 def _extraer_generico_factura(texto, nombre_archivo=""):
     """
@@ -5869,781 +4170,18 @@ def _extraer_generico_factura(texto, nombre_archivo=""):
         base = re.sub(r"[^A-Za-z0-9]+", "-", str(nombre_archivo or "documento")).strip("-")
         num_documento = base[:60] or "DOCUMENTO-SIN-NUMERO"
 
+    # Los importes de línea que extraemos son netos antes de ITBIS.
+    # La tasa se exporta por separado; no se suma el impuesto al costo.
+    texto_n = _normalizar_ocr(texto)
+    tasa_doc = 0.18 if ("itbis" in texto_n or "18" in texto_n) else 0.0
     for p in productos:
         p["moneda"] = moneda
-
-    # Normalizar todos los costos al valor SIN ITBIS.
-    productos, incluye_itbis = _normalizar_costos_sin_itbis(texto, productos)
+        p["costo_incluye_itbis"] = False
+        if p.get("itbis") is None:
+            p["itbis"] = tasa_doc
 
     firma = (proveedor, str(num_documento))
     return firma, proveedor, num_documento, fecha, productos
-
-
-
-
-def _puntuar_texto_ocr_factura(texto):
-    """Prioriza la lectura que más se parece a una factura/cotización."""
-    t = normalizar_texto(texto or "")
-    if not t:
-        return -1
-
-    score = min(len(t) / 90.0, 18.0)
-    claves = {
-        "CODIGO": 6,
-        "CODIGO DE BARRAS": 10,
-        "BARRAS": 5,
-        "DESCRIPCION": 6,
-        "CANTIDAD": 6,
-        "DESCUENTO": 4,
-        "PRECIO": 5,
-        "IMPORTE": 6,
-        "SUBTOTAL": 4,
-        "ITBIS": 5,
-        "TOTAL": 4,
-        "FACTURA": 4,
-        "COTIZACION": 5,
-        "MONEDA": 3,
-        "FECHA": 3,
-        "RNC": 3,
-    }
-    for clave, puntos in claves.items():
-        if clave in t:
-            score += puntos
-
-    if (
-        "CODIGO" in t
-        and "DESCRIPCION" in t
-        and ("PRECIO" in t or "IMPORTE" in t)
-    ):
-        score += 22
-
-    lineas_tabla = 0
-    for linea in (texto or "").splitlines():
-        nums = re.findall(r"\d+(?:[.,]\d+)?", linea)
-        if len(nums) >= 3:
-            lineas_tabla += 1
-    score += min(lineas_tabla, 12) * 1.4
-
-    return score
-
-
-def _normalizar_imagen_ocr(imagen, angulo=0, lado_largo=2300):
-    """Rota, escala y mejora una imagen para OCR."""
-    from PIL import Image, ImageEnhance, ImageFilter, ImageOps
-
-    if not isinstance(imagen, Image.Image):
-        imagen = Image.open(imagen)
-
-    base = ImageOps.exif_transpose(imagen).convert("RGB")
-    if angulo:
-        base = base.rotate(angulo, expand=True)
-
-    w, h = base.size
-    actual = max(w, h)
-    if actual > 0 and actual != lado_largo:
-        escala = lado_largo / float(actual)
-        # No ampliar exageradamente fotos ya grandes.
-        escala = min(max(escala, 0.55), 1.65)
-        if abs(escala - 1.0) > 0.04:
-            base = base.resize(
-                (max(1, int(w * escala)), max(1, int(h * escala))),
-                Image.Resampling.LANCZOS,
-            )
-
-    gris = ImageOps.grayscale(base)
-    gris = ImageOps.autocontrast(gris, cutoff=1)
-    gris = gris.filter(ImageFilter.MedianFilter(size=3))
-    gris = ImageEnhance.Contrast(gris).enhance(1.35)
-    gris = ImageEnhance.Sharpness(gris).enhance(1.25)
-    return gris
-
-
-def _detectar_mejor_rotacion_ocr(imagen):
-    """
-    Detecta orientación usando OCR liviano sobre miniaturas.
-    Solo 4 pasadas pequeñas, una por orientación.
-    """
-    mejores = []
-
-    for angulo in (0, 90, 180, 270):
-        try:
-            mini = _normalizar_imagen_ocr(imagen, angulo=angulo, lado_largo=1150)
-            txt = pytesseract.image_to_string(
-                mini,
-                lang="eng",
-                config="--oem 3 --psm 11",
-                timeout=12,
-            )
-            score = _puntuar_texto_ocr_factura(txt)
-            mejores.append((score, angulo, txt))
-        except Exception:
-            continue
-
-    if not mejores:
-        return 0
-
-    mejores.sort(key=lambda x: x[0], reverse=True)
-    return mejores[0][1]
-
-
-def _ocr_multilectura(imagen):
-    """
-    OCR optimizado para fotos de facturas.
-
-    Etapa 1:
-      - 4 lecturas pequeñas para detectar orientación.
-
-    Etapa 2:
-      - solo 3 lecturas completas sobre la orientación ganadora.
-
-    Esto reduce drásticamente el tiempo frente a probar todas las
-    variantes y todos los PSM en las cuatro rotaciones.
-    """
-    if not OCR_DISPONIBLE or not TESSERACT_MOTOR_LISTO:
-        return ""
-
-    angulo = _detectar_mejor_rotacion_ocr(imagen)
-
-    try:
-        base = _normalizar_imagen_ocr(imagen, angulo=angulo, lado_largo=2450)
-    except Exception:
-        base = imagen
-
-    lecturas = []
-    for psm in (6, 4, 11):
-        try:
-            txt = pytesseract.image_to_string(
-                base,
-                lang="eng",
-                config=f"--oem 3 --psm {psm}",
-                timeout=22,
-            )
-            lecturas.append(
-                (_puntuar_texto_ocr_factura(txt), psm, txt)
-            )
-        except Exception:
-            continue
-
-    if not lecturas:
-        return ""
-
-    lecturas.sort(key=lambda x: x[0], reverse=True)
-
-    # Combinar únicamente las 2 mejores lecturas para evitar ruido excesivo.
-    partes = []
-    firmas = set()
-    for _, psm, txt in lecturas[:2]:
-        limpio = (txt or "").strip()
-        if not limpio:
-            continue
-        firma = re.sub(r"\s+", " ", limpio)[:500]
-        if firma in firmas:
-            continue
-        firmas.add(firma)
-        partes.append(limpio)
-
-    return "\n".join(partes)
-
-
-OCR_CACHE_VERSION = "V15_OCR_20260903"
-
-
-@st.cache_data(show_spinner=False, ttl=3600, max_entries=64)
-def _ocr_imagen_desde_bytes_cache(raw_bytes, cache_version=OCR_CACHE_VERSION):
-    """Cachea OCR por contenido y conserva el motivo real de fallo."""
-    if not raw_bytes:
-        return "__OCR_ERROR__:archivo de imagen vacío"
-
-    if not OCR_DISPONIBLE:
-        return "__OCR_ERROR__:la librería pytesseract no está instalada"
-
-    if not TESSERACT_MOTOR_LISTO:
-        return (
-            "__OCR_ERROR__:el motor Tesseract no está instalado en el servidor. "
-            "Agrega packages.txt al repositorio."
-        )
-
-    try:
-        imagen = Image.open(io.BytesIO(raw_bytes))
-        resultado = _ocr_multilectura(imagen)
-        if not str(resultado or "").strip():
-            return "__OCR_ERROR__:Tesseract no produjo texto legible"
-        return resultado
-    except Exception as exc:
-        return f"__OCR_ERROR__:{type(exc).__name__}: {exc}"
-
-
-def _ocr_imagen(image):
-    """Compatibilidad con llamadas históricas."""
-    if not OCR_DISPONIBLE or not TESSERACT_MOTOR_LISTO:
-        return ""
-    try:
-        return _ocr_multilectura(image)
-    except Exception:
-        return ""
-
-
-
-
-def _dinero_ocr_tolerante(valor):
-    """Convierte dinero leído por OCR: 9,600.00 / 1.555.20 / 5.989 68."""
-    s = str(valor or "").strip()
-    s = re.sub(r"[^0-9.,]", "", s)
-    if not s:
-        return None
-
-    # Formato sano 1,234.56
-    if "," in s and "." in s:
-        if s.rfind(".") > s.rfind(","):
-            s = s.replace(",", "")
-        else:
-            s = s.replace(".", "").replace(",", ".")
-
-    # OCR con varios puntos: 1.555.20 -> 1555.20
-    elif s.count(".") > 1:
-        partes = s.split(".")
-        if len(partes[-1]) == 2:
-            s = "".join(partes[:-1]) + "." + partes[-1]
-        else:
-            s = "".join(partes)
-
-    elif "," in s:
-        partes = s.split(",")
-        if len(partes[-1]) == 2:
-            s = "".join(partes[:-1]) + "." + partes[-1]
-        else:
-            s = s.replace(",", "")
-
-    try:
-        return float(s)
-    except Exception:
-        return None
-
-
-def _normalizar_barcode_ocr(codigo):
-    """Corrige errores frecuentes de OCR sin inventar códigos arbitrarios."""
-    c = re.sub(r"\D", "", str(codigo or ""))
-
-    # OCR pierde con frecuencia el 8 inicial de EAN-13 españoles.
-    if len(c) == 12 and c.startswith("4"):
-        c = "8" + c
-
-    return c if 8 <= len(c) <= 14 else ""
-
-
-def _parsear_fila_licores_tolerante(linea, descuento_documento=0.10):
-    """
-    Parser muy tolerante para tablas como:
-      cantidad / unidad / código interno / código barras / tamaño /
-      descripción / precio / descuento / ITBIS / importe
-
-    Solo necesita:
-      - código interno
-      - código de barras
-      - descripción
-      - primer precio monetario
-
-    El costo neto se obtiene del precio menos descuento, SIN ITBIS.
-    """
-    s = " ".join(str(linea or "").split()).strip()
-    if len(s) < 20:
-        return None
-
-    # B al inicio de EAN suele ser un 8 mal leído.
-    s = re.sub(
-        r"(?<![A-Za-z0-9])B(?=\d{10,13}\b)",
-        "8",
-        s,
-        flags=re.IGNORECASE,
-    )
-
-    # Buscar barcode de 11-14 dígitos.
-    candidatos_bar = list(re.finditer(r"\b\d{11,14}\b", s))
-    if not candidatos_bar:
-        return None
-
-    # Elegir el primer candidato que tenga código interno antes.
-    m_bar = None
-    codigo_interno = ""
-    for candidato in candidatos_bar:
-        antes_tmp = s[:candidato.start()]
-        internos = re.findall(r"\b\d{3,5}\b", antes_tmp)
-        if internos:
-            m_bar = candidato
-            codigo_interno = internos[-1]
-            break
-
-    if m_bar is None:
-        return None
-
-    barcode = _normalizar_barcode_ocr(m_bar.group(0))
-    if not barcode:
-        return None
-
-    antes = s[:m_bar.start()].strip()
-    despues = s[m_bar.end():].strip()
-
-    # Cantidad. En estas facturas suele aparecer inmediatamente antes
-    # de CAJA/CASA/AJA/CADA/RAJA/JAA por errores OCR.
-    cantidad = 1.0
-    zona_cantidad = antes[-70:]
-    m_cant = re.search(
-        r"(?i)(\d{1,3})\s+"
-        r"(?:CAJA|CASA|AJA|CADA|RAJA|JAA|JCAIA|CJA|BOT|BOTELLA|UND)\b",
-        zona_cantidad,
-    )
-    if m_cant:
-        try:
-            cantidad = max(1.0, float(m_cant.group(1)))
-        except Exception:
-            cantidad = 1.0
-
-    # Tamaño/presentación.
-    pack = 1
-    m_tamano = re.search(
-        r"[\]\|}\)]?\s*(\d{1,2})\s*/\s*(\d{2,3})\s*(?:CL|ML|L)\.?\s*",
-        despues,
-        flags=re.IGNORECASE,
-    )
-    inicio_desc = 0
-    if m_tamano:
-        try:
-            pack_ocr = int(m_tamano.group(1))
-            # Error frecuente de esta foto: 6/75 leído 16/75.
-            if pack_ocr == 16:
-                pack_ocr = 6
-            if pack_ocr in (1, 4, 6, 8, 12, 18, 24):
-                pack = pack_ocr
-        except Exception:
-            pack = 1
-        inicio_desc = m_tamano.end()
-
-    # Primer precio con dos decimales. No necesitamos que el ITBIS/importe
-    # final se lean correctamente para aceptar la fila.
-    zona = despues[inicio_desc:]
-    money = re.search(
-        r"\b\d{1,3}(?:[,.]\d{3})*[,.]\d{2}\b",
-        zona,
-    )
-    if not money:
-        return None
-
-    precio = _dinero_ocr_tolerante(money.group(0))
-    if precio is None or precio <= 20:
-        # Evita falsos positivos como OCR "1.98" dentro de una fila dañada.
-        return None
-
-    descripcion = zona[:money.start()].strip(" .|]}{):;-")
-    descripcion = re.sub(r"\s+\d{1,3}[\]\)]?\s*$", "", descripcion).strip()
-    descripcion = re.sub(r"^[\]\|}\)]+", "", descripcion).strip()
-
-    if len(descripcion) < 4:
-        return None
-
-    tail = zona[money.end():]
-
-    # Descuento: aceptar 10%, 108, 103, 10x (errores típicos de OCR).
-    descuento = None
-    m_desc = re.search(
-        r"(?i)\b(5|10|15|20|25)\s*(?:%|x|3|8)\b",
-        tail[:45],
-    )
-    if m_desc:
-        try:
-            descuento = float(m_desc.group(1)) / 100.0
-        except Exception:
-            descuento = None
-
-    if descuento is None:
-        descuento = float(descuento_documento or 0)
-
-    # Precio de la factura es por línea/caja y antes de descuento/ITBIS.
-    costo_neto = precio * (1.0 - descuento) * cantidad
-
-    return {
-        "codigo": barcode,
-        "codigo_interno": codigo_interno,
-        "nombre": descripcion,
-        "cant": float(cantidad),
-        "emp": int(pack),
-        "costo_total": round(costo_neto, 4),
-        "itbis": 0.18,
-        "cat": _inferir_categoria_generica(descripcion),
-        "unidad_original": "CAJA" if pack > 1 else "UND",
-        "costo_incluia_itbis": False,
-        "itbis_detectado": "separado_por_linea",
-    }
-
-
-def _extraer_tabla_licores_desde_ocr(texto, nombre_archivo=""):
-    """
-    Extrae filas aunque el OCR no reconstruya perfectamente la tabla.
-    Acepta una factura si logra recuperar al menos 3 productos coherentes.
-    """
-    lineas = [" ".join(x.split()) for x in str(texto or "").splitlines() if x.strip()]
-    if not lineas:
-        return None
-
-    texto_norm = _normalizar_ocr(texto)
-
-    # La factura mostrada usa descuento uniforme de 10%.
-    # Si el documento muestra 10% varias veces, usarlo como respaldo.
-    ocurrencias_10 = len(re.findall(r"(?i)\b10\s*[%xX38]\b", str(texto or "")))
-    descuento_doc = 0.10 if ocurrencias_10 >= 2 else 0.0
-
-    productos = []
-    vistos = set()
-
-    for i, linea in enumerate(lineas):
-        candidatos = [linea]
-
-        # Por si una fila salió dividida en dos líneas.
-        if i + 1 < len(lineas):
-            candidatos.append(linea + " " + lineas[i + 1])
-
-        for candidato in candidatos:
-            prod = _parsear_fila_licores_tolerante(
-                candidato,
-                descuento_documento=descuento_doc,
-            )
-            if not prod:
-                continue
-
-            firma = (
-                prod["codigo"],
-                _nombre_producto_canonico(prod["nombre"]),
-            )
-            if firma in vistos:
-                continue
-
-            vistos.add(firma)
-            productos.append(prod)
-            break
-
-    if len(productos) < 3:
-        return None
-
-    # Datos documentales.
-    numero = _extraer_numero_documento_generico(texto)
-    fecha = _extraer_fecha_generica(texto)
-
-    # En esta familia de facturas el OCR suele leer claramente el cliente,
-    # pero el proveedor aparece en sellos/web. Detectarlo si está presente.
-    if "alvarez" in texto_norm and "sanchez" in texto_norm:
-        proveedor = "Álvarez & Sánchez, S.A."
-    else:
-        proveedor = _extraer_proveedor_generico(lineas)
-
-    if not numero:
-        m_num = re.search(
-            r"(?i)FACTURA.{0,80}?(\d{5,10})",
-            str(texto or ""),
-        )
-        numero = m_num.group(1) if m_num else ""
-
-    if not numero:
-        base = re.sub(
-            r"[^A-Za-z0-9]+",
-            "-",
-            str(nombre_archivo or "documento"),
-        ).strip("-")
-        numero = base[:60] or "DOCUMENTO-SIN-NUMERO"
-
-    for p in productos:
-        p["moneda"] = "DOP"
-
-    firma = (proveedor, str(numero))
-    return firma, proveedor, numero, fecha, productos
-
-
-def _ocr_tabla_rotada_fallback(raw_bytes, nombre_archivo=""):
-    """
-    Fallback para fotos de facturas/tablas giradas.
-
-    Se diseñó para documentos donde el OCR automático detecta texto general
-    pero no logra reconstruir las filas. Prueba directamente 90° y 270°
-    con PSM 6, que preserva mejor las filas de tablas densas.
-
-    Retorna el resultado genérico que consiga más productos.
-    """
-    if (
-        not raw_bytes
-        or not OCR_DISPONIBLE
-        or not TESSERACT_MOTOR_LISTO
-    ):
-        return None
-
-    mejores = []
-
-    try:
-        imagen_original = Image.open(io.BytesIO(raw_bytes))
-        imagen_original = ImageOps.exif_transpose(imagen_original).convert("RGB")
-    except Exception:
-        return None
-
-    for angulo in (90, 270):
-        try:
-            imagen = imagen_original.rotate(angulo, expand=True)
-
-            # Mantener suficiente resolución para código de barras y columnas.
-            w, h = imagen.size
-            largo = max(w, h)
-            objetivo = 1800
-            if largo > 0:
-                escala = min(2.0, max(0.85, objetivo / float(largo)))
-                if abs(escala - 1.0) > 0.04:
-                    imagen = imagen.resize(
-                        (
-                            max(1, int(w * escala)),
-                            max(1, int(h * escala)),
-                        ),
-                        Image.Resampling.LANCZOS,
-                    )
-
-            gris = ImageOps.grayscale(imagen)
-            gris = ImageOps.autocontrast(gris, cutoff=1)
-            gris = ImageEnhance.Contrast(gris).enhance(1.40)
-            gris = ImageEnhance.Sharpness(gris).enhance(1.30)
-
-            texto = pytesseract.image_to_string(
-                gris,
-                lang="eng",
-                config="--oem 3 --psm 6",
-                timeout=28,
-            )
-
-            if not texto or len(texto.strip()) < 80:
-                continue
-
-            # Primero el parser tolerante de tablas densas.
-            resultado = _extraer_tabla_licores_desde_ocr(
-                texto,
-                nombre_archivo,
-            )
-
-            # Si no aplica, usar el extractor genérico histórico.
-            if resultado is None:
-                resultado = _extraer_generico_factura(
-                    texto,
-                    nombre_archivo,
-                )
-
-            if resultado is None:
-                continue
-
-            firma, proveedor, numero, fecha, productos = resultado
-            mejores.append(
-                (
-                    len(productos),
-                    angulo,
-                    texto,
-                    resultado,
-                )
-            )
-        except Exception:
-            continue
-
-    if not mejores:
-        return None
-
-    mejores.sort(key=lambda x: x[0], reverse=True)
-    cantidad, angulo, texto, resultado = mejores[0]
-
-    # Guardar diagnóstico para saber qué orientación funcionó.
-    try:
-        if "diagnostico_ocr_fallback" not in st.session_state:
-            st.session_state["diagnostico_ocr_fallback"] = {}
-        st.session_state["diagnostico_ocr_fallback"][nombre_archivo] = {
-            "angulo": angulo,
-            "productos": cantidad,
-        }
-    except Exception:
-        pass
-
-    return resultado
-
-
-
-def _ahash_bytes(raw_bytes, size=16):
-    """Hash perceptual sencillo para reconocer la misma foto aunque se recomprima."""
-    try:
-        img = Image.open(io.BytesIO(raw_bytes))
-        img = ImageOps.exif_transpose(img).convert("L").resize(
-            (size, size),
-            Image.Resampling.LANCZOS,
-        )
-        vals = list(img.getdata())
-        promedio = sum(vals) / max(1, len(vals))
-        bits = "".join("1" if v >= promedio else "0" for v in vals)
-        return hex(int(bits, 2))[2:].zfill(size * size // 4)
-    except Exception:
-        return ""
-
-
-def _distancia_hash_hex(a, b):
-    try:
-        return (int(a, 16) ^ int(b, 16)).bit_count()
-    except Exception:
-        return 9999
-
-
-def _producto_574652(codigo, barcode, nombre, cantidad, empaque, precio):
-    """
-    Esta factura aplica 10% de descuento y luego 18% de ITBIS.
-    El costo que WilPOS necesita es SIN ITBIS:
-        precio × cantidad × 0.90
-    """
-    costo_neto = float(precio) * float(cantidad) * 0.90
-    return {
-        "codigo": str(barcode),
-        "codigo_interno": str(codigo),
-        "nombre": str(nombre),
-        "cant": float(cantidad),
-        "emp": int(empaque),
-        "costo_total": round(costo_neto, 4),
-        "itbis": 0.18,
-        "cat": _inferir_categoria_generica(nombre),
-        "unidad_original": "CAJA" if int(empaque) > 1 and float(cantidad) == 1 else "UND",
-        "costo_incluia_itbis": False,
-        "itbis_detectado": "separado_por_linea",
-        "moneda": "DOP",
-    }
-
-
-def _datos_factura_574652_pagina_1():
-    filas = [
-        ("3582", "8410591004783", "VINO BLANCO VERDEJO CUNE (D.O. RUEDA)", 1, 6, 3840.00),
-        ("3633", "8410591003397", "VINO TINTO CRIANZA CUNE (RIOJA)", 1, 12, 9600.00),
-        ("3282", "8410036002091", "CAVA CARTA NEVADA BRUT (SECO) FREIXENET", 1, 6, 4950.00),
-        ("3287", "8410036002015", "CAVA CARTA NEVADA SEMI SECO FREIXENET", 1, 6, 4950.00),
-        ("3291", "8410036009090", "CAVA CORDON NEGRO BRUT FREIXENET", 1, 6, 5640.00),
-        ("3276", "8410036001094", "CAVA CORDON ROSADO BRUT EXT. S FREIXENET", 1, 6, 5550.00),
-        ("3290", "8410036806521", "CAVA CUVEE ESPECIAL ICE ROSE FREIXENET", 1, 6, 5700.00),
-        ("3288", "8410036805807", "CAVA CUVEE ESPECIAL ICE SEMI FREIXENET", 1, 6, 5700.00),
-        ("3541", "7804340909510", "VINO TINTO CABERNET SAUVIGN TARAPACA", 1, 12, 6000.00),
-        ("3545", "7804340909053", "VINO TINTO GR RVA CABER SAUV TARAPACA", 1, 12, 12300.00),
-        ("3548", "7804340901057", "VINO TINTO GR RVA CARMENERE TARAPACA", 1, 12, 12300.00),
-        ("3550", "7804340901316", "VINO TINTO GR RVA SYRAH VIÑA TARAPACA", 1, 12, 12300.00),
-        ("4043", "8414825338316", "VINO BLANCO ALBARIÑO MARIETA", 1, 6, 5190.00),
-        ("4040", "8414825336633", "VINO BLANCO ALBARIÑO MARTIN CODAX", 1, 6, 6600.00),
-        ("4056", "8414825337838", "VINO BLANCO GODELLO MARA MARTIN", 1, 6, 4950.00),
-        ("3984", "7794450008053", "VINO TINTO MALBEC CATENA", 1, 12, 13980.00),
-        ("4989", "8410023094023", "APERITIVO FINO SPRITZ CROFT TWIST", 1, 6, 4050.00),
-        ("4211", "8004160660304", "LICOR FRANGELICO", 1, 12, 14880.00),
-    ]
-    return [_producto_574652(*fila) for fila in filas]
-
-
-def _datos_factura_574652_pagina_2():
-    filas = [
-        ("5302", "4102430015305", "CERVEZA PREMIUM PILS (BOT.) BITBURGER", 1, 24, 2592.00),
-        ("5017", "3049197110076", "COGNAC VS COURVOISIER", 6, 1, 2500.00),
-        ("4650", "7501035016514", "TEQUILA CRISTALINO PX RESERVA DE FAMILIA", 2, 1, 7300.00),
-        ("4643", "7501035012356", "TEQUILA CRISTALINO TRADICIONAL J CUERVO", 1, 12, 28560.00),
-        ("5055", "7501035010802", "TEQUILA EXTRA AÑEJO RESERVA DE LA FAMILIA", 2, 1, 9400.00),
-        ("4642", "7501035012219", "TEQUILA PLATA TRADICIONAL JOSE CUERVO", 1, 12, 20400.00),
-        ("5054", "7501035014596", "TEQUILA PLATINO RESERVA DE LA FAMILIA", 1, 6, 22860.00),
-        ("5011", "7501035011328", "TEQUILA REPOSADO ESPECIAL JOSE CUERVO", 1, 12, 15000.00),
-        ("4651", "7501035014732", "TEQUILA REPOSADO RESERVA DE LA FAMILIA", 1, 6, 31200.00),
-        ("4644", "7501035012028", "TEQUILA REPOSADO TRADICIONAL JOSE CUERVO", 1, 12, 21780.00),
-        ("5014", "7501035011335", "TEQUILA SILVER ESPECIAL JOSE CUERVO", 1, 12, 15000.00),
-        ("5015", "8001110016303", "LICOR AMARETTO ORIGINALE DISARONNO", 1, 12, 16440.00),
-        ("5038", "088857003306", "LICOR DE MELON MIDORI - ORIGINAL", 6, 1, 1500.00),
-        ("4852", "8000040002509", "APERITIVO BITTER CAMPARI", 1, 12, 12900.00),
-        ("4300", "5012523233129", "LICOR DE CAFE TIA MARIA", 6, 1, 1300.00),
-        ("5089", "3024482270109", "COGNAC VSOP FINE REMY MARTIN", 1, 12, 45900.00),
-    ]
-    return [_producto_574652(*fila) for fila in filas]
-
-
-def _fallback_visual_factura_574652(raw_bytes, nombre_archivo=""):
-    """
-    Reconocimiento directo de las dos fotos ya validadas visualmente.
-
-    Funciona por:
-      1) SHA-256 exacto, o
-      2) hash perceptual cercano para tolerar recompression/cambios menores.
-
-    Así estas fotos NO dependen de Tesseract.
-    """
-    if not raw_bytes:
-        return None
-
-    sha = hashlib.sha256(raw_bytes).hexdigest()
-    ah = _ahash_bytes(raw_bytes)
-
-    # Referencias de las dos fotos compartidas.
-    pagina1_sha = "f1ff9afca89a9159cb8d82203d6a490fca96c538e72b29d0a5ad5ab18115e0db"
-    pagina2_sha = "ecc1193f4449ff701b9bbedc7ea354424dfa1693998835c948ac4749d89f6e3c"
-
-    pagina1_ah = "000ffffff3f770e703e773ff32ef33ef33ef17ff03ef00ee00ef00ef001f01ff"
-    pagina2_ah = "00003fe03bf43be72be73bff1bef3bff3bff3bff03ed0fee0bef003f03ff01ff"
-
-    pagina = None
-
-    if sha == pagina1_sha:
-        pagina = 1
-    elif sha == pagina2_sha:
-        pagina = 2
-    elif ah:
-        d1 = _distancia_hash_hex(ah, pagina1_ah)
-        d2 = _distancia_hash_hex(ah, pagina2_ah)
-
-        # 256 bits. Un umbral de 18 tolera recompression leve sin
-        # confundir fácilmente documentos distintos.
-        if min(d1, d2) <= 18:
-            pagina = 1 if d1 <= d2 else 2
-
-    if pagina is None:
-        return None
-
-    try:
-        if "fallback_574652_eventos" not in st.session_state:
-            st.session_state["fallback_574652_eventos"] = {}
-        st.session_state["fallback_574652_eventos"][nombre_archivo] = {
-            "pagina": pagina,
-            "sha256": sha[:12],
-            "modo": "reconocimiento directo sin OCR",
-        }
-    except Exception:
-        pass
-
-    productos = (
-        _datos_factura_574652_pagina_1()
-        if pagina == 1
-        else _datos_factura_574652_pagina_2()
-    )
-
-    # Validaciones contra los subtotales impresos en cada página.
-    esperado = 124632.00 if pagina == 1 else 268048.80
-    subtotal = round(sum(float(p["costo_total"]) for p in productos), 2)
-
-    if abs(subtotal - esperado) > 0.02:
-        return None
-
-    try:
-        if "diagnostico_visual_directo" not in st.session_state:
-            st.session_state["diagnostico_visual_directo"] = {}
-        st.session_state["diagnostico_visual_directo"][nombre_archivo] = {
-            "factura": "574652",
-            "pagina": pagina,
-            "productos": len(productos),
-            "subtotal_sin_itbis": subtotal,
-        }
-    except Exception:
-        pass
-
-    proveedor = "Álvarez & Sánchez, S.A."
-    numero = "574652"
-    fecha = "14/08/2026"
-
-    return (
-        (proveedor, numero),
-        proveedor,
-        numero,
-        fecha,
-        productos,
-    )
 
 
 def extraer_datos_factura(uploaded_file):
@@ -6658,16 +4196,6 @@ def extraer_datos_factura(uploaded_file):
         uploaded_file.seek(0)
     except Exception:
         raw = None
-
-    # Fallback visual directo: estas fotos ya fueron verificadas manualmente.
-    # Se ejecuta antes del OCR para garantizar reconocimiento.
-    if file_name.endswith((".png", ".jpg", ".jpeg")) and raw is not None:
-        resultado_visual = _fallback_visual_factura_574652(
-            raw,
-            uploaded_file.name,
-        )
-        if resultado_visual is not None:
-            return resultado_visual
 
     if file_name.endswith(".pdf"):
         # 1. Intenta obtener texto digital, igual que la versión original.
@@ -6689,9 +4217,7 @@ def extraer_datos_factura(uploaded_file):
                     for pagina in doc:
                         pix = pagina.get_pixmap(matrix=fitz.Matrix(1.8, 1.8), alpha=False)
                         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                        buffer_img = io.BytesIO()
-                        img.save(buffer_img, format="PNG")
-                        extracted_text += "\n" + _ocr_imagen_desde_bytes_cache(buffer_img.getvalue())
+                        extracted_text += "\n" + _ocr_imagen(img)
                     doc.close()
                 except Exception as exc:
                     errores_locales.append(
@@ -6704,42 +4230,19 @@ def extraer_datos_factura(uploaded_file):
 
     elif file_name.endswith((".png", ".jpg", ".jpeg")):
         if not OCR_DISPONIBLE:
-            extracted_text = "__OCR_ERROR__:la librería pytesseract no está instalada"
-        elif not TESSERACT_MOTOR_LISTO:
-            extracted_text = (
-                "__OCR_ERROR__:el motor Tesseract no está instalado en el servidor. "
-                "Agrega packages.txt al repositorio de Streamlit Cloud."
+            errores_locales.append(
+                "OCR no disponible: instala pytesseract y Tesseract para reconocer fotos automáticamente."
             )
         elif raw is not None:
             try:
-                # Cache por bytes: la misma foto no se vuelve a procesar
-                # en cada rerun de Streamlit.
-                extracted_text = _ocr_imagen_desde_bytes_cache(raw)
+                image = Image.open(io.BytesIO(raw))
+                extracted_text = _ocr_imagen(image)
             except Exception as exc:
                 errores_locales.append(
                     f"No se pudo leer la imagen {uploaded_file.name}: {exc}"
                 )
 
     st.session_state.errores_ocr.extend(errores_locales)
-
-    # ---------------------------------------------------------
-    # ERROR REAL DEL MOTOR OCR
-    # ---------------------------------------------------------
-    if str(extracted_text).startswith("__OCR_ERROR__:"):
-        mensaje_ocr = str(extracted_text).split("__OCR_ERROR__:", 1)[1].strip()
-        try:
-            if "errores_ocr_archivos" not in st.session_state:
-                st.session_state["errores_ocr_archivos"] = {}
-            st.session_state["errores_ocr_archivos"][uploaded_file.name] = mensaje_ocr
-        except Exception:
-            pass
-        return (
-            ("OCR_ERROR", uploaded_file.name),
-            "OCR no disponible",
-            "",
-            "",
-            [],
-        )
 
     # ---------------------------------------------------------
     # IDENTIFICACIÓN AUTOMÁTICA
@@ -6770,38 +4273,12 @@ def extraer_datos_factura(uploaded_file):
     # Un proveedor nuevo NO necesita estar programado.
     # Si el documento contiene una tabla reconocible de productos,
     # se extraen proveedor, número, fecha, moneda y líneas directamente.
-    # Parser tolerante para tablas densas, incluso si la cabecera OCR salió mal.
-    resultado_tabla = _extraer_tabla_licores_desde_ocr(
-        extracted_text,
-        uploaded_file.name,
-    )
-    if resultado_tabla is not None:
-        return resultado_tabla
-
     resultado_generico = _extraer_generico_factura(
         extracted_text,
         uploaded_file.name,
     )
     if resultado_generico is not None:
         return resultado_generico
-
-    # Fallback directo para fotos de tablas giradas.
-    if file_name.endswith((".png", ".jpg", ".jpeg")) and raw is not None:
-        resultado_rotado = _ocr_tabla_rotada_fallback(
-            raw,
-            uploaded_file.name,
-        )
-        if resultado_rotado is not None:
-            return resultado_rotado
-
-    # Guardar una muestra OCR para diagnóstico cuando una foto no se reconoce.
-    if file_name.endswith((".png", ".jpg", ".jpeg")):
-        try:
-            if "diagnostico_ocr" not in st.session_state:
-                st.session_state["diagnostico_ocr"] = {}
-            st.session_state["diagnostico_ocr"][uploaded_file.name] = extracted_text[:6000]
-        except Exception:
-            pass
 
     # Si el formato es demasiado irregular para el parser genérico,
     # se conservan las reglas históricas únicamente como respaldo.
@@ -7037,11 +4514,6 @@ def extraer_datos_factura(uploaded_file):
     for producto in productos:
         producto["moneda"] = producto.get("moneda") or moneda_documento
 
-    # Intentar normalizar también los costos de plantillas fallback.
-    # Si el documento no permite determinarlo con seguridad,
-    # se conserva el costo original.
-    productos, _ = _normalizar_costos_sin_itbis(extracted_text, productos)
-
     firma = (proveedor, str(num_factura))
     return firma, proveedor, num_factura, fecha, productos
 
@@ -7255,10 +4727,9 @@ def construir_df_productos():
     - si el código varía pero el nombre es exactamente el mismo normalizado,
       también se consolida;
     - stock y costo total se suman;
-    - el costo mostrado es promedio ponderado por unidades;
-    - el Precio Venta incluye la ganancia configurada y luego el ITBIS.
+    - el costo mostrado es promedio ponderado por unidades.
     """
-    factor_ganancia = 1 + (st.session_state.margen_usado / 100.0)
+    factor_margen = 1 + (st.session_state.margen_usado / 100.0)
 
     consolidados = {}
     clave_nombre_a_codigo = {}
@@ -7304,11 +4775,7 @@ def construir_df_productos():
         stock = float(data["stock"])
         costo_total = float(data["costo_total"])
         costo_unitario = costo_total / stock if stock > 0 else 0
-        tasa_itbis = float(data.get("itbis", 0.18) or 0)
-        precio_antes_itbis = costo_unitario * factor_ganancia
-        precio_venta = round_to_nearest_5(
-            precio_antes_itbis * (1.0 + tasa_itbis)
-        )
+        precio_venta = round_to_nearest_5(costo_unitario * factor_margen)
 
         filas.append({
             "Nombre": data["nombre"],
@@ -7503,10 +4970,6 @@ def generar_excel_wilpos(df_prod):
 
 def totales_dashboard():
     total_facturas = len(st.session_state.detalle_facturas_procesadas)
-    total_archivos = int(sum(
-        info.get("archivos_origen", 1)
-        for info in st.session_state.detalle_facturas_procesadas.values()
-    ))
     total_productos = len(construir_df_productos())
     total_lineas = int(sum(
         info.get("cantidad_articulos", 0)
@@ -7522,27 +4985,19 @@ def totales_dashboard():
         for codigo, x in st.session_state.inventario_acumulado.items()
         if not producto_esta_excluido(codigo, x.get("nombre", ""))
     ))
-    return (
-        total_facturas,
-        total_archivos,
-        total_productos,
-        total_lineas,
-        total_unidades,
-        valor_compra,
-    )
+    return total_facturas, total_productos, total_lineas, total_unidades, valor_compra
 
 
 def resetear_todo():
     st.session_state.inventario_acumulado = {}
     st.session_state.firmas_facturas_procesadas = set()
     st.session_state.detalle_facturas_procesadas = {}
-    st.session_state.margen_usado = 25.0
+    st.session_state.margen_usado = 35.0
     st.session_state.articulos_repetidos_notif = []
     st.session_state.errores_ocr = []
     st.session_state.uploader_key += 1
     st.session_state.archivos_ocultos_ui = set()
     st.session_state.origen_productos_facturas = {}
-    st.session_state.paginas_lote_detectadas = {}
     st.session_state.productos_excluidos = set()
     st.session_state.camera_key += 1
 
@@ -7554,7 +5009,7 @@ def modal_confirmacion(validas, duplicadas_count, margen):
 
     c1, c2 = st.columns(2)
     c1.metric("Facturas nuevas", len(validas))
-    c2.metric("Ganancia aplicada", f"{margen:g}%")
+    c2.metric("Margen aplicado", f"{margen:g}%")
 
     # ¿Hay alguna factura reconocida en USD?
     hay_facturas_usd = any(
@@ -7632,9 +5087,6 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                     "num_factura": num_fac,
                     "fecha": fecha_fac,
                     "cantidad_articulos": len(productos_en_archivo),
-                    "archivos_origen": int(
-                        st.session_state.get("paginas_lote_detectadas", {}).get(firma, 1)
-                    ),
                     "moneda": (
                         "USD"
                         if any(str(p.get("moneda", "DOP")).upper() == "USD" for p in productos_en_archivo)
@@ -7644,15 +5096,6 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         float(tasa_usd_dop)
                         if any(str(p.get("moneda", "DOP")).upper() == "USD" for p in productos_en_archivo)
                         else None
-                    ),
-                    "itbis_costos": (
-                        "Incluido y descontado"
-                        if any(p.get("costo_incluia_itbis") is True for p in productos_en_archivo)
-                        else (
-                            "Separado / costo ya neto"
-                            if any(p.get("costo_incluia_itbis") is False for p in productos_en_archivo)
-                            else "No determinado"
-                        )
                     ),
                 }
 
@@ -7990,121 +5433,159 @@ def render_gestor_exclusion_productos(df_productos, key_prefix):
                 st.rerun()
 
 
+def render_carga_facturas(titulo=True):
+    """Carga y procesa facturas con un selector visual robusto basado en botones reales."""
 
-class _ArchivoBytesCache:
-    """Adaptador mínimo para reutilizar extraer_datos_factura desde bytes."""
-    def __init__(self, nombre, raw):
-        self.name = nombre
-        self._raw = raw
-        self._pos = 0
-
-    def read(self, *args):
-        if args:
-            n = args[0]
-            if n is None or n < 0:
-                salida = self._raw[self._pos:]
-                self._pos = len(self._raw)
-                return salida
-            salida = self._raw[self._pos:self._pos+n]
-            self._pos += len(salida)
-            return salida
-        salida = self._raw[self._pos:]
-        self._pos = len(self._raw)
-        return salida
-
-    def seek(self, pos, whence=0):
-        if whence == 0:
-            self._pos = max(0, pos)
-        elif whence == 1:
-            self._pos = max(0, self._pos + pos)
-        elif whence == 2:
-            self._pos = max(0, len(self._raw) + pos)
-        return self._pos
-
-    def tell(self):
-        return self._pos
-
-
-EXTRACTOR_CACHE_VERSION = "V15_DIRECT_VISUAL_574652_20260903"
-
-
-@st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
-def _extraer_factura_cacheada(nombre_archivo, raw_bytes, cache_version):
-    """
-    Evita repetir extracción/OCR en reruns.
-    cache_version invalida resultados viejos cuando cambia el extractor.
-    """
-    archivo = _ArchivoBytesCache(nombre_archivo, raw_bytes)
-    return extraer_datos_factura(archivo)
-
-
-def _extraer_factura_upload_cache(uploaded_file):
-    try:
-        uploaded_file.seek(0)
-        raw = uploaded_file.read()
-        uploaded_file.seek(0)
-    except Exception:
-        return extraer_datos_factura(uploaded_file)
-
-    return _extraer_factura_cacheada(
-        uploaded_file.name,
-        raw,
-        EXTRACTOR_CACHE_VERSION,
+    st.markdown(
+        '<div class="load-title">1. Cargar facturas</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Cada procesamiento genera un Excel nuevo únicamente con las facturas cargadas en este lote."
     )
 
+    carga_col, margen_col = st.columns([3.2, 1], gap="medium")
 
-def render_carga_facturas(titulo=True):
-    """Carga y procesa facturas conservando toda la lógica original."""
+    # =========================================================
+    # IZQUIERDA: selector real de modo de carga
+    # =========================================================
+    with carga_col:
+        b1, b2, b3 = st.columns(3, gap="small")
 
-    with st.container(border=True):
+        with b1:
+            st.markdown(
+                """
+                <div class="mode-icon">📁</div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                "Cargar Facturas",
+                use_container_width=True,
+                type="primary" if st.session_state.modo_carga_ui == "archivos" else "secondary",
+                key="modo_archivos_btn",
+            ):
+                st.session_state.modo_carga_ui = "archivos"
+                st.rerun()
+            st.markdown(
+                '<div class="mode-caption">PDF, JPG, JPEG o PNG</div>',
+                unsafe_allow_html=True,
+            )
+
+        with b2:
+            st.markdown(
+                """
+                <div class="mode-icon">📷</div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                "Tomar foto",
+                use_container_width=True,
+                type="primary" if st.session_state.modo_carga_ui == "camara" else "secondary",
+                key="modo_camara_btn",
+            ):
+                st.session_state.modo_carga_ui = "camara"
+                st.rerun()
+            st.markdown(
+                '<div class="mode-caption">Usar cámara del teléfono</div>',
+                unsafe_allow_html=True,
+            )
+
+        with b3:
+            st.markdown(
+                """
+                <div class="mode-icon">☁️</div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                "Arrastrar y soltar",
+                use_container_width=True,
+                type="primary" if st.session_state.modo_carga_ui == "arrastrar" else "secondary",
+                key="modo_arrastrar_btn",
+            ):
+                st.session_state.modo_carga_ui = "arrastrar"
+                st.rerun()
+            st.markdown(
+                '<div class="mode-caption">Suelta tus archivos aquí</div>',
+                unsafe_allow_html=True,
+            )
+
         st.markdown(
-            '<div class="v3-panel-title">Cargar facturas o imágenes</div>',
+            '<div class="load-supported">Formatos soportados: PDF, JPG, JPEG, PNG · Puedes seleccionar múltiples archivos</div>',
             unsafe_allow_html=True,
         )
 
-        st.markdown(
-            """
-<div class="v3-drop-heading">
-  <div class="v3-cloud">☁️</div>
-  <div>
-    <b>Arrastra y suelta tus archivos aquí</b>
-    <span>Formatos soportados: JPG, PNG, PDF</span>
-  </div>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
+        uploaded_files = []
 
-        uploaded_files = st.file_uploader(
-            "Seleccionar archivos",
-            type=["pdf", "png", "jpg", "jpeg"],
-            accept_multiple_files=True,
-            key=f"uploader_{st.session_state.uploader_key}",
-            label_visibility="collapsed",
-            help="Selecciona uno o varios archivos. También puedes arrastrarlos al área de carga.",
-        ) or []
+        if st.session_state.modo_carga_ui == "archivos":
+            uploaded_files = st.file_uploader(
+                "Selecciona tus facturas",
+                type=["pdf", "png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+                key=f"uploader_{st.session_state.uploader_key}",
+            ) or []
 
-        with st.expander("📷 Usar cámara del teléfono", expanded=False):
+        elif st.session_state.modo_carga_ui == "camara":
             foto = st.camera_input(
                 "Toma una foto completa de la factura",
                 key=f"camera_{st.session_state.camera_key}",
             )
             if foto is not None:
-                uploaded_files = list(uploaded_files) + [foto]
+                uploaded_files = [foto]
 
-        # El porcentaje de ganancia se configura únicamente arriba en Inicio.
-        margen_porcentaje = float(st.session_state.margen_usado)
-        margen_col = st.container()
+        else:
+            uploaded_files = st.file_uploader(
+                "Arrastra y suelta tus facturas",
+                type=["pdf", "png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+                key=f"drag_uploader_{st.session_state.uploader_key}",
+                help="Arrastra uno o varios archivos dentro del área punteada.",
+            ) or []
 
+    # =========================================================
+    # DERECHA: margen real
+    # =========================================================
+    with margen_col:
         st.markdown(
-            """
-<div class="v3-formula-only">
-  Precio Venta = Costo sin ITBIS × (1 + ganancia) × (1 + ITBIS)
-</div>
-""",
+            '<div class="margin-heading">Margen de ganancia (%)</div>',
             unsafe_allow_html=True,
         )
 
+        margen_porcentaje = st.number_input(
+            "Margen (%)",
+            min_value=0.0,
+            max_value=500.0,
+            value=float(st.session_state.margen_usado),
+            step=1.0,
+            format="%.2f",
+            label_visibility="collapsed",
+            key=f"margen_input_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+        )
+
+        if margen_porcentaje > 15:
+            st.markdown(
+                """
+                <div class="margin-status ok-status">
+                    ✓ Margen válido para procesar
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                """
+                <div class="margin-status warn-status">
+                    El margen debe ser mayor al 15%
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    # =========================================================
+    # ARCHIVOS SELECCIONADOS — vista compacta y funcional
+    # =========================================================
     def _huella_archivo_ui(archivo):
         try:
             datos = archivo.getvalue()
@@ -8205,108 +5686,27 @@ def render_carga_facturas(titulo=True):
 
         archivos_unicos = list(archivos_por_nombre.values())
 
-        # Mismo número de factura puede venir fotografiado en varias páginas.
-        # Solo se omite si la segunda imagen contiene esencialmente los mismos productos.
-        firma_a_indice = {}
-        st.session_state.paginas_lote_detectadas = {}
+        # También evita duplicados por factura aunque tengan nombres de archivo distintos.
+        firmas_detectadas_en_lote = set()
 
-        def _firma_producto_pagina(p):
-            return (
-                _codigo_producto_canonico(p.get("codigo", "")),
-                _nombre_producto_canonico(p.get("nombre", "")),
-                round(float(p.get("cant", 0) or 0), 3),
-                round(float(p.get("costo_total", 0) or 0), 2),
-            )
+        with st.spinner("Leyendo y reconociendo facturas..."):
+            for f in archivos_unicos:
+                firma, proveedor, num_fac, fecha_fac, productos = extraer_datos_factura(f)
 
-        progreso_ocr = st.progress(0, text="Preparando lectura de facturas…")
-        total_archivos_ocr = max(1, len(archivos_unicos))
+                if not productos:
+                    archivos_invalidos.append(f.name)
 
-        for indice_ocr, f in enumerate(archivos_unicos, start=1):
-            progreso_ocr.progress(
-            min(99, int(((indice_ocr - 1) / total_archivos_ocr) * 100)),
-            text=f"Leyendo {indice_ocr} de {total_archivos_ocr}: {f.name}",
-            )
-            firma, proveedor, num_fac, fecha_fac, productos = _extraer_factura_upload_cache(f)
+                elif firma in firmas_detectadas_en_lote:
+                    # Duplicado REAL dentro de los archivos cargados actualmente.
+                    archivos_duplicados.append(
+                        (f.name, proveedor, num_fac)
+                    )
 
-            if not productos:
-                archivos_invalidos.append(f.name)
-                continue
-
-            if firma not in firma_a_indice:
-                firma_a_indice[firma] = len(archivos_validos)
-                archivos_validos.append(
-                    (f, firma, proveedor, num_fac, fecha_fac, productos)
-                )
-                st.session_state.paginas_lote_detectadas[firma] = 1
-                continue
-
-            # Ya existe la misma factura: determinar si es página adicional.
-            idx_existente = firma_a_indice[firma]
-            f0, firma0, prov0, num0, fecha0, productos0 = archivos_validos[idx_existente]
-
-            sig0 = {_firma_producto_pagina(p) for p in productos0}
-            sig1 = {_firma_producto_pagina(p) for p in productos}
-
-            nuevos = [p for p in productos if _firma_producto_pagina(p) not in sig0]
-
-            if nuevos:
-                # Página adicional de la misma factura: unir productos.
-                combinados = list(productos0) + nuevos
-                archivos_validos[idx_existente] = (
-                    f0, firma0, prov0 or proveedor, num0 or num_fac,
-                    fecha0 or fecha_fac, combinados
-                )
-                st.session_state.paginas_lote_detectadas[firma0] = (
-                    int(st.session_state.paginas_lote_detectadas.get(firma0, 1)) + 1
-                )
-            else:
-                # Mismo contenido: duplicado real.
-                archivos_duplicados.append(
-                    (f.name, proveedor, num_fac)
-                )
-
-        progreso_ocr.progress(100, text="Lectura completada")
-        progreso_ocr.empty()
-
-        _eventos_directos = st.session_state.get("fallback_574652_eventos", {})
-        for _nombre_directo, _info_directo in _eventos_directos.items():
-            if any(getattr(_f, "name", "") == _nombre_directo for _f in archivos_unicos):
-                st.success(
-                    f"✅ {_nombre_directo}: factura 574652 reconocida directamente "
-                    f"(página {_info_directo.get('pagina')}, sin OCR)."
-                )
-
-        _diag_visual = st.session_state.get("diagnostico_visual_directo", {})
-        for _nombre_visual, _info_visual in _diag_visual.items():
-            if any(getattr(_f, "name", "") == _nombre_visual for _f in archivos_unicos):
-                st.success(
-                    f"✅ Factura {_info_visual.get('factura')} reconocida por coincidencia visual "
-                    f"· página {_info_visual.get('pagina')} "
-                    f"· {_info_visual.get('productos')} productos."
-                )
-
-        _diag_fallback = st.session_state.get("diagnostico_ocr_fallback", {})
-        for _archivo_fb, _info_fb in _diag_fallback.items():
-            if any(getattr(_f, "name", "") == _archivo_fb for _f in archivos_unicos):
-                st.caption(
-                    f"📐 {_archivo_fb}: reconocimiento recuperado con rotación "
-                    f"{_info_fb.get('angulo')}° · {_info_fb.get('productos')} productos detectados."
-                )
-
-        # Acción principal visible inmediatamente después de leer la factura.
-        st.markdown("<div class='v3-process-top'></div>", unsafe_allow_html=True)
-        if st.button(
-            "🚀  Procesar Factura",
-            type="primary",
-            use_container_width=True,
-            disabled=(len(archivos_validos) == 0 or margen_porcentaje <= 0),
-            key="procesar_facturas_principal",
-        ):
-            modal_confirmacion(
-                archivos_validos,
-                len(archivos_duplicados),
-                margen_porcentaje,
-            )
+                else:
+                    firmas_detectadas_en_lote.add(firma)
+                    archivos_validos.append(
+                        (f, firma, proveedor, num_fac, fecha_fac, productos)
+                    )
 
     if uploaded_files:
         # -----------------------------------------------------
@@ -8440,13 +5840,17 @@ def render_carga_facturas(titulo=True):
                 for err in st.session_state.errores_ocr:
                     st.warning(err)
 
-        if margen_porcentaje <= 0:
-            st.error("La ganancia debe ser mayor al 0% para procesar.")
+        if margen_porcentaje <= 15:
+            st.error("El margen de ganancia debe ser mayor al 15% para procesar.")
 
-        # =====================================================
-        # RESUMEN DE VALIDACIÓN DEL LOTE
-        # =====================================================
+        # El botón principal se muestra en la columna derecha,
+        # justo debajo del margen de ganancia.
         with margen_col:
+            st.markdown('<div class="process-action-spacer"></div>', unsafe_allow_html=True)
+
+            # =====================================================
+            # RESUMEN DE VALIDACIÓN DEL LOTE
+            # =====================================================
             total_validas = len(archivos_validos) if uploaded_files else 0
             total_omitidas = (
                 len(archivos_duplicados) + len(archivos_invalidos)
@@ -8542,6 +5946,19 @@ def render_carga_facturas(titulo=True):
                 )
                 st.markdown(detalle_html, unsafe_allow_html=True)
 
+            if st.button(
+                "🚀  Generar Archivo Excel",
+                type="primary",
+                use_container_width=True,
+                disabled=(len(archivos_validos) == 0 or margen_porcentaje <= 15),
+                key="procesar_facturas_principal",
+            ):
+                modal_confirmacion(
+                    archivos_validos,
+                    len(archivos_duplicados),
+                    margen_porcentaje,
+                )
+
             st.caption(
                 "Se omiten automáticamente las facturas duplicadas antes de consolidar."
             )
@@ -8551,50 +5968,63 @@ def render_carga_facturas(titulo=True):
     else:
         # Mantener visible la acción principal desde el primer momento.
         # Se habilitará automáticamente cuando existan facturas válidas
-        # y la ganancia sea mayor al 0%.
+        # y el margen sea mayor al 15%.
         with margen_col:
-            st.markdown('<div class="process-action-spacer compact"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="process-action-spacer"></div>', unsafe_allow_html=True)
+            st.markdown(
+                """
+                <div class="process-ready process-waiting">
+                    <div class="process-ready-icon">📄</div>
+                    <div>
+                        <b>Generar Archivo Excel</b>
+                        <span>Carga tus facturas para habilitar el procesamiento</span>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
             st.button(
-                "🚀  Procesar Factura",
+                "🚀  Generar Archivo Excel",
                 type="primary",
                 use_container_width=True,
                 disabled=True,
                 key="procesar_facturas_principal_inactivo",
             )
-            st.caption("Carga una factura válida para habilitar el procesamiento.")
+            st.caption("Se habilita automáticamente cuando haya facturas válidas.")
 
-        st.caption("Selecciona una factura o usa la cámara para comenzar.")
+        st.markdown("""
+        <div class="empty-state">
+          <div class="big">🧾</div>
+          <b>Aún no has cargado facturas</b><br>
+          Selecciona archivos o usa la cámara para comenzar.
+        </div>
+        """, unsafe_allow_html=True)
 
 
 
 # =========================================================
 # SIDEBAR
 # =========================================================
-(
-    total_facturas,
-    total_archivos,
-    total_productos,
-    total_lineas,
-    total_unidades,
-    valor_compra,
-) = totales_dashboard()
+total_facturas, total_productos, total_lineas, total_unidades, valor_compra = totales_dashboard()
 
 with st.sidebar:
-    st.markdown(
-        f"""
-<div class="v3-side-brand">
-  <img src="data:image/png;base64,{WILPOS_LOGO_B64}" alt="WilPOS">
-</div>
-<div class="v3-side-label">MENÚ</div>
-""",
-        unsafe_allow_html=True,
-    )
+    st.markdown("""
+    <div class="side-logo">
+      <div class="brand">
+        <div class="mark">📦</div>
+        <div>
+          <div class="name">WilPOS</div>
+          <div class="sub">MÓVIL</div>
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     pagina = st.radio(
         "Navegación",
         [
             "🏠 Inicio",
-            "🧾 Procesar Factura",
+            "🧾 Generar Archivo Excel",
             "📦 Productos consolidados",
             "📋 Detalle de facturas",
             "📥 Exportar Excel",
@@ -8602,406 +6032,187 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
-    st.markdown(
-        """
-<div class="v3-side-divider"></div>
-<div class="v3-side-label">APARIENCIA</div>
-""",
-        unsafe_allow_html=True,
-    )
+    st.markdown("""
+    <div style="height:1px;background:rgba(255,255,255,.08);margin:.9rem 0;"></div>
+    """, unsafe_allow_html=True)
 
-    st.toggle(
-        "🌙 Modo oscuro",
-        key="modo_oscuro",
-        help="Cambia entre tema claro y oscuro.",
-    )
+    st.markdown(f"""
+    <div class="side-summary">
+      <div class="s-title">RESUMEN RÁPIDO</div>
+      <div class="row"><span>Facturas procesadas</span><span class="num">{total_facturas}</span></div>
+      <div class="row"><span>Productos únicos</span><span class="num">{total_productos}</span></div>
+      <div class="row"><span>Líneas procesadas</span><span class="num">{total_lineas}</span></div>
+      <div class="row"><span>Unidades totales</span><span class="num">{total_unidades:,}</span></div>
+      <div class="row"><span>Total procesado</span><span class="num">RD$ {valor_compra:,.2f}</span></div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    st.markdown("<div class='v3-side-bottom-gap'></div>", unsafe_allow_html=True)
-
+    st.markdown("<div style='height:.7rem'></div>", unsafe_allow_html=True)
     if st.button("🔄 Reiniciar todo", use_container_width=True):
         resetear_todo()
         st.rerun()
 
 
 # =========================================================
-# V5 — COMPACTAR ESPACIO SUPERIOR + HEADER MÁS GRANDE
-# =========================================================
-st.markdown(
-    """
-<style>
-/* Streamlit mantiene un bloque superior por la cabecera/sidebar.
-   Lo compactamos agresivamente sin afectar los widgets. */
-[data-testid="stAppViewContainer"] {
-  padding-top:0 !important;
-}
-[data-testid="stMain"] {
-  padding-top:0 !important;
-  margin-top:0 !important;
-}
-[data-testid="stMainBlockContainer"],
-.main .block-container,
-.block-container {
-  padding-top:0 !important;
-  margin-top:-2.35rem !important;
-}
-
-/* En móviles no usamos margen negativo tan fuerte */
-@media(max-width:700px) {
-  [data-testid="stMainBlockContainer"],
-  .main .block-container,
-  .block-container {
-    margin-top:-1.15rem !important;
-  }
-}
-
-/* Encabezado principal más grande y protagonista */
-.v4-app-header {
-  min-height:82px !important;
-  padding:.85rem 1.15rem !important;
-  margin-top:0 !important;
-  margin-bottom:.75rem !important;
-  border-radius:14px !important;
-}
-
-.v4-header-copy strong {
-  font-size:1.28rem !important;
-  line-height:1.15 !important;
-  font-weight:900 !important;
-  letter-spacing:-.025em !important;
-}
-
-.v4-header-copy span {
-  font-size:.78rem !important;
-  margin-top:.18rem !important;
-}
-
-.v4-header-status {
-  font-size:.72rem !important;
-  padding:.48rem .72rem !important;
-}
-
-/* Sidebar también sube para aprovechar el espacio */
-[data-testid="stSidebar"] > div:first-child {
-  padding-top:.35rem !important;
-}
-
-@media(max-width:700px) {
-  .v4-app-header {
-    min-height:68px !important;
-    padding:.65rem .75rem !important;
-    margin-bottom:.55rem !important;
-  }
-  .v4-header-copy strong {
-    font-size:1.05rem !important;
-  }
-  .v4-header-copy span {
-    font-size:.65rem !important;
-  }
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-
-st.markdown(
-    """
-<style>
-@media (max-width: 768px) {
-  [data-testid="stHeader"] {
-    display:flex !important;
-    height:2.65rem !important;
-    min-height:2.65rem !important;
-    background:transparent !important;
-    pointer-events:none !important;
-  }
-
-  [data-testid="stHeader"] button,
-  [data-testid="stHeader"] [role="button"],
-  [data-testid="collapsedControl"] {
-    pointer-events:auto !important;
-  }
-
-  [data-testid="stToolbar"] {
-    display:none !important;
-  }
-
-  [data-testid="stMainBlockContainer"],
-  .main .block-container,
-  .block-container {
-    padding-top:.25rem !important;
-    margin-top:0 !important;
-  }
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-
-# =========================================================
-# V6 — SIDEBAR RESPONSIVE PARA MÓVIL
-# =========================================================
-st.markdown(
-    """
-<style>
-/* Escritorio: mantener navegación lateral normal */
-@media (min-width: 769px) {
-  [data-testid="stSidebar"] {
-    transform:none !important;
-    visibility:visible !important;
-  }
-}
-
-/* Móvil y tablets pequeñas */
-@media (max-width: 768px) {
-  /* El contenido principal ocupa todo el ancho */
-  [data-testid="stAppViewContainer"] > .main,
-  [data-testid="stMain"],
-  section.main {
-    width:100% !important;
-    margin-left:0 !important;
-    padding-left:0 !important;
-  }
-
-  [data-testid="stMainBlockContainer"],
-  .main .block-container,
-  .block-container {
-    max-width:100% !important;
-    width:100% !important;
-    margin-left:0 !important;
-    margin-right:0 !important;
-    padding-left:.55rem !important;
-    padding-right:.55rem !important;
-  }
-
-  /* Cuando Streamlit deja el sidebar abierto al cargar en móvil,
-     lo sacamos visualmente del viewport. Al usar el control nativo,
-     Streamlit puede volver a mostrarlo. */
-  [data-testid="stSidebar"][aria-expanded="true"] {
-    position:fixed !important;
-    z-index:9999 !important;
-    height:100vh !important;
-    max-width:82vw !important;
-  }
-
-  /* Reducir su ancho cuando el usuario lo abre manualmente */
-  [data-testid="stSidebar"] {
-    width:min(82vw, 280px) !important;
-    min-width:min(82vw, 280px) !important;
-  }
-
-  /* Mostrar el botón nativo para abrir/cerrar sidebar */
-  [data-testid="collapsedControl"],
-  button[data-testid="stSidebarCollapseButton"],
-  button[data-testid="stSidebarExpandButton"] {
-    display:flex !important;
-    visibility:visible !important;
-    opacity:1 !important;
-    z-index:10000 !important;
-  }
-
-  /* Header compacto en móvil */
-  .v4-app-header {
-    width:100% !important;
-    margin-left:0 !important;
-    margin-right:0 !important;
-  }
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-
-# =========================================================
 # INICIO
 # =========================================================
 if pagina == "🏠 Inicio":
-    modo_texto = "Modo oscuro" if st.session_state.get("modo_oscuro", False) else "Modo claro"
-    encabezado_html = f"""
-<div class="v4-app-header">
-  <div class="v4-header-copy">
-    <strong>WilPOS Móvil</strong>
-    <span>Procesador inteligente de facturas</span>
-  </div>
-  <div class="v4-header-status">
-    <span class="v4-status-dot"></span>
-    <span>{modo_texto}</span>
-  </div>
+    st.markdown(f"""<div class="hero-grid">
+<div class="hero-card hero-card-logo">
+<div class="hero-copy">
+<h1>¡Bienvenido! 👋</h1>
+<div class="subtitle">Procesador de Facturas para WilPOS</div>
+<p>Carga tus facturas desde tu teléfono o computadora.</p>
+<p>El sistema consolidará los productos y generará el Excel listo para importar en WilPOS.</p>
 </div>
-"""
-    st.markdown(encabezado_html, unsafe_allow_html=True)
-
-    head_left, head_gain, head_itbis = st.columns([5.8, 1.25, .9], gap="medium")
-
-    with head_left:
-        st.markdown(
-            """
-<div class="v3-page-title">
-  <h1>Procesar Facturas e Imágenes</h1>
-  <p>Extrae productos, calcula precios y genera el archivo para WilPOS automáticamente.</p>
+<div class="hero-brand-zone">
+<img class="wilpos-hero-logo" src="data:image/png;base64,{WILPOS_LOGO_B64}" alt="WilPOS">
 </div>
-""",
-            unsafe_allow_html=True,
-        )
-
-    with head_gain:
-        st.markdown('<div class="v3-top-label">% de Ganancia</div>', unsafe_allow_html=True)
-        margen_home = st.number_input(
-            "Ganancia principal",
-            min_value=0.0,
-            max_value=500.0,
-            value=float(st.session_state.margen_usado),
-            step=1.0,
-            format="%.0f",
-            label_visibility="collapsed",
-            key="margen_home_v3",
-        )
-        if margen_home != st.session_state.margen_usado:
-            st.session_state.margen_usado = float(margen_home)
-
-    with head_itbis:
-        st.markdown(
-            """
-<div class="v3-top-itbis">
-  <span>ITBIS aplicado</span>
-  <strong>18%</strong>
+<div class="hero-visual">
+<div class="phone"></div>
+<div class="sheet"></div>
 </div>
-""",
-            unsafe_allow_html=True,
-        )
+</div>
+<div class="stats-card">
+<div class="stats-title">Estadísticas generales</div>
+<div class="stats-grid">
+<div class="stat blue">
+<div class="label">Facturas procesadas</div>
+<div class="value">{total_facturas}</div>
+<div class="stat-icon">🧾</div>
+</div>
+<div class="stat purple">
+<div class="label">Productos únicos</div>
+<div class="value">{total_productos}</div>
+<div class="stat-icon">📦</div>
+</div>
+<div class="stat orange">
+<div class="label">Unidades totales</div>
+<div class="value">{total_unidades:,}</div>
+<div class="stat-icon">🛒</div>
+</div>
+<div class="stat green">
+<div class="label">Total procesado</div>
+<div class="value">RD$ {valor_compra:,.2f}</div>
+<div class="stat-icon">💰</div>
+</div>
+</div>
+<div class="stats-link">Ver detalle completo →</div>
+</div>
+</div>""", unsafe_allow_html=True)
 
-    df_home = construir_df_productos()
-    valor_venta_estimado = 0.0
-    if not df_home.empty:
-        try:
-            valor_venta_estimado = float(
-                (df_home["Precio Venta"].astype(float) * df_home["Stock"].astype(float)).sum()
+    render_carga_facturas(titulo=False)
+
+
+
+    if st.session_state.detalle_facturas_procesadas:
+        st.markdown('<div class="inventory-card">', unsafe_allow_html=True)
+
+        df_inicio = construir_df_productos()
+
+        inv_c1, inv_preview, inv_download = st.columns([3.2, 1, 1.25])
+
+        with inv_c1:
+            st.markdown(
+                f'<div class="inventory-title">📦 Productos consolidados '
+                f'<span class="badge">{len(df_inicio)} productos únicos</span></div>',
+                unsafe_allow_html=True
             )
-        except Exception:
-            valor_venta_estimado = 0.0
 
-    ganancia_estimada = max(0.0, valor_venta_estimado - valor_compra)
+        with inv_preview:
+            if not df_inicio.empty:
+                if st.button(
+                    "👁 Vista previa",
+                    use_container_width=True,
+                    key="preview_productos_inicio",
+                ):
+                    mostrar_vista_previa_productos(df_inicio)
 
-    kpi_html = f"""
-<div class="v3-kpi-grid">
-  <div class="v3-kpi-card">
-    <div class="v3-kpi-icon blue">🧾</div>
-    <div>
-      <span>Facturas únicas</span>
-      <strong>{total_facturas}</strong>
-      <small>{total_archivos} archivo(s)/página(s)</small>
-    </div>
-  </div>
-  <div class="v3-kpi-card">
-    <div class="v3-kpi-icon green">📦</div>
-    <div><span>Productos únicos</span><strong>{total_productos}</strong><small>productos</small></div>
-  </div>
-  <div class="v3-kpi-card">
-    <div class="v3-kpi-icon purple">💲</div>
-    <div><span>Valor de compra</span><strong>RD${valor_compra:,.2f}</strong><small>sin ITBIS</small></div>
-  </div>
-  <div class="v3-kpi-card">
-    <div class="v3-kpi-icon orange">📈</div>
-    <div><span>Valor de venta</span><strong>RD${valor_venta_estimado:,.2f}</strong><small>con ITBIS</small></div>
-  </div>
-  <div class="v3-kpi-card">
-    <div class="v3-kpi-icon teal">%</div>
-    <div><span>Ganancia estimada</span><strong>RD${ganancia_estimada:,.2f}</strong><small>{float(st.session_state.margen_usado):.0f}%</small></div>
-  </div>
-</div>
-"""
-    st.markdown(kpi_html, unsafe_allow_html=True)
-
-    if total_archivos > total_facturas:
-        st.caption(
-            f"📄 {total_archivos} archivos/páginas procesados corresponden a "
-            f"{total_facturas} factura(s) única(s)."
-        )
-
-    upload_col, preview_col = st.columns([.92, 1.65], gap="medium")
-
-    with upload_col:
-        render_carga_facturas(titulo=False)
-
-    with preview_col:
-        st.markdown(
-            '<div class="v3-panel-title">Vista previa del inventario</div>',
-            unsafe_allow_html=True,
-        )
-
-        df_preview = construir_df_productos()
-
-        if not df_preview.empty:
-            botones_a, botones_b, botones_c = st.columns([2.4, 1.15, 1.05], gap="small")
-            with botones_b:
-                if st.button("Ver inventario completo", use_container_width=True, key="v3_ver_inv"):
-                    mostrar_vista_previa_productos(df_preview)
-            with botones_c:
-                excel_home = generar_excel_wilpos(df_preview)
+        with inv_download:
+            if not df_inicio.empty:
+                excel_inicio = generar_excel_wilpos(df_inicio)
                 st.download_button(
-                    "⬇ Exportar Excel",
-                    data=excel_home,
+                    "📥 Descargar Excel",
+                    data=excel_inicio,
                     file_name="Productos_WilPOS_Consolidados.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                     type="primary",
-                    key="v3_export_home",
+                    key="download_excel_inicio",
                 )
 
-            cols_preview = [
+        if not df_inicio.empty:
+            render_gestor_exclusion_productos(
+                df_inicio,
+                key_prefix="inicio",
+            )
+
+            # Reconstruir porque una exclusión puede haber cambiado el consolidado.
+            df_inicio = construir_df_productos()
+
+            cols = [
                 c for c in [
                     "Código Barra",
                     "Nombre",
+                    "Cantidad Empaque",
                     "Stock",
                     "Costo",
-                    "ITBIS",
-                    "Precio Venta",
-                    "Categoría",
-                ] if c in df_preview.columns
-            ]
-
-            df_show = df_preview[cols_preview].head(8).copy()
-            if "Nombre" in df_show.columns:
-                df_show = df_show.rename(columns={"Nombre": "Descripción"})
-            if "Stock" in df_show.columns:
-                df_show = df_show.rename(columns={"Stock": "Cantidad"})
-
-            st.dataframe(
-                df_show,
-                use_container_width=True,
-                hide_index=True,
-                height=310,
-                column_config={
-                    "Costo": st.column_config.NumberColumn(format="RD$ %.2f"),
-                    "Precio Venta": st.column_config.NumberColumn(format="RD$ %.2f"),
-                    "ITBIS": st.column_config.NumberColumn(format="%.2f"),
-                },
-            )
-            st.caption(f"Mostrando {min(8, len(df_preview))} de {len(df_preview)} productos")
-        else:
-            empty_df = pd.DataFrame(
-                columns=[
-                    "Código Barra",
-                    "Descripción",
-                    "Cantidad",
-                    "Costo sin ITBIS",
-                    "ITBIS",
                     "Precio Venta",
                     "Categoría",
                 ]
+                if c in df_inicio.columns
+            ]
+
+            st.markdown(
+                f"""
+                <div class="home-products-note">
+                    <span><b>{len(df_inicio)}</b> productos consolidados</span>
+                    <span>↕ Desplázate para ver todos</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
+
+            # IMPORTANTE: ya no se usa .head(8).
+            # Todas las filas están dentro del dataframe y el scroll
+            # vertical aparece al superar la altura configurada.
             st.dataframe(
-                empty_df,
+                df_inicio[cols],
                 use_container_width=True,
                 hide_index=True,
-                height=310,
+                height=500,
+                column_config={
+                    "Código Barra": st.column_config.TextColumn(
+                        "Código Barra", width="medium"
+                    ),
+                    "Nombre": st.column_config.TextColumn(
+                        "Nombre", width="large"
+                    ),
+                    "Cantidad Empaque": st.column_config.NumberColumn(
+                        "Cantidad Empaque", format="%d"
+                    ),
+                    "Stock": st.column_config.NumberColumn(
+                        "Stock", format="%d"
+                    ),
+                    "Costo": st.column_config.NumberColumn(
+                        "Costo", format="%.4f"
+                    ),
+                    "Precio Venta": st.column_config.NumberColumn(
+                        "Precio Venta", format="%.2f"
+                    ),
+                    "Categoría": st.column_config.TextColumn(
+                        "Categoría", width="medium"
+                    ),
+                },
             )
-            st.caption("Carga y procesa facturas para mostrar productos aquí.")
+
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
-elif pagina == "🧾 Procesar Factura":
+# =========================================================
+# GENERAR ARCHIVO EXCEL
+# =========================================================
+elif pagina == "🧾 Generar Archivo Excel":
     render_carga_facturas(titulo=True)
 
 
@@ -9019,7 +6230,7 @@ elif pagina == "📦 Productos consolidados":
         "Por eso el número de productos consolidados puede ser menor que el número total de líneas leídas."
     )
     st.info(
-        "Vista previa del consolidado que se exportará a WilPOS. El campo Costo se normaliza sin ITBIS cuando el documento permite detectarlo."
+        "Vista previa del consolidado que se exportará al archivo Excel para importarlo en WilPOS."
     )
 
     if not df_repetidos_hist.empty:
@@ -9139,7 +6350,7 @@ elif pagina == "📦 Productos consolidados":
         c1, c2, c3 = st.columns(3)
         c1.metric("Productos consolidados", len(df_productos))
         c2.metric("Unidades consolidadas", int(df_productos["Stock"].sum()))
-        c3.metric("Ganancia aplicada", f"{st.session_state.margen_usado:g}%")
+        c3.metric("Margen aplicado", f"{st.session_state.margen_usado:g}%")
     st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -9159,7 +6370,6 @@ elif pagina == "📋 Detalle de facturas":
                 "No. Factura": info["num_factura"],
                 "Fecha": info["fecha"],
                 "Artículos": info["cantidad_articulos"],
-                "Costo / ITBIS": info.get("itbis_costos", "No determinado"),
             })
         st.dataframe(pd.DataFrame(tabla), use_container_width=True, hide_index=True)
     st.markdown('</div>', unsafe_allow_html=True)
