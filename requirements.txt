@@ -22,3 +22,4 @@ pytesseract
 pdfplumber
 PyMuPDF
 requests
+openai>=1.0.0
