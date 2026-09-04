@@ -2,6 +2,7 @@ import io
 import base64
 import os
 import hashlib
+import html
 import re
 import json
 import html as html_lib
@@ -3792,7 +3793,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R13":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R14":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3801,7 +3802,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R13":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R13"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R14"
 
 
 # =========================================================
@@ -8110,7 +8111,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R13"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R14"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -10003,7 +10004,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R13_ISC_CANTIDAD_UDM_20260904"
+EXTRACTOR_CACHE_VERSION = "BASE6_R14_UI_HORIZONTAL_COMPACTA_20260904"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -10043,33 +10044,48 @@ def render_carga_facturas(titulo=True):
             + " Las facturas desconocidas dependerán solamente del OCR local."
         )
 
-    st.markdown("#### Diagnóstico técnico de lectura")
+    # BASE6-R14: diagnóstico compacto; el detalle técnico queda plegado.
     ultimo_error_directo = st.session_state.get("vision_ultimo_error_directo", "")
+    debug_map = st.session_state.get("vision_debug", {}) or {}
+    errores_v = st.session_state.get("errores_vision_api", {}) or {}
+
+    total_diag = len(debug_map)
+    total_errores_diag = len([e for e in errores_v.values() if e])
     if ultimo_error_directo:
-        st.error("ERROR DIRECTO DE OPENAI API:\n\n" + ultimo_error_directo)
-    debug_map = st.session_state.get("vision_debug", {})
-    if not debug_map:
-        st.info(
-            "Todavía no hay eventos de Vision registrados. "
-            "Carga una imagen y pulsa Procesar Factura."
-        )
-    else:
-        for dbg_archivo, dbg_eventos in debug_map.items():
-            with st.expander(f"🔎 {dbg_archivo}", expanded=True):
-                for ev in dbg_eventos[-12:]:
-                    estado = ev.get("estado", "")
-                    icono = "✅" if estado == "OK" else ("⚠️" if estado in ("INTENTO", "FALLO") else "❌")
-                    st.write(
-                        f"{icono} **{ev.get('etapa','')}** — {estado}: "
-                        f"{ev.get('detalle','')}"
+        total_errores_diag += 1
+
+    if total_diag or total_errores_diag:
+        estado_diag = "✅ Lectura técnica OK" if total_errores_diag == 0 else f"⚠️ {total_errores_diag} incidencia(s)"
+        st.caption(f"🧪 Diagnóstico técnico · {total_diag} archivo(s) · {estado_diag}")
+
+        with st.expander("Ver diagnóstico técnico de lectura", expanded=False):
+            if ultimo_error_directo:
+                st.error("ERROR DIRECTO DE OPENAI API:\n\n" + ultimo_error_directo)
+
+            if not debug_map:
+                st.caption("Todavía no hay eventos de Vision registrados.")
+            else:
+                for dbg_archivo, dbg_eventos in debug_map.items():
+                    ultimos = dbg_eventos[-6:]
+                    ok = sum(1 for ev in ultimos if ev.get("estado") == "OK")
+                    fallos = sum(1 for ev in ultimos if ev.get("estado") not in ("OK", "INTENTO"))
+                    st.markdown(
+                        f"**{dbg_archivo}** · ✅ {ok} · "
+                        f"{'⚠️ ' + str(fallos) if fallos else 'sin incidencias'}"
                     )
+                    for ev in ultimos:
+                        estado = ev.get("estado", "")
+                        icono = "✅" if estado == "OK" else ("⏳" if estado == "INTENTO" else "⚠️")
+                        st.caption(
+                            f"{icono} {ev.get('etapa','')} — {estado}: "
+                            f"{str(ev.get('detalle',''))[:220]}"
+                        )
 
-
-    errores_v = st.session_state.get("errores_vision_api", {})
-    if errores_v:
-        with st.expander("Diagnóstico de lectura avanzada"):
-            for archivo_v, error_v in list(errores_v.items())[-5:]:
-                st.error(f"{archivo_v}: {error_v}")
+            if errores_v:
+                st.markdown("**Errores de lectura avanzada**")
+                for archivo_v, error_v in list(errores_v.items())[-5:]:
+                    if error_v:
+                        st.error(f"{archivo_v}: {error_v}")
 
     """Carga y procesa facturas conservando toda la lógica original."""
 
@@ -10135,16 +10151,58 @@ def render_carga_facturas(titulo=True):
     ]
 
     if uploaded_files:
-        # El uploader ya muestra "Selecciona tus facturas", no lo repetimos.
-        max_cols = 3
+        # BASE6-R14: franja horizontal compacta con scroll.
+        chips = []
+        for indice, archivo in enumerate(uploaded_files):
+            try:
+                datos = archivo.getvalue()
+            except Exception:
+                archivo.seek(0)
+                datos = archivo.read()
+                archivo.seek(0)
 
-        for fila_inicio in range(0, len(uploaded_files), max_cols):
-            grupo = uploaded_files[fila_inicio:fila_inicio + max_cols]
-            columnas_archivos = st.columns(len(grupo), gap="small")
+            nombre = archivo.name
+            extension = nombre.lower().rsplit(".", 1)[-1] if "." in nombre else ""
+            if extension == "pdf":
+                icono, tipo = "📄", "PDF"
+            elif extension in ("jpg", "jpeg", "png", "webp"):
+                icono, tipo = "🖼️", "Imagen"
+            else:
+                icono, tipo = "📎", extension.upper() or "Archivo"
 
-            for offset, archivo in enumerate(grupo):
-                indice = fila_inicio + offset
+            tam = len(datos)
+            tam_txt = f"{tam/1024/1024:.1f} MB" if tam >= 1024*1024 else f"{tam/1024:.1f} KB"
+            chips.append(
+                f"""
+                <div style="
+                    flex:0 0 auto; min-width:170px; max-width:220px;
+                    border:1px solid var(--border); border-radius:12px;
+                    padding:8px 10px; background:var(--panel);
+                " title="{html.escape(nombre)}">
+                    <div style="
+                        font-weight:700; font-size:.86rem;
+                        white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+                    ">{icono} {html.escape(nombre)}</div>
+                    <div style="font-size:.74rem; color:var(--muted); margin-top:2px;">
+                        {tam_txt} · {tipo}
+                    </div>
+                </div>
+                """
+            )
 
+        st.markdown(
+            """
+            <div style="
+                display:flex; gap:8px; overflow-x:auto; overflow-y:hidden;
+                padding:4px 1px 8px 1px; -webkit-overflow-scrolling:touch;
+            ">
+            """ + "".join(chips) + "</div>",
+            unsafe_allow_html=True,
+        )
+
+        # Acciones menos frecuentes quedan plegadas para no ocupar espacio.
+        with st.expander("Administrar archivos cargados", expanded=False):
+            for indice, archivo in enumerate(uploaded_files):
                 try:
                     datos = archivo.getvalue()
                 except Exception:
@@ -10154,54 +10212,28 @@ def render_carga_facturas(titulo=True):
 
                 nombre = archivo.name
                 mime = getattr(archivo, "type", None)
-                extension = nombre.lower().rsplit(".", 1)[-1] if "." in nombre else ""
+                c1, c2, c3 = st.columns([7, 1.3, 1.3], gap="small", vertical_alignment="center")
+                with c1:
+                    st.caption(nombre)
+                with c2:
+                    if st.button(
+                        "👁",
+                        key=f"preview_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+                        help=f"Vista previa de {nombre}",
+                        use_container_width=True,
+                    ):
+                        mostrar_vista_previa_archivo(nombre, mime, datos)
+                with c3:
+                    if st.button(
+                        "✕",
+                        key=f"remove_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+                        help=f"Quitar {nombre}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.archivos_ocultos_ui.add(_huella_archivo_ui(archivo))
+                        st.rerun()
 
-                if extension in ("jpg", "jpeg", "png"):
-                    icono = "🖼️"
-                    tipo = "Imagen"
-                elif extension == "pdf":
-                    icono = "📄"
-                    tipo = "PDF"
-                else:
-                    icono = "📎"
-                    tipo = extension.upper() or "Archivo"
-
-                nombre_corto = nombre if len(nombre) <= 25 else nombre[:22] + "…"
-
-                with columnas_archivos[offset]:
-                    with st.container(border=True):
-                        info_col, ojo_col, x_col = st.columns(
-                            [6.6, 1.1, 1.1],
-                            gap="small",
-                            vertical_alignment="center",
-                        )
-
-                        with info_col:
-                            st.markdown(f"{icono} **{nombre_corto}**")
-                            st.caption(f"{len(datos)/1024:.1f} KB · {tipo}")
-
-                        with ojo_col:
-                            if st.button(
-                                "👁",
-                                key=f"preview_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
-                                help=f"Vista previa de {nombre}",
-                                use_container_width=True,
-                            ):
-                                mostrar_vista_previa_archivo(nombre, mime, datos)
-
-                        with x_col:
-                            if st.button(
-                                "✕",
-                                key=f"remove_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
-                                help=f"Quitar {nombre}",
-                                use_container_width=True,
-                            ):
-                                st.session_state.archivos_ocultos_ui.add(
-                                    _huella_archivo_ui(archivo)
-                                )
-                                st.rerun()
-
-        st.markdown("<div style='height:.2rem'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:.1rem'></div>", unsafe_allow_html=True)
 
     archivos_validos = []
     archivos_duplicados = []
