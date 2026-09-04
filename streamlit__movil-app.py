@@ -1,4 +1,5 @@
 import io
+import hashlib
 import re
 import json
 import html as html_lib
