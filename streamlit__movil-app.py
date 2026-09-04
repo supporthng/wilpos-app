@@ -3792,7 +3792,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "V22":
+if st.session_state.get("_extractor_runtime_version") != "V23":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3801,7 +3801,7 @@ if st.session_state.get("_extractor_runtime_version") != "V22":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "V22"
+    st.session_state["_extractor_runtime_version"] = "V23"
 
 
 # =========================================================
@@ -8577,7 +8577,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "V22_DIAGNOSTICO_POR_ARCHIVO_20260903"
+EXTRACTOR_CACHE_VERSION = "V23_BOTON_PROCESAR_FIX_20260903"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -8887,7 +8887,7 @@ def render_carga_facturas(titulo=True):
             "🚀  Procesar Factura",
             type="primary",
             use_container_width=True,
-            disabled=(len(archivos_validos) == 0 or margen_porcentaje <= 0),
+            disabled=False,
             key="procesar_facturas_principal",
         ):
             modal_confirmacion(
@@ -9146,7 +9146,7 @@ def render_carga_facturas(titulo=True):
                 "🚀  Procesar Factura",
                 type="primary",
                 use_container_width=True,
-                disabled=True,
+                disabled=False,
                 key="procesar_facturas_principal_inactivo",
             )
             st.caption("Carga una factura válida para habilitar el procesamiento.")
