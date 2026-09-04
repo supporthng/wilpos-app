@@ -3793,7 +3793,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R18":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R19":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3802,7 +3802,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R18":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R18"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R19"
 
 
 # =========================================================
@@ -5285,6 +5285,76 @@ def _inferir_categoria_generica(nombre):
     return "General"
 
 
+
+CLIENTE_ALIASES_NO_PROVEEDOR = (
+    "AD ROYAL LICOR",
+    "ROYAL LICOR",
+    "DUSP ROYAL CLUB",
+    "DUSP ROYAL CLUB SRL",
+)
+
+
+def _texto_empresa_canonico(valor):
+    return re.sub(
+        r"[^A-Z0-9]",
+        "",
+        _normalizar_ocr(str(valor or "")).upper(),
+    )
+
+
+def _proveedor_parece_cliente(proveedor, cliente=""):
+    """
+    Evita usar el comprador/facturado-a como proveedor.
+    El proveedor debe ser la empresa EMISORA/VENDEDORA de la factura.
+    """
+    p = _texto_empresa_canonico(proveedor)
+    c = _texto_empresa_canonico(cliente)
+
+    if not p:
+        return True
+
+    if c and (p == c or p in c or c in p):
+        return True
+
+    for alias in CLIENTE_ALIASES_NO_PROVEEDOR:
+        a = _texto_empresa_canonico(alias)
+        if a and (p == a or p in a or a in p):
+            return True
+
+    # textos genéricos que Vision/OCR a veces confunde como empresa
+    if p in {
+        "CLIENTE", "FACTURADOA", "VENDIDOA", "ENVIARA",
+        "CUSTOMER", "UNKNOWN", "DESCONOCIDO", "NIDENTIFICADO",
+    }:
+        return True
+
+    return False
+
+
+def _normalizar_proveedor_factura(proveedor, cliente=""):
+    prov = " ".join(str(proveedor or "").split()).strip()
+    if _proveedor_parece_cliente(prov, cliente):
+        return "Proveedor no identificado"
+    return prov or "Proveedor no identificado"
+
+
+def _firma_factura_canonica(proveedor, numero="", ncf=""):
+    """
+    NCF manda. Así una misma factura no se duplica aunque una página
+    haya leído mal el proveedor como cliente.
+    """
+    ncf_key = re.sub(r"[^A-Z0-9]", "", str(ncf or "").upper())
+    if ncf_key:
+        return ("NCF", ncf_key)
+
+    num_key = re.sub(r"[^A-Z0-9]", "", str(numero or "").upper())
+    prov_key = _texto_empresa_canonico(proveedor)
+    if num_key:
+        return ("FAC", prov_key, num_key)
+
+    return ("DOC", prov_key)
+
+
 def _extraer_proveedor_generico(lineas):
     """
     Busca el nombre comercial en las primeras líneas.
@@ -6739,6 +6809,7 @@ VISION_FACTURA_SCHEMA = {
     "type": "object",
     "properties": {
         "provider": {"type": "string"},
+        "customer": {"type": ["string", "null"]},
         "invoice_number": {"type": ["string", "null"]},
         "ncf": {"type": ["string", "null"]},
         "date": {"type": ["string", "null"]},
@@ -6778,6 +6849,7 @@ VISION_FACTURA_SCHEMA = {
     },
     "required": [
         "provider",
+        "customer",
         "invoice_number",
         "ncf",
         "date",
@@ -7211,11 +7283,9 @@ def _inferir_unidades_empaque_vision(item, nombre=""):
 
 
 def _clave_factura_multipagina(proveedor="", numero="", ncf=""):
-    """Clave estable para agrupar páginas de la misma factura."""
-    prov = _nombre_producto_canonico(proveedor)
-    num = re.sub(r"[^A-Z0-9]", "", str(numero or "").upper())
-    ncfn = re.sub(r"[^A-Z0-9]", "", str(ncf or "").upper())
-    return ncfn or (prov + "|" + num if num else prov)
+    """Clave estable; NCF no depende de que una página lea mal el proveedor."""
+    firma = _firma_factura_canonica(proveedor, numero, ncf)
+    return "|".join(str(x) for x in firma)
 
 
 def _registrar_pagina_factura_vision(
@@ -7424,6 +7494,8 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
         return None
 
     proveedor = str(data.get("provider") or "").strip()
+    cliente = str(data.get("customer") or "").strip()
+    proveedor = _normalizar_proveedor_factura(proveedor, cliente)
     numero = str(data.get("invoice_number") or "").strip()
     ncf = str(data.get("ncf") or "").strip()
     fecha = str(data.get("date") or "").strip()
@@ -7738,9 +7810,12 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
         ).strip("-")[:80]
 
     numero_visible = numero or ncf or firma_doc
+    firma_canonica = _firma_factura_canonica(proveedor, numero, ncf)
+    if firma_canonica[0] == "DOC":
+        firma_canonica = ("DOC", firma_canonica[1], firma_doc)
 
     return (
-        (proveedor, firma_doc),
+        firma_canonica,
         proveedor,
         numero_visible,
         fecha,
@@ -8339,7 +8414,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R18"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R19"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -8379,7 +8454,8 @@ Debes leer la tabla completa aunque la foto esté girada 90 grados.
 
 Formato exacto:
 {
-  "provider": "nombre proveedor",
+  "provider": "empresa EMISORA/VENDEDORA de la factura",
+  "customer": "empresa CLIENTE/COMPRADOR/FACTURADO A o null",
   "invoice_number": "numero o null",
   "ncf": "NCF o null",
   "date": "fecha o null",
@@ -8428,6 +8504,13 @@ Formato exacto:
 }
 
 REGLAS:
+- provider SIEMPRE es la empresa que EMITE/VENDE la factura: logo/razón social del encabezado,
+  vendedor/proveedor/emisor. NO uses como provider al cliente/comprador.
+- customer es la empresa que COMPRA/RECIBE: campos CLIENTE, FACTURAR A, VENDIDO A,
+  ENVIAR A, RAZÓN SOCIAL CLIENTE, etc.
+- AD ROYAL LICOR, ROYAL LICOR y DUSP ROYAL CLUB son nombres de CLIENTE en este flujo;
+  nunca deben devolverse como provider salvo que la propia factura demuestre que son el emisor.
+- Si el emisor no es legible, usa provider="Proveedor no identificado"; NO copies el cliente.
 - Cuenta TODAS las filas de productos visibles y coloca ese total en visible_product_rows.
 - Lee también los totales impresos cuando existan:
   * net_subtotal_before_tax = subtotal neto de mercancía ANTES de ITBIS, después de descuentos.
@@ -9882,10 +9965,11 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                     if codigo not in st.session_state.origen_productos_facturas:
                         st.session_state.origen_productos_facturas[codigo] = []
 
-                    st.session_state.origen_productos_facturas[codigo].append({
+                    proveedor_limpio = _normalizar_proveedor_factura(proveedor, "")
+                    nuevo_origen = {
                         "codigo": codigo,
                         "nombre": p["nombre"],
-                        "proveedor": proveedor,
+                        "proveedor": proveedor_limpio,
                         "factura": str(num_fac),
                         "fecha": fecha_fac,
                         "cantidad": float(p["cant"]),
@@ -9895,10 +9979,36 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         "moneda_original": moneda_original,
                         "costo_original": costo_original,
                         "tasa_usd_dop": float(tasa_usd_dop) if moneda_original == "USD" else None,
-                    })
+                    }
+
+                    # No registrar dos veces la misma línea de la misma factura
+                    # por una lectura distinta del proveedor/cliente.
+                    ya_existe_origen = False
+                    for existente in st.session_state.origen_productos_facturas[codigo]:
+                        if (
+                            _clave_origen_producto(existente) == _clave_origen_producto(nuevo_origen)
+                            and _nombre_producto_canonico(existente.get("nombre", ""))
+                                == _nombre_producto_canonico(nuevo_origen.get("nombre", ""))
+                            and abs(float(existente.get("unidades", 0)) - float(nuevo_origen["unidades"])) < 1e-9
+                            and abs(float(existente.get("costo_total", 0)) - float(nuevo_origen["costo_total"])) < 0.01
+                        ):
+                            existente["proveedor"] = _proveedor_preferible(
+                                existente.get("proveedor"),
+                                nuevo_origen.get("proveedor"),
+                            )
+                            ya_existe_origen = True
+                            break
+
+                    if not ya_existe_origen:
+                        st.session_state.origen_productos_facturas[codigo].append(nuevo_origen)
+
+                    # Si la misma línea de la misma factura ya estaba registrada,
+                    # no volver a sumar stock/costo al inventario.
+                    if ya_existe_origen:
+                        continue
 
                     # MISMO CÓDIGO = MISMO PRODUCTO:
-                    # suma stock y suma costo aunque venga de otra factura.
+                    # suma stock y suma costo cuando realmente viene de otra línea/factura.
                     if codigo in st.session_state.inventario_acumulado:
                         st.session_state.articulos_repetidos_notif.append(
                             f'**{p["nombre"]}** ({codigo}) apareció en otra factura; '
@@ -10154,6 +10264,35 @@ def detectar_productos_repetidos_en_facturas(archivos_validos):
     return pd.DataFrame(resumen), pd.DataFrame(detalle)
 
 
+
+def _clave_origen_producto(item):
+    """
+    Identifica una aparición por factura, no por el texto del proveedor.
+    Evita que la misma factura se cuente dos veces si una página leyó
+    'AD ROYAL LICOR' o 'unknown' como proveedor.
+    """
+    factura = re.sub(r"[^A-Z0-9]", "", str(item.get("factura") or "").upper())
+    ncf = re.sub(r"[^A-Z0-9]", "", str(item.get("ncf") or "").upper())
+    if ncf:
+        return ("NCF", ncf)
+    if factura:
+        return ("FAC", factura)
+    return (
+        "FALLBACK",
+        _texto_empresa_canonico(item.get("proveedor")),
+        str(item.get("fecha") or ""),
+    )
+
+
+def _proveedor_preferible(actual, nuevo):
+    """Conserva el proveedor real frente a unknown/cliente/no identificado."""
+    a = _normalizar_proveedor_factura(actual, "")
+    n = _normalizar_proveedor_factura(nuevo, "")
+    if a == "Proveedor no identificado" and n != "Proveedor no identificado":
+        return n
+    return a
+
+
 def construir_productos_repetidos_historicos():
     """Productos repetidos ya incorporados al consolidado."""
     resumen = []
@@ -10163,13 +10302,30 @@ def construir_productos_repetidos_historicos():
         # El mismo producto debe estar en 2+ facturas diferentes.
         facturas = {}
         for item in apariciones:
-            key = (str(item.get("proveedor", "")), str(item.get("factura", "")))
+            key = _clave_origen_producto(item)
 
             if key not in facturas:
                 facturas[key] = dict(item)
+                facturas[key]["proveedor"] = _normalizar_proveedor_factura(
+                    facturas[key].get("proveedor"), ""
+                )
             else:
-                facturas[key]["unidades"] += float(item.get("unidades", 0))
-                facturas[key]["costo_total"] += float(item.get("costo_total", 0))
+                # Si es la MISMA factura, no crear una aparición falsa por proveedor mal leído.
+                facturas[key]["proveedor"] = _proveedor_preferible(
+                    facturas[key].get("proveedor"),
+                    item.get("proveedor"),
+                )
+                # Solo acumular si las cantidades/costos realmente son líneas distintas.
+                # Si son exactamente iguales, tratarlas como repetición de lectura de la misma línea.
+                misma_linea = (
+                    abs(float(facturas[key].get("unidades", 0)) - float(item.get("unidades", 0))) < 1e-9
+                    and abs(float(facturas[key].get("costo_total", 0)) - float(item.get("costo_total", 0))) < 0.01
+                    and _nombre_producto_canonico(facturas[key].get("nombre", ""))
+                        == _nombre_producto_canonico(item.get("nombre", ""))
+                )
+                if not misma_linea:
+                    facturas[key]["unidades"] += float(item.get("unidades", 0))
+                    facturas[key]["costo_total"] += float(item.get("costo_total", 0))
 
         items = list(facturas.values())
         if len(items) < 2:
@@ -10192,7 +10348,7 @@ def construir_productos_repetidos_historicos():
             detalle.append({
                 "Código": codigo,
                 "Producto": x.get("nombre", ""),
-                "Proveedor": x.get("proveedor", ""),
+                "Proveedor": _normalizar_proveedor_factura(x.get("proveedor", ""), ""),
                 "Factura": x.get("factura", ""),
                 "Fecha": x.get("fecha", ""),
                 "Cantidad": x.get("cantidad", 0),
@@ -10340,7 +10496,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R18_TRAZABILIDAD_FALLOS_20260904"
+EXTRACTOR_CACHE_VERSION = "BASE6_R19_PROVEEDOR_CLIENTE_ANTIDUP_20260904"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
