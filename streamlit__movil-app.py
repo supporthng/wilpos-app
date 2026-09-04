@@ -3792,7 +3792,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "V21":
+if st.session_state.get("_extractor_runtime_version") != "V22":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3801,7 +3801,7 @@ if st.session_state.get("_extractor_runtime_version") != "V21":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "V21"
+    st.session_state["_extractor_runtime_version"] = "V22"
 
 
 # =========================================================
@@ -6055,7 +6055,7 @@ def _ocr_multilectura(imagen):
     return "\n".join(partes)
 
 
-OCR_CACHE_VERSION = "V21_OCR_20260903"
+OCR_CACHE_VERSION = "V22_OCR_20260903"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=64)
@@ -6576,7 +6576,9 @@ def _fallback_visual_factura_574652(raw_bytes, nombre_archivo=""):
 
     Así estas fotos NO dependen de Tesseract.
     """
+    _diag_vision(nombre_archivo, "inicio", "OK", f"{len(raw_bytes) if raw_bytes else 0} bytes recibidos")
     if not raw_bytes:
+        _diag_vision(nombre_archivo, "entrada", "ERROR", "Archivo sin bytes.")
         return None
 
     sha = hashlib.sha256(raw_bytes).hexdigest()
@@ -6676,8 +6678,27 @@ def _obtener_openai_api_key():
 
 
 
+
+def _diag_vision(nombre_archivo, etapa, estado, detalle=""):
+    """Guarda diagnóstico visible por archivo, incluso si luego hay rerun."""
+    try:
+        if "vision_debug" not in st.session_state:
+            st.session_state["vision_debug"] = {}
+        item = st.session_state["vision_debug"].setdefault(nombre_archivo, [])
+        item.append({
+            "etapa": str(etapa),
+            "estado": str(estado),
+            "detalle": str(detalle)[:1200],
+        })
+        # Mantener sólo los últimos 20 eventos por archivo.
+        st.session_state["vision_debug"][nombre_archivo] = item[-20:]
+    except Exception:
+        pass
+
+
 def _estado_vision_api():
     if not OPENAI_SDK_DISPONIBLE:
+        _diag_vision(nombre_archivo, "SDK OpenAI", "ERROR", "Paquete openai no disponible.")
         return False, "Falta instalar el paquete openai."
     if not _obtener_openai_api_key():
         return False, "No existe OPENAI_API_KEY en Streamlit Secrets."
@@ -6836,7 +6857,7 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
 
 
 @st.cache_data(show_spinner=False, ttl=86400, max_entries=256)
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V21"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V22"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -6855,6 +6876,7 @@ def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VI
 
     api_key = _obtener_openai_api_key()
     if not api_key:
+        _diag_vision(nombre_archivo, "API key", "ERROR", "OPENAI_API_KEY no encontrada.")
         try:
             st.session_state.setdefault("errores_vision_api", {})[nombre_archivo] = (
                 "No se encontró OPENAI_API_KEY en Streamlit Secrets."
@@ -6863,6 +6885,7 @@ def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VI
             pass
         return None
 
+    _diag_vision(nombre_archivo, "API key", "OK", "Clave encontrada en Secrets/entorno.")
     mime = _mime_imagen(nombre_archivo)
     data_url = f"data:{mime};base64,{base64.b64encode(raw_bytes).decode('ascii')}"
 
@@ -6919,6 +6942,7 @@ REGLAS:
     ultimo_error = ""
     for modelo in modelos:
         try:
+            _diag_vision(nombre_archivo, "envío API", "INTENTO", f"Modelo: {modelo}")
             client = OpenAI(api_key=api_key)
             response = client.responses.create(
                 model=modelo,
@@ -6941,9 +6965,17 @@ REGLAS:
                 max_output_tokens=12000,
             )
 
+            _diag_vision(
+                nombre_archivo,
+                "respuesta API",
+                "OK",
+                f"Modelo {modelo}; response_id={getattr(response, 'id', 'sin-id')}"
+            )
             raw_json = str(getattr(response, "output_text", "") or "").strip()
             if not raw_json:
+                _diag_vision(nombre_archivo, "texto API", "ERROR", "output_text vacío.")
                 raise RuntimeError("La API respondió sin texto.")
+            _diag_vision(nombre_archivo, "texto API", "OK", raw_json[:500])
 
             # Tolerar ```json ... ``` si el modelo lo añade.
             raw_json = re.sub(r"^```(?:json)?\s*", "", raw_json, flags=re.I)
@@ -6952,10 +6984,22 @@ REGLAS:
             data = json.loads(raw_json)
             resultado = _normalizar_resultado_vision_factura(data, nombre_archivo)
             if resultado is None:
+                _diag_vision(
+                    nombre_archivo,
+                    "normalización",
+                    "ERROR",
+                    "JSON recibido, pero ningún producto pasó la validación."
+                )
                 raise RuntimeError(
                     "La visión respondió, pero no devolvió productos válidos."
                 )
 
+            _diag_vision(
+                nombre_archivo,
+                "resultado",
+                "OK",
+                f"{len(resultado[4])} producto(s) válidos."
+            )
             try:
                 st.session_state.setdefault("diagnostico_vision_api", {})[nombre_archivo] = {
                     "modelo": modelo,
@@ -6969,6 +7013,7 @@ REGLAS:
 
         except Exception as exc:
             ultimo_error = f"{modelo}: {type(exc).__name__}: {str(exc)[:700]}"
+            _diag_vision(nombre_archivo, "envío/API", "ERROR", ultimo_error)
 
     try:
         st.session_state.setdefault("errores_vision_api", {})[nombre_archivo] = ultimo_error
@@ -7132,14 +7177,18 @@ def extraer_datos_factura(uploaded_file):
     # V21: para cualquier foto NO conocida, intentar visión primero.
     # Así las facturas nuevas no dependen de que Tesseract reconstruya bien la tabla.
     if file_name.endswith((".png", ".jpg", ".jpeg", ".webp")) and raw is not None:
-        vision_ok, _ = _estado_vision_api()
+        _diag_vision(uploaded_file.name, "flujo extractor", "OK", "Imagen nueva llegó al bloque Vision-first.")
+        vision_ok, vision_msg = _estado_vision_api()
+        _diag_vision(uploaded_file.name, "estado Vision", "OK" if vision_ok else "ERROR", vision_msg)
         if vision_ok:
             resultado_vision_directo = _extraer_factura_con_vision_api(
                 raw,
                 uploaded_file.name,
             )
             if resultado_vision_directo is not None:
+                _diag_vision(uploaded_file.name, "flujo extractor", "OK", "Vision devolvió resultado; se acepta.")
                 return resultado_vision_directo
+            _diag_vision(uploaded_file.name, "flujo extractor", "FALLO", "Vision no devolvió resultado; continúa a OCR local.")
 
     if file_name.endswith(".pdf"):
         # 1. Intenta obtener texto digital, igual que la versión original.
@@ -8528,7 +8577,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "V21_VISION_PRIMARIA_20260903"
+EXTRACTOR_CACHE_VERSION = "V22_DIAGNOSTICO_POR_ARCHIVO_20260903"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -8567,6 +8616,25 @@ def render_carga_facturas(titulo=True):
             + vision_msg
             + " Las facturas desconocidas dependerán solamente del OCR local."
         )
+
+    st.markdown("#### Diagnóstico técnico de lectura")
+    debug_map = st.session_state.get("vision_debug", {})
+    if not debug_map:
+        st.info(
+            "Todavía no hay eventos de Vision registrados. "
+            "Carga una imagen y pulsa Procesar Factura."
+        )
+    else:
+        for dbg_archivo, dbg_eventos in debug_map.items():
+            with st.expander(f"🔎 {dbg_archivo}", expanded=True):
+                for ev in dbg_eventos[-12:]:
+                    estado = ev.get("estado", "")
+                    icono = "✅" if estado == "OK" else ("⚠️" if estado in ("INTENTO", "FALLO") else "❌")
+                    st.write(
+                        f"{icono} **{ev.get('etapa','')}** — {estado}: "
+                        f"{ev.get('detalle','')}"
+                    )
+
 
     errores_v = st.session_state.get("errores_vision_api", {})
     if errores_v:
