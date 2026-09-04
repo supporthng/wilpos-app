@@ -3793,7 +3793,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R21":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R22":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3802,7 +3802,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R21":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R21"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R22"
 
 
 # =========================================================
@@ -6398,7 +6398,7 @@ def _ocr_multilectura(imagen):
     return "\n".join(partes)
 
 
-OCR_CACHE_VERSION = "V22_OCR_20260903"
+OCR_CACHE_VERSION = "BASE6_R22_OCR_FRESH_20260904"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=64)
@@ -8686,7 +8686,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R21"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R22"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -10783,7 +10783,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R21_NOMBRE_LIMPIO_PRESENTACION_20260904"
+EXTRACTOR_CACHE_VERSION = "BASE6_R22_NO_CACHE_FALLOS_20260904"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -10796,7 +10796,54 @@ def _extraer_factura_cacheada(nombre_archivo, raw_bytes, cache_version):
     return extraer_datos_factura(archivo)
 
 
+def _limpiar_cache_lectura_archivo(nombre_archivo=""):
+    """
+    Limpia caches que pueden conservar un fallo transitorio.
+    Se usa sólo cuando una lectura devuelve 0 productos o cuando el usuario
+    solicita reintentar archivos no procesados.
+    """
+    try:
+        _extraer_factura_cacheada.clear()
+    except Exception:
+        pass
+    try:
+        _ocr_imagen_desde_bytes_cache.clear()
+    except Exception:
+        pass
+
+    if nombre_archivo:
+        for clave in (
+            "errores_vision_api",
+            "vision_debug",
+            "diagnostico_ocr",
+            "diagnostico_ocr_fallback",
+            "diagnostico_visual_directo",
+            "fallback_574652_eventos",
+        ):
+            obj = st.session_state.get(clave)
+            if isinstance(obj, dict):
+                obj.pop(nombre_archivo, None)
+
+        # El error directo no está asociado siempre por nombre; al reintentar
+        # una lectura fallida es mejor descartarlo para no mostrar un error viejo.
+        st.session_state.pop("vision_ultimo_error_directo", None)
+
+
+def _resultado_tiene_productos(resultado):
+    try:
+        return bool(resultado and len(resultado) >= 5 and resultado[4])
+    except Exception:
+        return False
+
+
 def _extraer_factura_upload_cache(uploaded_file):
+    """
+    Cachea únicamente el camino exitoso.
+
+    Si el resultado cacheado no contiene productos, se asume que pudo ser un
+    fallo transitorio (timeout/API/OCR), se limpian los caches de lectura y se
+    hace UN reintento fresco sin reutilizar el resultado vacío.
+    """
     try:
         uploaded_file.seek(0)
         raw = uploaded_file.read()
@@ -10804,11 +10851,33 @@ def _extraer_factura_upload_cache(uploaded_file):
     except Exception:
         return extraer_datos_factura(uploaded_file)
 
-    return _extraer_factura_cacheada(
+    resultado = _extraer_factura_cacheada(
         uploaded_file.name,
         raw,
         EXTRACTOR_CACHE_VERSION,
     )
+
+    if _resultado_tiene_productos(resultado):
+        return resultado
+
+    # Nunca confiar en un resultado vacío cacheado.
+    _diag_vision(
+        uploaded_file.name,
+        "cache lectura",
+        "FALLO",
+        "Resultado sin productos: se limpia cache y se reintenta una vez desde cero.",
+    )
+    _limpiar_cache_lectura_archivo(uploaded_file.name)
+
+    # Reintento directo: evita volver a guardar inmediatamente el fallo en
+    # _extraer_factura_cacheada. OCR también fue limpiado.
+    try:
+        archivo_fresco = _ArchivoBytesCache(uploaded_file.name, raw)
+        resultado_fresco = extraer_datos_factura(archivo_fresco)
+    except Exception:
+        resultado_fresco = None
+
+    return resultado_fresco if resultado_fresco is not None else resultado
 
 
 
@@ -10935,6 +11004,18 @@ def _mostrar_archivos_no_procesados_ui():
 
         st.dataframe(pd.DataFrame(filas), use_container_width=True, hide_index=True)
 
+        st.caption(
+            "El reintento limpia la caché de extracción/OCR y vuelve a leer los "
+            "archivos cargados desde cero. No borra el inventario ya consolidado."
+        )
+        if st.button(
+            f"🔄 Reintentar {len(fallidos)} archivo(s) sin usar caché",
+            key="reintentar_archivos_fallidos_sin_cache",
+            use_container_width=True,
+        ):
+            _limpiar_cache_lectura_lote()
+            st.rerun()
+
 
 def _mostrar_resumen_procesamiento_archivos_ui(total_cargados, total_duplicados_binarios):
     r = _resumen_trazabilidad_lote()
@@ -10953,6 +11034,24 @@ def _mostrar_resumen_procesamiento_archivos_ui(total_cargados, total_duplicados_
         """,
         unsafe_allow_html=True,
     )
+
+
+
+def _limpiar_cache_lectura_lote():
+    """Limpia sólo caches/diagnósticos de lectura; no borra inventario ni configuración."""
+    _limpiar_cache_lectura_archivo("")
+    for clave in (
+        "errores_vision_api",
+        "vision_debug",
+        "diagnostico_ocr",
+        "diagnostico_ocr_fallback",
+        "diagnostico_visual_directo",
+        "fallback_574652_eventos",
+        "resultado_archivos_lote",
+    ):
+        if clave in st.session_state:
+            st.session_state.pop(clave, None)
+    st.session_state.pop("vision_ultimo_error_directo", None)
 
 
 def render_carga_facturas(titulo=True):
@@ -11167,6 +11266,12 @@ def render_carga_facturas(titulo=True):
         st.session_state.errores_ocr = []
         st.session_state["resultado_archivos_lote"] = {}
         st.session_state["correcciones_empaque_lote"] = []
+
+        # Los errores/diagnósticos pertenecen al intento actual, no a uno anterior.
+        # No limpiamos el cache exitoso aquí; sólo descartamos estados visuales viejos.
+        st.session_state["errores_vision_api"] = {}
+        st.session_state["vision_debug"] = {}
+        st.session_state.pop("vision_ultimo_error_directo", None)
 
         # Evita procesar dos veces el mismo nombre de archivo dentro del lote.
         archivos_por_nombre = {}
