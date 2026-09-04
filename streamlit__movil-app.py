@@ -3938,8 +3938,105 @@ def _ocr_imagen(image):
     return lecturas[0][1]
 
 
+
+def _ocr_lineas_posicionales(image):
+    """
+    Usa las coordenadas de Tesseract para reconstruir renglones de tabla.
+    Es más robusto que image_to_string cuando las columnas están separadas.
+    """
+    if not OCR_DISPONIBLE:
+        return []
+
+    angulo = _detectar_orientacion_ocr(image)
+    img = _preparar_imagen_ocr(image, angulo, max_lado=2100)
+
+    try:
+        salida = pytesseract.image_to_data(
+            img,
+            config="--oem 3 --psm 6",
+            output_type=pytesseract.Output.DICT,
+            timeout=25,
+        )
+    except Exception:
+        return []
+
+    grupos = {}
+    n = len(salida.get("text", []))
+    for i in range(n):
+        txt = str(salida["text"][i] or "").strip()
+        if not txt:
+            continue
+
+        try:
+            conf = float(salida.get("conf", ["-1"] * n)[i])
+        except Exception:
+            conf = -1
+        if conf < 15:
+            continue
+
+        clave = (
+            salida.get("block_num", [0] * n)[i],
+            salida.get("par_num", [0] * n)[i],
+            salida.get("line_num", [0] * n)[i],
+        )
+        grupos.setdefault(clave, []).append(
+            (
+                int(salida.get("left", [0] * n)[i]),
+                txt,
+            )
+        )
+
+    lineas = []
+    for _, palabras in grupos.items():
+        palabras.sort(key=lambda x: x[0])
+        linea = " ".join(x[1] for x in palabras)
+        if linea.strip():
+            lineas.append(linea.strip())
+
+    return lineas
+
+
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
-def _ocr_imagen_bytes_cache(raw_bytes, cache_version="MP_FAST_OCR_V3"):
+def _extraer_productos_posicionales_cache(raw_bytes, cache_version="POS_TABLE_V4"):
+    if not raw_bytes:
+        return []
+
+    try:
+        image = Image.open(io.BytesIO(raw_bytes))
+        lineas = _ocr_lineas_posicionales(image)
+    except Exception:
+        return []
+
+    productos = []
+    vistos = set()
+
+    # Probar líneas individuales y combinaciones de 2 líneas por si OCR parte una fila.
+    for i, linea in enumerate(lineas):
+        candidatos = [linea]
+        if i + 1 < len(lineas):
+            candidatos.append(linea + " " + lineas[i + 1])
+
+        for candidato in candidatos:
+            prod = _parsear_linea_producto_generica(candidato)
+            if not _producto_ocr_valido(prod):
+                continue
+
+            clave = (
+                _normalizar_ocr(prod.get("codigo", "")),
+                _normalizar_ocr(prod.get("nombre", "")),
+                round(float(prod.get("cant", 0) or 0), 4),
+                round(float(prod.get("costo_total", 0) or 0), 2),
+            )
+            if clave not in vistos:
+                vistos.add(clave)
+                productos.append(prod)
+            break
+
+    return productos
+
+
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
+def _ocr_imagen_bytes_cache(raw_bytes, cache_version="MP_FAST_OCR_V4"):
     """La misma imagen no vuelve a pasar por Tesseract en cada rerun."""
     if not raw_bytes:
         return ""
@@ -4101,6 +4198,82 @@ def _tokens_numericos(linea):
     return re.findall(r"(?<![A-Za-z])[-+]?\d[\d.,]*(?:\s*%)?", str(linea or ""))
 
 
+
+def _codigo_producto_ocr_valido(codigo):
+    """
+    Evita falsos positivos OCR como EEE, III, TOTAL, etc.
+    Los códigos reales deben contener al menos un dígito.
+    """
+    c = re.sub(r"\s+", "", str(codigo or "")).upper().strip()
+    if not c or len(c) < 3 or len(c) > 24:
+        return False
+    if not re.search(r"\d", c):
+        return False
+    if c in {
+        "18", "10", "100", "000", "111", "123",
+        "TOTAL", "ITBIS", "SUBTOTAL", "PRECIO", "CODIGO",
+    }:
+        return False
+    # Exceso de signos/puntuación = ruido.
+    if len(re.sub(r"[A-Z0-9]", "", c)) > 4:
+        return False
+    return True
+
+
+def _descripcion_producto_ocr_valida(nombre):
+    n = " ".join(str(nombre or "").split()).strip()
+    if len(n) < 5:
+        return False
+
+    letras = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", n)
+    if len(letras) < 4:
+        return False
+
+    palabras = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]{2,}", n)
+    if len(palabras) < 2:
+        return False
+
+    # Rechaza cadenas con demasiados fragmentos OCR de 1 letra.
+    tokens = n.split()
+    if tokens:
+        cortos = sum(
+            1 for t in tokens
+            if len(re.sub(r"[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", "", t)) <= 1
+        )
+        if cortos / len(tokens) > 0.45:
+            return False
+
+    # Debe tener una proporción razonable de letras.
+    ratio = len(letras) / max(len(n), 1)
+    if ratio < 0.35:
+        return False
+
+    return True
+
+
+def _producto_ocr_valido(prod):
+    if not isinstance(prod, dict):
+        return False
+
+    if not _codigo_producto_ocr_valido(prod.get("codigo", "")):
+        return False
+    if not _descripcion_producto_ocr_valida(prod.get("nombre", "")):
+        return False
+
+    try:
+        cant = float(prod.get("cant", 0) or 0)
+        costo = float(prod.get("costo_total", 0) or 0)
+    except Exception:
+        return False
+
+    if not (0 < cant <= 100000):
+        return False
+    if not (0 < costo <= 1_000_000_000):
+        return False
+
+    return True
+
+
 def _parsear_linea_producto_generica(linea):
     """
     Parser tolerante para OCR de tablas. No depende del proveedor.
@@ -4117,6 +4290,9 @@ def _parsear_linea_producto_generica(linea):
 
     codigo = m_codigo.group(1).strip()
     resto = m_codigo.group(2).strip()
+
+    if not _codigo_producto_ocr_valido(codigo):
+        return None
 
     # Evitar encabezados y metadatos.
     nc = _normalizar_ocr(codigo + " " + resto)
@@ -4154,7 +4330,7 @@ def _parsear_linea_producto_generica(linea):
         except Exception:
             pass
 
-    if len(valores) < 2 or len(nombre) < 3:
+    if len(valores) < 2 or not _descripcion_producto_ocr_valida(nombre):
         return None
 
     # Primera cifra suele ser cantidad. En tablas con UND antes de cantidad sigue siendo
@@ -4224,7 +4400,7 @@ def _extraer_productos_genericos(texto):
             break
 
         prod = _parsear_linea_producto_generica(linea)
-        if prod:
+        if prod and _producto_ocr_valido(prod):
             clave = (_normalizar_ocr(prod["codigo"]), _normalizar_ocr(prod["nombre"]),
                      round(prod["cant"], 4), round(prod["costo_total"], 2))
             if clave not in vistos:
@@ -4368,8 +4544,46 @@ def extraer_datos_factura(uploaded_file):
         extracted_text,
         uploaded_file.name,
     )
+
+    # Si el parser de texto produjo productos válidos, usarlo.
     if resultado_generico is not None:
-        return resultado_generico
+        firma_g, proveedor_g, num_g, fecha_g, productos_g = resultado_generico
+        productos_g = [p for p in productos_g if _producto_ocr_valido(p)]
+        if len(productos_g) >= 2:
+            return firma_g, proveedor_g, num_g, fecha_g, productos_g
+
+    # Fallback posicional para fotos de tablas.
+    if file_name.endswith((".png", ".jpg", ".jpeg")) and raw is not None:
+        productos_pos = _extraer_productos_posicionales_cache(raw)
+        productos_pos = [p for p in productos_pos if _producto_ocr_valido(p)]
+
+        if len(productos_pos) >= 2:
+            proveedor_pos = _extraer_proveedor_generico(
+                [" ".join(x.split()) for x in extracted_text.splitlines() if x.strip()]
+            )
+            numero_pos = _extraer_numero_documento_generico(extracted_text)
+            fecha_pos = _extraer_fecha_generica(extracted_text)
+
+            if not proveedor_pos:
+                proveedor_pos = "Proveedor no identificado"
+            if not numero_pos:
+                numero_pos = re.sub(
+                    r"[^A-Za-z0-9]+",
+                    "-",
+                    uploaded_file.name,
+                ).strip("-")[:60]
+
+            for p in productos_pos:
+                p["moneda"] = detectar_moneda_documento(extracted_text)
+                p["costo_incluye_itbis"] = False
+
+            return (
+                (proveedor_pos, str(numero_pos)),
+                proveedor_pos,
+                numero_pos,
+                fecha_pos,
+                productos_pos,
+            )
 
     # Si el formato es demasiado irregular para el parser genérico,
     # se conservan las reglas históricas únicamente como respaldo.
@@ -5554,7 +5768,7 @@ class _ArchivoBytesOCR:
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
-def _extraer_factura_cache_mp(nombre, raw_bytes, cache_version="MP_EXTRACT_V3"):
+def _extraer_factura_cache_mp(nombre, raw_bytes, cache_version="MP_EXTRACT_V4"):
     archivo = _ArchivoBytesOCR(nombre, raw_bytes)
     return extraer_datos_factura(archivo)
 
@@ -5836,7 +6050,9 @@ def render_carga_facturas(titulo=True):
 
             firma, proveedor, num_fac, fecha_fac, productos = _extraer_factura_upload_mp(f)
 
-            if not productos:
+            productos = [p for p in (productos or []) if _producto_ocr_valido(p)]
+
+            if len(productos) < 2:
                 archivos_invalidos.append(f.name)
 
             elif firma in firmas_detectadas_en_lote:
