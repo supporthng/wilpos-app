@@ -3792,7 +3792,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R4":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R13":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3801,7 +3801,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R4":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R4"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R13"
 
 
 # =========================================================
@@ -6888,6 +6888,326 @@ def _clasificar_calidad_producto_vision(prod):
 
 
 
+
+
+def _resolver_costo_neto_linea_vision(item, cantidad, unidades_empaque):
+    """
+    Reconstruye el costo neto TOTAL de la línea sin ITBIS usando varias
+    estructuras de factura, sin depender de un proveedor específico.
+
+    Soporta:
+    - line_cost_net ya total de línea.
+    - net_price_per_package / price_net como neto por caja/empaque.
+    - unit_cost_net como neto por empaque cuando la cantidad > 1.
+    - precio lista - descuento, por empaque o por línea.
+    - total con ITBIS + valor ITBIS, para obtener neto de línea.
+
+    Devuelve: (costo_total_linea, fuente, advertencias)
+    """
+    adv = []
+
+    def fnum(v):
+        try:
+            if v is None or v == "":
+                return None
+            if isinstance(v, str):
+                s = re.sub(r"[^0-9,.\-]", "", v).replace(",", "")
+                return float(s) if s not in ("", "-", ".", "-.") else None
+            return float(v)
+        except Exception:
+            return None
+
+    q = max(0.0, float(cantidad or 0))
+    emp = max(1, int(unidades_empaque or 1))
+
+    line_cost = fnum(item.get("line_cost_net"))
+    net_pkg = (
+        fnum(item.get("net_price_per_package"))
+        or fnum(item.get("price_net"))
+        or fnum(item.get("net_price"))
+    )
+    unit_cost = fnum(item.get("unit_cost_net"))
+    list_price = (
+        fnum(item.get("list_price_per_package"))
+        or fnum(item.get("price_list"))
+        or fnum(item.get("list_price"))
+    )
+    price_unit_package = (
+        fnum(item.get("price_unit_per_package"))
+        or fnum(item.get("precio_unit"))
+        or fnum(item.get("unit_price_package"))
+    )
+    discount_value = fnum(item.get("discount_value"))
+    discount_rate = fnum(item.get("discount_rate"))
+    tax_value = (
+        fnum(item.get("tax_value"))
+        or fnum(item.get("itbis_value"))
+    )
+    gross_line = (
+        fnum(item.get("gross_line_total"))
+        or fnum(item.get("importe_total"))
+        or fnum(item.get("line_total_with_tax"))
+    )
+    subtotal_net = (
+        fnum(item.get("subtotal_net"))
+        or fnum(item.get("net_subtotal_line"))
+        or fnum(item.get("subtotal_line"))
+    )
+
+    # A0) Subtotal neto explícito de la línea.
+    # Algunos formatos imprimen "Subtotal" después de aplicar descuento.
+    # Si existe, es el mejor candidato al costo neto total de la línea sin ITBIS.
+    if subtotal_net is not None and subtotal_net > 0:
+        if line_cost is not None and line_cost > 0:
+            tol = max(0.05, abs(subtotal_net) * 0.002)
+            if abs(line_cost - subtotal_net) <= tol:
+                return round(subtotal_net, 6), "subtotal_neto_linea_validado", adv
+        return round(subtotal_net, 6), "subtotal_neto_linea", adv
+
+    # A) Total de línea explícito y válido.
+    if line_cost is not None and line_cost > 0:
+        # Validación fuerte para formatos con Imp. Neto + ITBIS = Total.
+        if gross_line is not None and tax_value is not None:
+            esperado_total = line_cost + tax_value
+            tol_total = max(0.05, abs(gross_line) * 0.002)
+            if abs(esperado_total - gross_line) <= tol_total:
+                return round(line_cost, 6), "imp_neto_validado_con_itbis_total", adv
+        # Si también existe precio neto por empaque y cantidad>1, validar semántica.
+        # Caso MercaSID: Precio Neto = por caja, Importe = cantidad × precio neto.
+        if net_pkg and q > 0:
+            esperado = net_pkg * q
+            tol = max(0.05, abs(esperado) * 0.002)
+            if abs(line_cost - net_pkg) <= tol and q > 1:
+                adv.append(
+                    "line_cost_net parecía precio neto por empaque; se multiplicó por cantidad"
+                )
+                return round(esperado, 6), "precio_neto_empaque_x_cantidad", adv
+            if abs(line_cost - esperado) <= tol:
+                return round(line_cost, 6), "line_cost_net_validado", adv
+        return round(line_cost, 6), "line_cost_net", adv
+
+    # B) Precio neto por caja/empaque.
+    if net_pkg is not None and net_pkg > 0 and q > 0:
+        return round(net_pkg * q, 6), "precio_neto_empaque_x_cantidad", adv
+
+    # C) unit_cost_net: por el nombre del campo puede venir por empaque.
+    if unit_cost is not None and unit_cost > 0 and q > 0:
+        return round(unit_cost * q, 6), "unit_cost_net_x_cantidad", adv
+
+    # C2) Precio Unit por empaque.
+    # En algunos formatos "Precio Unit" significa precio por CAJA/BOT/UND,
+    # no costo por botella. El costo neto de línea = cantidad × Precio Unit.
+    if price_unit_package is not None and price_unit_package > 0 and q > 0:
+        candidato = price_unit_package * q
+        if gross_line is not None and tax_value is not None:
+            tol = max(0.05, abs(gross_line) * 0.002)
+            if abs((candidato + tax_value) - gross_line) <= tol:
+                return round(candidato, 6), "precio_unit_empaque_validado_con_itbis_total", adv
+        return round(candidato, 6), "precio_unit_empaque_x_cantidad", adv
+
+    # D) Lista/descuento.
+    if list_price is not None and list_price > 0 and q > 0:
+        neto_pkg = list_price
+        if discount_value is not None and discount_value >= 0:
+            # En muchos formatos el descuento impreso junto al precio es por empaque.
+            if discount_value <= list_price * 1.05:
+                neto_pkg = list_price - discount_value
+        elif discount_rate is not None and 0 <= discount_rate <= 100:
+            tasa = discount_rate / 100.0 if discount_rate > 1 else discount_rate
+            neto_pkg = list_price * (1.0 - tasa)
+        if neto_pkg > 0:
+            adv.append("costo neto reconstruido desde precio lista y descuento")
+            return round(neto_pkg * q, 6), "lista_descuento_x_cantidad", adv
+
+    # E) Total con ITBIS menos ITBIS.
+    if gross_line is not None and gross_line > 0 and tax_value is not None and tax_value >= 0:
+        neto = gross_line - tax_value
+        if neto > 0:
+            adv.append("costo neto reconstruido desde total con ITBIS menos ITBIS")
+            return round(neto, 6), "total_menos_itbis", adv
+
+    return 0.0, "sin_costo_valido", adv
+
+
+def _separar_cantidad_udm_vision(valor, udm_actual=""):
+    """Interpreta textos como '1 CJ', '2 CAJA', '6 BOT', '10 UND'."""
+    txt = str(valor or "").upper().replace(",", ".").strip()
+    m = re.fullmatch(
+        r"\s*(\d+(?:\.\d+)?)\s*(CJ|CAJ|CAJA|BOT|BOTELLA|BOTELLAS|UND|UNIDAD|UNIDADES|PZA|PIEZA|PIEZAS)\s*\.?\s*",
+        txt, flags=re.I
+    )
+    if not m:
+        return None, str(udm_actual or "").strip()
+    q = float(m.group(1))
+    u = m.group(2).upper()
+    return q, u
+
+
+def _inferir_unidades_empaque_vision(item, nombre=""):
+    """
+    Determina unidades físicas por empaque usando UdM + presentación + descripción.
+
+    Reglas generales:
+    - BOT/UND/PZA -> 1 unidad física.
+    - Una medida sola (700ML, 750ML, 75CL, 1.75L) -> 1 unidad física.
+    - CJ12BOT/CJ24BOT/CAJ6UND -> número indicado.
+    - 24X330ML, 6X355ML, 12X750ML -> primer número.
+    - 6/1.75L, 12/75CL, 24/330ML -> primer número.
+    - 24/6/330ML -> 24 unidades vendibles.
+    - 4X6/33CL -> 24 unidades.
+    """
+    if not isinstance(item, dict):
+        return 1, "default"
+
+    purchase_unit = str(
+        item.get("purchase_unit")
+        or item.get("unit")
+        or item.get("uom")
+        or item.get("udm")
+        or ""
+    ).upper().replace(",", ".").strip()
+
+    # Unidad física explícita.
+    if re.fullmatch(
+        r"\s*(?:BOT|BOT\.?|BOTELLA(?:S)?|UND|UND\.?|UNIDAD(?:ES)?|PZA|PZA\.?|PIEZA(?:S)?)\s*",
+        purchase_unit, flags=re.I
+    ):
+        return 1, "udm_unidad_fisica"
+
+    # Medida sola = una botella/unidad física por cantidad.
+    # Ej.: 700ML, 750 ML, 75CL, 1.75 L.
+    if re.fullmatch(
+        r"\s*\d+(?:\.\d+)?\s*(?:ML|CL|L|LT|LTR|OZ|CC)\s*\.?\s*",
+        purchase_unit, flags=re.I
+    ):
+        return 1, "udm_medida_individual"
+
+    # UMV/UdM tipo "CAJ / 6 PZA", "CAJA/12 PCS", "CASE / 24 UND".
+    m_caj_pza = re.search(
+        r"\b(?:CJ|CAJ|CAJA|CASE|PACK|PCK)\s*/\s*(\d{1,3})\s*"
+        r"(?:PZA|PZAS|PCS|PC|UND|UNIDADES?|BOT|BOTELLAS?)\b",
+        purchase_unit, flags=re.I
+    )
+    if m_caj_pza:
+        n = int(m_caj_pza.group(1))
+        if 2 <= n <= 144:
+            return n, "udm_caja_piezas"
+
+    # UdM con espacio tipo "Caja 12", "CJ 24", "CAJ 6".
+    m_caja_espacio = re.fullmatch(
+        r"\s*(?:CJ|CAJ|CAJA|CASE|PACK|PCK)\s+(\d{1,3})\s*",
+        purchase_unit,
+        flags=re.I,
+    )
+    if m_caja_espacio:
+        n = int(m_caja_espacio.group(1))
+        if 2 <= n <= 144:
+            return n, "udm_caja_espaciada"
+
+    # UdM compacta tipo CAJA12, CAJA24, CJ6, CAJ12, CASE24.
+    m_caja_compacta = re.fullmatch(
+        r"\s*(?:CJ|CAJ|CAJA|CASE|PACK|PCK)\s*[- ]?(\d{1,3})\s*",
+        purchase_unit,
+        flags=re.I,
+    )
+    if m_caja_compacta:
+        n = int(m_caja_compacta.group(1))
+        if 2 <= n <= 144:
+            return n, "udm_caja_compacta"
+
+    # UdM con caja explícita: CJ12BOT, CJ24BOT, CAJ6UND...
+    m_udm = re.search(
+        r"\b(?:CJ|CAJ|CAJA|CASE|PACK|PCK)\s*[- ]?(\d{1,3})\s*"
+        r"(?:BOT|BOTELLAS?|UND|UNIDADES?|PZA|PIEZAS?)?\b",
+        purchase_unit, flags=re.I
+    )
+    if m_udm:
+        n = int(m_udm.group(1))
+        if 2 <= n <= 144:
+            return n, "udm_empaque_explicito"
+
+    # UdM tipo 24X330ML / 6X355ML / 12X750ML.
+    m_x = re.search(
+        r"(?<!\d)(\d{1,3})\s*[Xx]\s*\d+(?:\.\d+)?\s*(?:ML|CL|L|LT|LTR|OZ|CC)\b",
+        purchase_unit, flags=re.I
+    )
+    if m_x:
+        n = int(m_x.group(1))
+        if 2 <= n <= 144:
+            return n, "udm_multipack_x_medida"
+
+    try:
+        emp_api = int(float(item.get("units_per_package") or 0))
+    except Exception:
+        emp_api = 0
+
+    textos = [
+        str(item.get("package_text") or ""),
+        str(item.get("presentation") or ""),
+        str(item.get("size_text") or ""),
+        str(nombre or ""),
+    ]
+
+    inferred = 0
+    for texto in textos:
+        t = " ".join(texto.upper().replace(",", ".").split())
+        if not t:
+            continue
+
+        # 4X6/33CL -> 24.
+        m_comp = re.search(
+            r"(?<!\d)(\d{1,2})\s*[Xx]\s*(\d{1,2})\s*/\s*"
+            r"(?:\d+(?:\.\d+)?)\s*(?:ML|CL|L|LT|LTR|OZ|CC)\b", t
+        )
+        if m_comp:
+            a, b = int(m_comp.group(1)), int(m_comp.group(2))
+            candidato = a * b
+            if 2 <= candidato <= 144:
+                inferred = candidato
+                break
+
+        # 24/6/330ML -> 24 unidades vendibles.
+        m_multi = re.search(
+            r"(?<!\d)(\d{1,3})\s*/\s*(\d{1,3})\s*/\s*"
+            r"(?:\d+(?:\.\d+)?)\s*(?:ML|CL|L|LT|LTR|OZ|CC)\b", t
+        )
+        if m_multi:
+            candidato = int(m_multi.group(1))
+            if 2 <= candidato <= 144:
+                inferred = candidato
+                break
+
+        patrones = [
+            r"(?<!\d)(\d{1,3})\s*/\s*(?:\d+(?:[.,]\d+)?)\s*(?:ML|CL|L|LT|LTR|OZ|CC)\b",
+            r"(?<!\d)(\d{1,3})\s*[Xx]\s*(?:\d+(?:[.,]\d+)?)\s*(?:ML|CL|L|LT|LTR|OZ|CC)\b",
+            r"(?<!\d)(\d{1,3})\s*(?:UND|UNID|UNIDADES|BOT|BOTELLAS|PZS|PIEZAS)\b",
+            r"\b(?:CJ|CAJA|CASE|PACK|PCK)\s*(?:DE\s*)?(\d{1,3})\b",
+        ]
+        for patron in patrones:
+            m = re.search(patron, t, flags=re.I)
+            if m:
+                candidato = int(m.group(1))
+                if 2 <= candidato <= 144:
+                    inferred = candidato
+                    break
+        if inferred:
+            break
+
+    if inferred > 1:
+        if emp_api > 1 and inferred != emp_api:
+            return inferred, "descripcion_presentacion_corrige_api"
+        return inferred, "descripcion_presentacion"
+
+    if emp_api > 1:
+        return emp_api, "vision"
+
+    if re.search(r"\b(?:CA|CAJA|CJ|CAJ|CASE|PACK|PCK)\b", purchase_unit):
+        return 1, "caja_sin_empaque_legible"
+
+    return 1, "default"
+
+
+
 def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
     if not isinstance(data, dict):
         return None
@@ -6981,31 +7301,46 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
             cant = 0
             razones.append("cantidad no numérica")
 
-        try:
-            emp = max(1, int(float(item.get("units_per_package") or 1)))
-        except Exception:
-            emp = 1
-            advertencias.append("empaque no legible; se usó 1")
+        emp, fuente_empaque = _inferir_unidades_empaque_vision(item, nombre)
+        package_text = " ".join(str(
+            item.get("package_text")
+            or item.get("presentation")
+            or item.get("size_text")
+            or ""
+        ).split()).strip()
+        purchase_unit = " ".join(str(
+            item.get("purchase_unit")
+            or item.get("unit")
+            or item.get("uom")
+            or ""
+        ).split()).strip()
 
-        try:
-            costo_total = float(item.get("line_cost_net") or 0)
-        except Exception:
-            costo_total = 0
+        if fuente_empaque in ("texto_presentacion_corrige_api", "descripcion_presentacion_corrige_api"):
+            advertencias.append(
+                f"empaque corregido desde UdM/descripción/presentación: {emp} unidades"
+            )
+        elif fuente_empaque in (
+            "texto_presentacion", "descripcion_presentacion", "udm_empaque_explicito",
+            "udm_multipack_x_medida", "udm_caja_piezas", "udm_caja_compacta",
+            "udm_caja_espaciada"
+        ):
+            advertencias.append(
+                f"empaque inferido desde UdM/descripción/presentación: {emp} unidades"
+            )
+        elif fuente_empaque == "caja_sin_empaque_legible":
+            advertencias.append(
+                "la unidad de compra parece CAJA pero no se pudo leer cuántas unidades contiene"
+            )
 
-        # Recuperación: si line_cost_net faltó pero unit_cost_net sí está,
-        # reconstruir el total neto de la línea.
+        costo_total, fuente_costo, adv_costo = _resolver_costo_neto_linea_vision(
+            item,
+            cant,
+            emp,
+        )
+        advertencias.extend(adv_costo)
+
         if costo_total <= 0:
-            try:
-                unit_cost_net = float(item.get("unit_cost_net") or 0)
-            except Exception:
-                unit_cost_net = 0
-            if unit_cost_net > 0 and cant > 0:
-                costo_total = round(unit_cost_net * cant, 4)
-                advertencias.append(
-                    "costo neto de línea reconstruido desde costo unitario × cantidad"
-                )
-            else:
-                razones.append("costo neto de línea inválido o no legible")
+            razones.append("costo neto de línea inválido o no legible")
 
         try:
             itbis = float(item.get("itbis_rate") or 0)
@@ -7055,7 +7390,22 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
             "nombre": nombre,
             "cant": cant,
             "emp": emp,
+            "package_text": package_text,
+            "purchase_unit": purchase_unit,
+            "fuente_empaque": fuente_empaque,
             "costo_total": costo_total,
+            "fuente_costo": fuente_costo,
+            "net_price_per_package": item.get("net_price_per_package"),
+            "price_unit_per_package": item.get("price_unit_per_package"),
+            "subtotal_net": item.get("subtotal_net"),
+            "isc_value": item.get("isc_value"),
+            "isc_advalorem_value": item.get("isc_advalorem_value"),
+            "other_tax_value": item.get("other_tax_value"),
+            "list_price_per_package": item.get("list_price_per_package"),
+            "discount_value": item.get("discount_value"),
+            "discount_rate": item.get("discount_rate"),
+            "tax_value": item.get("tax_value"),
+            "gross_line_total": item.get("gross_line_total"),
             "itbis": itbis,
             "cat": _inferir_categoria_generica(nombre),
             "moneda": moneda if moneda in ("DOP", "USD") else "DOP",
@@ -7340,6 +7690,297 @@ REGLAS:
 
 
 
+
+def _norm_codigo_auditoria(valor):
+    return re.sub(r"[^A-Z0-9]", "", str(valor or "").upper())
+
+
+def _norm_desc_auditoria(valor):
+    return _nombre_producto_canonico(valor)
+
+
+def _fila_auditoria_es_util(f):
+    if not isinstance(f, dict):
+        return False
+    desc = " ".join(str(f.get("description") or "").split()).strip()
+    barcode = str(f.get("barcode") or "").strip()
+    interno = str(f.get("internal_code") or "").strip()
+    try:
+        cant = float(f.get("quantity_packages") or 0)
+        costo = float(f.get("line_cost_net") or 0)
+    except Exception:
+        return False
+    return bool(desc and cant > 0 and costo > 0 and (barcode or interno))
+
+
+def _fusionar_auditoria_con_lectura(data, auditoria, nombre_archivo=""):
+    if not isinstance(data, dict) or not isinstance(auditoria, dict):
+        return data
+
+    productos = [p for p in (data.get("products") or []) if isinstance(p, dict)]
+    filas_audit = [f for f in (auditoria.get("rows") or []) if isinstance(f, dict)]
+
+    idx_barcode, idx_interno, idx_desc = {}, {}, {}
+    for i, p in enumerate(productos):
+        bc = _norm_codigo_auditoria(p.get("barcode"))
+        ci = _norm_codigo_auditoria(p.get("internal_code"))
+        ds = _norm_desc_auditoria(p.get("description"))
+        if bc:
+            idx_barcode[bc] = i
+        if ci:
+            idx_interno[ci] = i
+        if ds:
+            idx_desc.setdefault(ds, []).append(i)
+
+    completados = 0
+    agregados = 0
+
+    for f in filas_audit:
+        if str(f.get("confidence") or "").lower() == "low":
+            continue
+
+        bc_raw = str(f.get("barcode") or "").strip()
+        ci_raw = str(f.get("internal_code") or "").strip()
+        ds_raw = " ".join(str(f.get("description") or "").split()).strip()
+
+        bc = _norm_codigo_auditoria(bc_raw)
+        ci = _norm_codigo_auditoria(ci_raw)
+        ds = _norm_desc_auditoria(ds_raw)
+
+        match = None
+        if bc and bc in idx_barcode:
+            match = idx_barcode[bc]
+        elif ci and ci in idx_interno:
+            match = idx_interno[ci]
+        elif ds and ds in idx_desc and len(idx_desc[ds]) == 1:
+            match = idx_desc[ds][0]
+
+        if match is not None:
+            p = productos[match]
+            antes = bool(str(p.get("barcode") or "").strip() or str(p.get("internal_code") or "").strip())
+            if bc_raw and not str(p.get("barcode") or "").strip():
+                p["barcode"] = bc_raw
+            if ci_raw and not str(p.get("internal_code") or "").strip():
+                p["internal_code"] = ci_raw
+            if bc_raw or ci_raw:
+                p["code_status"] = "read"
+
+            # También completar presentación/empaque si la primera lectura lo perdió.
+            for campo in (
+                "purchase_unit", "package_text",
+                "list_price_per_package", "discount_value", "discount_rate",
+                "net_price_per_package", "price_unit_per_package", "subtotal_net", "isc_value", "isc_advalorem_value", "other_tax_value", "tax_value", "gross_line_total"
+            ):
+                if f.get(campo) is not None and not p.get(campo):
+                    p[campo] = f.get(campo)
+            try:
+                emp_audit = int(float(f.get("units_per_package") or 0))
+            except Exception:
+                emp_audit = 0
+            try:
+                emp_actual = int(float(p.get("units_per_package") or 0))
+            except Exception:
+                emp_actual = 0
+            if emp_audit > 1 and emp_actual <= 1:
+                p["units_per_package"] = emp_audit
+
+            despues = bool(str(p.get("barcode") or "").strip() or str(p.get("internal_code") or "").strip())
+            if despues and not antes:
+                completados += 1
+            continue
+
+        if not _fila_auditoria_es_util(f):
+            continue
+
+        try:
+            cant = float(f.get("quantity_packages") or 0)
+        except Exception:
+            cant = 0
+        try:
+            emp = max(1, int(float(f.get("units_per_package") or 1)))
+        except Exception:
+            emp = 1
+        try:
+            unit_cost = float(f.get("unit_cost_net") or 0)
+        except Exception:
+            unit_cost = 0
+        try:
+            line_cost = float(f.get("line_cost_net") or 0)
+        except Exception:
+            line_cost = 0
+        try:
+            itbis = float(f.get("itbis_rate") or 0)
+        except Exception:
+            itbis = 0.0
+
+        nuevo = {
+            "barcode": bc_raw or None,
+            "internal_code": ci_raw or None,
+            "code_status": "read",
+            "description": ds_raw,
+            "quantity_packages": cant,
+            "purchase_unit": str(f.get("purchase_unit") or "").strip() or None,
+            "package_text": str(f.get("package_text") or "").strip() or None,
+            "units_per_package": emp,
+            "list_price_per_package": f.get("list_price_per_package"),
+            "discount_value": f.get("discount_value"),
+            "discount_rate": f.get("discount_rate"),
+            "net_price_per_package": f.get("net_price_per_package"),
+            "price_unit_per_package": f.get("price_unit_per_package"),
+            "subtotal_net": f.get("subtotal_net"),
+            "isc_value": f.get("isc_value"),
+            "isc_advalorem_value": f.get("isc_advalorem_value"),
+            "other_tax_value": f.get("other_tax_value"),
+            "unit_cost_net": unit_cost if unit_cost > 0 else None,
+            "line_cost_net": line_cost,
+            "tax_value": f.get("tax_value"),
+            "gross_line_total": f.get("gross_line_total"),
+            "itbis_rate": itbis,
+        }
+        productos.append(nuevo)
+        ni = len(productos) - 1
+        if bc:
+            idx_barcode[bc] = ni
+        if ci:
+            idx_interno[ci] = ni
+        if ds:
+            idx_desc.setdefault(ds, []).append(ni)
+        agregados += 1
+
+    data["products"] = productos
+
+    try:
+        vis_audit = int(auditoria.get("visible_product_rows") or 0)
+    except Exception:
+        vis_audit = 0
+    try:
+        vis_data = int(data.get("visible_product_rows") or 0)
+    except Exception:
+        vis_data = 0
+    if vis_audit > vis_data:
+        data["visible_product_rows"] = vis_audit
+
+    _diag_vision(
+        nombre_archivo,
+        "auditoría filas/códigos",
+        "OK",
+        f"{completados} código(s) completados · {agregados} fila(s) faltante(s) recuperadas · "
+        f"{len(productos)} fila(s) tras auditoría."
+    )
+    return data
+
+
+def _auditar_todas_las_filas_y_codigos(client, modelo, data_url, data, nombre_archivo):
+    if not isinstance(data, dict):
+        return data
+
+    code_columns_raw = data.get("code_columns_present", None)
+    if code_columns_raw is False or str(code_columns_raw).strip().lower() in ("false", "no", "0"):
+        return data
+
+    prompt = """
+AUDITORIA INDEPENDIENTE DE FILAS DE PRODUCTOS.
+
+Ignora cualquier lectura previa. Mira la imagen desde cero y recorre visualmente
+la tabla o ticket DE ARRIBA HACIA ABAJO. Enumera TODAS las filas reales de productos.
+
+Devuelve SOLO JSON válido:
+{
+  "visible_product_rows": 0,
+  "rows": [
+    {
+      "row_index": 1,
+      "barcode": "código de barras exacto o null",
+      "internal_code": "código interno exacto o null",
+      "description": "descripción completa",
+      "quantity_packages": 1,
+      "purchase_unit": "CAJA|BOT|UND|otra",
+      "package_text": "TAMAÑO/PRESENTACION exacta",
+      "units_per_package": 1,
+      "unit_cost_net": 0,
+      "line_cost_net": 0,
+      "itbis_rate": 0.18,
+      "confidence": "high|medium|low"
+    }
+  ]
+}
+
+REGLAS:
+- Cuenta tú mismo las filas visibles; no dependas de una lectura anterior.
+- Sigue horizontalmente cada fila para no mezclar códigos con otros productos.
+- Puede haber código interno y código de barras en columnas separadas.
+- En tickets, el código puede estar en una línea inmediatamente anterior a la descripción.
+- Conserva ceros a la izquierda.
+- No confundas cantidades, tamaños, precios, ITBIS, fechas o números de factura con códigos.
+- Si un código es legible, cópialo EXACTAMENTE.
+- Si no se lee, usa null. No inventes.
+- Copia EXACTAMENTE purchase_unit/UdM y package_text; no reduzcas CJ12BOT/CJ24BOT a CAJA.
+- UdM BOT/UND/PZA => units_per_package=1 aunque la descripción contenga 6/750ML.
+- UdM CJ12BOT => 12; CJ24BOT => 24.
+- Si UdM es caja genérica, infiere el contenido desde descripción/presentación.
+- Si TAMAÑO dice "6/1.75 L", units_per_package=6; si dice "12/75 CL", usa 12.
+- Si la unidad es BOT/UND, units_per_package=1.
+- Distingue precio neto por empaque de total neto de línea.
+- Si existen "Imp. Neto", "ITBIS" y "Total", usa Imp. Neto como line_cost_net
+  cuando Imp. Neto + ITBIS = Total.
+- UdM CAJA12/CJ12/CAJ12 o "Caja 12"/"CJ 12" => 12.
+- UdM CAJA24/CJ24/CAJ24 o "Caja 24"/"CJ 24" => 24.
+- Si Cantidad aparece como "1 CJ", "2 CJ", "6 BOT", separa número y UdM.
+- Si existen ISC/ISCav, consérvalos como impuestos separados y NUNCA uses Valor Neto
+  directamente como costo sin impuestos.
+- Si hay Cantidad + Precio Unit + ITBIS + Total, copia Precio Unit en price_unit_per_package
+  y valida (Cantidad × Precio Unit) + ITBIS ≈ Total.
+- UMV/UdM "CAJ / N PZA", "CAJA / N PCS" => units_per_package=N.
+- Si existe columna "Subtotal" después del descuento, copia ese valor en subtotal_net
+  y úsalo como costo neto total de la línea.
+- Si hay Monto Neto + ITBIS = Total Posición, usa Monto Neto como line_cost_net.
+- Unidad 700ML/750ML/75CL/1.75L => units_per_package=1.
+- Unidad 24X330ML/6X355ML/12X750ML => usa el primer número como units_per_package.
+- net_price_per_package = neto por CAJA/BOT/UND.
+- line_cost_net = cantidad × net_price_per_package, sin ITBIS.
+- Si existe Precio Lista, Descto, Precio Neto, ITBIS e Importe, copia esos valores
+  en sus campos correspondientes y verifica matemáticamente la fila.
+- Incluye solo productos, no subtotales, sellos, firmas ni encabezados.
+"""
+
+    try:
+        _diag_vision(
+            nombre_archivo,
+            "auditoría filas/códigos",
+            "INTENTO",
+            "Revisión independiente de todas las filas visibles."
+        )
+        resp = client.responses.create(
+            model=modelo,
+            store=False,
+            reasoning={"effort": "low"},
+            input=[{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": prompt},
+                    {"type": "input_image", "image_url": data_url, "detail": "high"},
+                ],
+            }],
+            text={"verbosity": "low"},
+            max_output_tokens=10000,
+        )
+        txt = str(getattr(resp, "output_text", "") or "").strip()
+        txt = re.sub(r"^```(?:json)?\s*", "", txt, flags=re.I)
+        txt = re.sub(r"\s*```$", "", txt).strip()
+        if not txt:
+            return data
+        auditoria = json.loads(txt)
+        return _fusionar_auditoria_con_lectura(data, auditoria, nombre_archivo)
+    except Exception as exc:
+        _diag_vision(
+            nombre_archivo,
+            "auditoría filas/códigos",
+            "ERROR",
+            f"{type(exc).__name__}: {str(exc)[:700]}"
+        )
+        return data
+
+
 def _vision_requiere_rescate_filas(data):
     """Detecta una lectura incompleta sin depender del proveedor."""
     if not isinstance(data, dict):
@@ -7469,7 +8110,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R4"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R13"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -7529,9 +8170,22 @@ Formato exacto:
       "code_status": "read|not_printed|unreadable|unknown",
       "description": "descripcion completa",
       "quantity_packages": 1,
+      "purchase_unit": "CAJA|BOT|UND|otra unidad impresa",
+      "package_text": "texto exacto de TAMAÑO/PRESENTACION, por ejemplo 6/1.75 L",
       "units_per_package": 1,
-      "unit_cost_net": 0,
+      "list_price_per_package": null,
+      "discount_value": null,
+      "discount_rate": null,
+      "net_price_per_package": null,
+      "unit_cost_net": null,
       "line_cost_net": 0,
+      "price_unit_per_package": null,
+      "subtotal_net": null,
+      "isc_value": null,
+      "isc_advalorem_value": null,
+      "other_tax_value": null,
+      "tax_value": null,
+      "gross_line_total": null,
       "itbis_rate": 0.18
     }
   ],
@@ -7556,6 +8210,8 @@ REGLAS:
   net_subtotal_before_tax y subtotal_scope debe ser "page".
 - NO uses "SUBTOTAL NETO PAGINA" si ese valor ya incluye ITBIS.
 - Incluye TODAS las filas reales de productos visibles, aunque una descripción ocupe varias líneas.
+- Antes de responder, verifica fila por fila desde la primera hasta la última.
+- Si existe una columna CODIGO DE BARRAS, confirma que cada barcode legible esté incluido en products.
 - code_columns_present=true si la factura/ticket imprime códigos de producto en alguna parte
   de las filas; false si el formato realmente no imprime códigos.
 - Algunos formatos imprimen: código interno + barcode en columnas separadas.
@@ -7583,9 +8239,84 @@ REGLAS:
 - Distingue código de producto de medidas como 75 CL, 750 ML, 12X750ML, 1.5L.
 - internal_code = CODIGO/MATERIAL/ITEM del proveedor.
 - quantity_packages = columna CANTIDAD.
-- units_per_package = unidades físicas por caja si puede inferirse de TAMAÑO/UdM;
-  si no es seguro usa 1.
-- line_cost_net = IMPORTE NETO DE LA LINEA SIN ITBIS y después del descuento.
+- purchase_unit = copia EXACTAMENTE la UdM/UMV/unidad impresa: CA, CAJA, BOT, UND,
+  CJ12BOT, CJ24BOT, "CAJ / 6 PZA", "CAJ / 12 PZA", etc. NO simplifiques el texto.
+- Si la factura muestra UMV como "CAJ / N PZA", units_per_package=N.
+- La UdM tiene prioridad para saber si CANTIDAD representa cajas o botellas:
+  * UdM "Caja 12", "CJ 12", "CAJ 12" => units_per_package=12.
+  * UdM "Caja 24", "CJ 24", "CAJ 24" => units_per_package=24.
+  * UdM CAJA12/CJ12/CAJ12 => units_per_package=12.
+  * UdM CAJA24/CJ24/CAJ24 => units_per_package=24.
+  * UdM BOT/UND/PZA => units_per_package=1 aunque la descripción diga 6/750ML.
+  * UdM CJ12BOT => units_per_package=12.
+  * UdM CJ24BOT => units_per_package=24.
+- Si UdM es CA/CAJA/CJ sin número, busca el contenido en descripción/presentación.
+- package_text = copia EXACTAMENTE el contenido de TAMAÑO/PRESENTACION/UdM cuando exista.
+- units_per_package = unidades físicas que contiene cada empaque comprado.
+  EJEMPLOS OBLIGATORIOS:
+  * CANTIDAD 1 + UNID CAJA + TAMAÑO "6/1.75 L" => units_per_package=6.
+  * CANTIDAD 2 + UNID CAJA + TAMAÑO "12/75 CL" => units_per_package=12.
+  * CANTIDAD 6 + UNID BOT => units_per_package=1.
+  * "4X6/33CL" => units_per_package=24.
+  * Descripción "CERVEZA PERONI 24/6/330 ML" + UdM "CJ24BOT" => units_per_package=24.
+  * Descripción "ANTIOQUENO 12x75 CL" + UdM "CJ12BOT" => units_per_package=12.
+  * Descripción "PATRON XO CAFE 6/750 ML" + UdM "BOT" => units_per_package=1.
+- NO confundas 1.75 L, 75 CL, 330 ML o 700 ML con cantidad de unidades.
+- Si la unidad es CAJA, revisa TAMAÑO/PRESENTACION antes de usar units_per_package=1.
+- Distingue SIEMPRE entre precio por empaque y total de línea.
+- Si CANTIDAD viene combinada con la unidad, por ejemplo "1 CJ", "2 CJ", "6 BOT",
+  separa quantity_packages=1/2/6 y purchase_unit=CJ/BOT.
+  * BOT/UND/PZA significa unidades físicas: units_per_package=1.
+  * CJ/CAJA significa empaque; busca su contenido en descripción/presentación.
+- Si la factura tiene columnas "Precio", "Desc.", "ISC + ISCav", "ITBIS", "Valor Neto":
+  * ISC/ISCav son IMPUESTOS separados; NO los sumes al costo base que se exporta.
+  * tax_value corresponde únicamente al ITBIS.
+  * isc_value / isc_advalorem_value / other_tax_value guardan los demás impuestos cuando sean legibles.
+  * "Valor Neto" puede incluir ISC/ISCav + ITBIS y NO debe asumirse como line_cost_net.
+  * Calcula el costo comercial base desde Cantidad × Precio menos descuento comercial, antes de ISC/ISCav e ITBIS.
+  * Usa Valor Neto solo como validación contable cuando la estructura de impuestos permita cuadrarlo.
+- Si la factura tiene columnas "Cant.", "UM", "Precio Unit", "ITBIS", "Total":
+  * price_unit_per_package = Precio Unit tal como aparece.
+  * Si UM es Caja/Caja 12/Caja 24, Precio Unit es precio del EMPAQUE, no de una botella.
+  * line_cost_net = Cantidad × Precio Unit cuando no hay descuento de línea adicional.
+  * Valida cuando sea posible: (Cantidad × Precio Unit) + ITBIS ≈ Total.
+  * Después, el costo físico = line_cost_net / (Cantidad × units_per_package).
+- Si la factura tiene columnas "Precio Und", "Desc.", "Subtotal":
+  * subtotal_net = Subtotal neto de la línea después del descuento.
+  * Si Subtotal = (Precio Und × Cantidad) - descuento, usa Subtotal como line_cost_net.
+  * No uses Precio Und como costo unitario físico si Unidad es CAJA12/CAJA24/etc.
+- Si la factura tiene columnas "Monto Neto", "ITBIS", "Total Posición":
+  * "Monto Neto" es line_cost_net cuando Monto Neto + ITBIS = Total Posición.
+  * "Total Posición" incluye ITBIS y NO es el costo que se exporta a WilPOS.
+  * Si UMV dice "CAJ / 6 PZA", "CAJ / 12 PZA", "CAJ / 20 PZA", etc.,
+    usa 6, 12, 20, etc. como units_per_package.
+- Si la factura tiene columnas "Importe", "Imp. Neto", "ITBIS", "Total":
+  * "Imp. Neto" es el candidato principal a line_cost_net cuando
+    Imp. Neto + ITBIS = Total (con tolerancia de redondeo).
+  * "Total" NO debe usarse como costo sin ITBIS.
+  * "Importe" puede ser cantidad × precio base antes del descuento.
+- Si Unidad/UdM es solo una medida como 700ML, 750ML, 75CL o 1.75L,
+  cada cantidad representa una unidad física: units_per_package=1.
+- Si Unidad/UdM es 24X330ML, 6X355ML, 12X750ML, etc.,
+  el primer número es units_per_package.
+- list_price_per_package = precio lista por CAJA/BOT/UND tal como se imprime.
+- discount_value = descuento monetario por empaque si la factura lo muestra así.
+- discount_rate = porcentaje de descuento si existe.
+- net_price_per_package = precio neto por CAJA/BOT/UND después del descuento, antes de ITBIS.
+- line_cost_net = COSTO NETO TOTAL DE TODA LA LÍNEA SIN ITBIS:
+  quantity_packages × net_price_per_package cuando Precio Neto es por empaque.
+- tax_value = ITBIS monetario de la línea si aparece.
+- gross_line_total = total de la línea con ITBIS SOLO cuando la factura realmente lo imprime así.
+- IMPORTANTE: algunos formatos llaman "IMPORTE" al neto sin ITBIS; no asumas que siempre incluye ITBIS.
+  Usa las columnas y la relación matemática de la fila para decidirlo.
+- EJEMPLO tipo MercaSID:
+  Cantidad=2 CA, Precio Neto=526.385, Importe=1,052.77.
+  Entonces line_cost_net=1,052.77 y net_price_per_package=526.385.
+- EJEMPLO tipo Álvarez:
+  Cantidad=1 CAJA, Precio=43,500, descuento=10%, ITBIS=7,047, Importe=46,197.
+  Entonces net_price_per_package=39,150 y line_cost_net=39,150.
+- El costo físico que exportará WilPOS se obtiene como:
+  line_cost_net / (quantity_packages * units_per_package).
 - Si la factura muestra PRECIO, DESCUENTO, VALOR ITBIS e IMPORTE, calcula o usa
   el importe antes de ITBIS. NO uses importe con ITBIS como costo neto.
 - itbis_rate: 0.18 si indica 18%, 0 si exento.
@@ -7643,7 +8374,14 @@ REGLAS:
 
             data = json.loads(raw_json)
 
-            # BASE6-R4: primero rescata filas/importe faltantes; después recupera códigos.
+            # BASE6-R7: auditoría independiente antes de aceptar la lectura.
+            data = _auditar_todas_las_filas_y_codigos(
+                client,
+                modelo,
+                data_url,
+                data,
+                nombre_archivo,
+            )
             data = _rescatar_filas_factura_vision(
                 client,
                 modelo,
@@ -8606,7 +9344,7 @@ def construir_df_productos():
                         4,
                     )
                     g["Precio Venta"] = round_to_nearest_5(
-                        float(g["Costo"]) * factor_margen
+                        float(g["Costo"]) * factor_ganancia * (1.0 + float(g.get("ITBIS", 0.18) or 0))
                     )
 
             df = pd.DataFrame(grupos.values())
@@ -8893,6 +9631,12 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                 for p in productos_en_archivo:
                     codigo = re.sub(r"[^A-Za-z0-9]", "", str(p["codigo"])).upper()
                     cantidad_comprada_unidades = float(p["cant"]) * float(p["emp"])
+
+                    # BASE6-R7: el stock debe ser unidades físicas, nunca número de cajas.
+                    # El costo_total de p es el neto de TODA la línea sin ITBIS; al dividir
+                    # posteriormente costo_total / stock obtenemos el costo por botella/unidad.
+                    if cantidad_comprada_unidades <= 0:
+                        cantidad_comprada_unidades = float(p["cant"])
 
                     moneda_original = str(p.get("moneda", "DOP")).upper()
                     costo_original = float(p["costo_total"])
@@ -9259,7 +10003,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R4_LECTOR_GENERAL_REAL_20260904"
+EXTRACTOR_CACHE_VERSION = "BASE6_R13_ISC_CANTIDAD_UDM_20260904"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
