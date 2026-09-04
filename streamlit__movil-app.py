@@ -3793,7 +3793,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R15":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R16":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3802,7 +3802,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R15":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R15"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R16"
 
 
 # =========================================================
@@ -8111,7 +8111,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R15"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R16"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -9696,6 +9696,83 @@ def modal_confirmacion(validas, duplicadas_count, margen):
 
 
 
+
+def _resumen_duplicados_archivos_ui(archivos):
+    """Devuelve (total, unicos, duplicados, detalle) usando SHA256 del contenido."""
+    import hashlib
+    vistos = {}
+    detalle = []
+    total = 0
+
+    for archivo in archivos or []:
+        total += 1
+        nombre = getattr(archivo, "name", "Archivo")
+        try:
+            datos = archivo.getvalue()
+        except Exception:
+            try:
+                archivo.seek(0)
+                datos = archivo.read()
+                archivo.seek(0)
+            except Exception:
+                datos = b""
+
+        huella = hashlib.sha256(datos).hexdigest()
+        if huella in vistos:
+            detalle.append({
+                "archivo": nombre,
+                "duplicado_de": vistos[huella],
+                "sha256": huella,
+            })
+        else:
+            vistos[huella] = nombre
+
+    duplicados = len(detalle)
+    return total, total - duplicados, duplicados, detalle
+
+
+def _mostrar_resumen_archivos_facturas_ui(archivos, facturas_unicas=None):
+    total, archivos_unicos, duplicados, detalle = _resumen_duplicados_archivos_ui(archivos)
+
+    if facturas_unicas is None:
+        facturas_unicas = archivos_unicos
+
+    st.markdown(
+        f"""
+        <div style="
+            display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+            margin:.15rem 0 .45rem 0;
+        ">
+            <span style="padding:5px 9px;border:1px solid var(--border);border-radius:999px;">
+                📎 <b>{total}</b> archivos cargados
+            </span>
+            <span style="padding:5px 9px;border:1px solid var(--border);border-radius:999px;">
+                🧾 <b>{facturas_unicas}</b> facturas únicas
+            </span>
+            <span style="padding:5px 9px;border:1px solid var(--border);border-radius:999px;">
+                ♻️ <b>{duplicados}</b> duplicado{"s" if duplicados != 1 else ""} detectado{"s" if duplicados != 1 else ""}
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if detalle:
+        with st.expander(
+            f"Ver {duplicados} archivo(s) duplicado(s)",
+            expanded=False,
+        ):
+            for d in detalle:
+                st.caption(f"♻️ {d['archivo']} → duplicado de {d['duplicado_de']}")
+
+    return {
+        "archivos_cargados": total,
+        "archivos_unicos": archivos_unicos,
+        "duplicados": duplicados,
+        "detalle": detalle,
+    }
+
+
 @st.dialog("👁 Vista previa del archivo", width="large")
 def mostrar_vista_previa_archivo(nombre, tipo_mime, datos):
     """Muestra imágenes y la primera página de PDFs sin alterar el archivo."""
@@ -10004,7 +10081,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R15_HTML_COMPACTO_FIX_20260904"
+EXTRACTOR_CACHE_VERSION = "BASE6_R16_RESUMEN_DUPLICADOS_20260904"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -10189,7 +10266,8 @@ def render_carga_facturas(titulo=True):
                 )
             )
 
-        st.caption(f"📎 {len(uploaded_files)} archivo(s) cargado(s)")
+        # BASE6-R16: distinguir archivos cargados, facturas únicas y duplicados.
+        _mostrar_resumen_archivos_facturas_ui(uploaded_files)
         html_archivos = (
             '<div style="'
             'display:flex; gap:8px; overflow-x:auto; overflow-y:hidden;'
