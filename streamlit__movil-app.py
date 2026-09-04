@@ -3792,7 +3792,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "V24":
+if st.session_state.get("_extractor_runtime_version") != "V25":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3801,7 +3801,7 @@ if st.session_state.get("_extractor_runtime_version") != "V24":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "V24"
+    st.session_state["_extractor_runtime_version"] = "V25"
 
 
 # =========================================================
@@ -6788,8 +6788,28 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
     moneda = str(data.get("currency") or "DOP").upper().strip()
 
     productos = []
-    for item in data.get("products") or []:
+    omitidos = []
+
+    # Omitidos que el propio lector visual detectó en la factura
+    # pero no pudo leer con seguridad.
+    for item in data.get("omitted_rows") or []:
+        if isinstance(item, dict):
+            omitidos.append({
+                "fila": str(item.get("row_hint") or "").strip(),
+                "descripcion": " ".join(str(item.get("description") or "").split()).strip(),
+                "motivo": str(item.get("reason") or "Fila ilegible o incompleta según Vision AI").strip(),
+                "origen": "vision",
+            })
+
+    productos_api = data.get("products") or []
+    for indice, item in enumerate(productos_api, start=1):
         if not isinstance(item, dict):
+            omitidos.append({
+                "fila": str(indice),
+                "descripcion": "",
+                "motivo": "La fila devuelta por Vision AI no tenía estructura de producto.",
+                "origen": "validacion",
+            })
             continue
 
         barcode = str(item.get("barcode") or "").strip()
@@ -6797,15 +6817,47 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
         codigo = barcode or codigo_interno
         nombre = " ".join(str(item.get("description") or "").split()).strip()
 
+        razones = []
         try:
             cant = float(item.get("quantity_packages") or 0)
-            emp = max(1, int(item.get("units_per_package") or 1))
+        except Exception:
+            cant = 0
+            razones.append("cantidad no numérica")
+
+        try:
+            emp = max(1, int(float(item.get("units_per_package") or 1)))
+        except Exception:
+            emp = 1
+            razones.append("empaque no numérico")
+
+        try:
             costo_total = float(item.get("line_cost_net") or 0)
+        except Exception:
+            costo_total = 0
+            razones.append("costo neto no numérico")
+
+        try:
             itbis = float(item.get("itbis_rate") or 0)
         except Exception:
-            continue
+            itbis = 0
+            razones.append("ITBIS no numérico")
 
-        if not codigo or not nombre or cant <= 0 or costo_total <= 0:
+        if not codigo:
+            razones.append("sin código de barras ni código interno legible")
+        if not nombre:
+            razones.append("descripción vacía o ilegible")
+        if cant <= 0:
+            razones.append("cantidad inválida o no legible")
+        if costo_total <= 0:
+            razones.append("costo neto de línea inválido o no legible")
+
+        if razones:
+            omitidos.append({
+                "fila": str(indice),
+                "descripcion": nombre or codigo or "Producto sin identificar",
+                "motivo": "; ".join(dict.fromkeys(razones)),
+                "origen": "validacion",
+            })
             continue
 
         # ITBIS se guarda como tasa decimal: 18% -> 0.18.
@@ -6828,6 +6880,25 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
             "itbis_detectado": "vision_api",
         }
         productos.append(p)
+
+    # Resumen persistente por imagen.
+    try:
+        visibles = int(data.get("visible_product_rows") or 0)
+    except Exception:
+        visibles = 0
+
+    try:
+        if "resumen_lectura_productos" not in st.session_state:
+            st.session_state["resumen_lectura_productos"] = {}
+        st.session_state["resumen_lectura_productos"][nombre_archivo] = {
+            "filas_visibles_estimadas": visibles,
+            "filas_devuelta_api": len(productos_api),
+            "productos_aceptados": len(productos),
+            "productos_omitidos": len(omitidos),
+            "omitidos": omitidos,
+        }
+    except Exception:
+        pass
 
     if not productos:
         return None
@@ -6856,7 +6927,7 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
     )
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V24"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_V25"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -6903,6 +6974,7 @@ Formato exacto:
   "currency": "DOP o USD",
   "page_number": 1,
   "total_pages": 1,
+  "visible_product_rows": 0,
   "products": [
     {
       "barcode": "codigo de barras o null",
@@ -6914,11 +6986,22 @@ Formato exacto:
       "line_cost_net": 0,
       "itbis_rate": 0.18
     }
+  ],
+  "omitted_rows": [
+    {
+      "row_hint": "número/posición aproximada de fila",
+      "description": "texto parcial si se alcanza a leer",
+      "reason": "por qué no se pudo extraer con seguridad"
+    }
   ]
 }
 
 REGLAS:
+- Cuenta TODAS las filas de productos visibles y coloca ese total en visible_product_rows.
 - Incluye todas las filas reales de productos visibles.
+- Si ves una fila de producto pero algún dato esencial impide extraerla con seguridad,
+  NO la ocultes: agrégala a omitted_rows explicando exactamente por qué.
+- Si no omites ninguna fila, devuelve omitted_rows como [].
 - No conviertas encabezados, subtotales, ITBIS, sellos o firmas en productos.
 - barcode = CODIGO DE BARRAS/EAN/UPC cuando exista.
 - internal_code = CODIGO/MATERIAL/ITEM del proveedor.
@@ -8581,7 +8664,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "V24_API_SIN_CACHE_20260903"
+EXTRACTOR_CACHE_VERSION = "V25_SCROLL_CONTROL_OMISIONES_20260903"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -9557,7 +9640,8 @@ if pagina == "🏠 Inicio":
                 ] if c in df_preview.columns
             ]
 
-            df_show = df_preview[cols_preview].head(8).copy()
+            # V25: mostrar TODOS los productos procesados dentro de un área con scroll.
+            df_show = df_preview[cols_preview].copy()
             if "Nombre" in df_show.columns:
                 df_show = df_show.rename(columns={"Nombre": "Descripción"})
             if "Stock" in df_show.columns:
@@ -9567,14 +9651,72 @@ if pagina == "🏠 Inicio":
                 df_show,
                 use_container_width=True,
                 hide_index=True,
-                height=310,
+                height=min(620, max(310, 42 + 35 * min(len(df_show), 16))),
                 column_config={
                     "Costo": st.column_config.NumberColumn(format="RD$ %.2f"),
                     "Precio Venta": st.column_config.NumberColumn(format="RD$ %.2f"),
                     "ITBIS": st.column_config.NumberColumn(format="%.2f"),
                 },
             )
-            st.caption(f"Mostrando {min(8, len(df_preview))} de {len(df_preview)} productos")
+            st.caption(
+                f"{len(df_preview)} producto(s) en la vista previa. "
+                "Usa el scroll vertical de la tabla para revisarlos todos."
+            )
+
+            # Control de calidad de lectura por imagen.
+            resumen_lectura = st.session_state.get("resumen_lectura_productos", {})
+            if resumen_lectura:
+                total_aceptados = sum(
+                    int(x.get("productos_aceptados", 0) or 0)
+                    for x in resumen_lectura.values()
+                )
+                total_omitidos = sum(
+                    int(x.get("productos_omitidos", 0) or 0)
+                    for x in resumen_lectura.values()
+                )
+
+                if total_omitidos == 0:
+                    st.success(
+                        f"✅ Control de lectura: Vision AI no reportó productos omitidos. "
+                        f"{total_aceptados} fila(s) fueron aceptadas por el lector."
+                    )
+                else:
+                    st.warning(
+                        f"⚠️ Control de lectura: {total_omitidos} producto(s)/fila(s) "
+                        "fueron omitidos porque no pudieron extraerse con seguridad."
+                    )
+                    with st.expander(
+                        f"Ver productos omitidos y motivo ({total_omitidos})",
+                        expanded=True,
+                    ):
+                        for archivo_res, info_res in resumen_lectura.items():
+                            omitidos_res = info_res.get("omitidos", []) or []
+                            if not omitidos_res:
+                                continue
+                            st.markdown(f"**{archivo_res}**")
+                            for om in omitidos_res:
+                                fila_txt = f"Fila {om.get('fila')}: " if om.get("fila") else ""
+                                desc_txt = om.get("descripcion") or "Producto sin identificar"
+                                motivo_txt = om.get("motivo") or "No se pudo validar."
+                                st.write(f"• {fila_txt}{desc_txt} — {motivo_txt}")
+
+                # Si Vision estima más filas visibles que las explicadas,
+                # levantar una alerta de posible omisión silenciosa.
+                alertas_conteo = []
+                for archivo_res, info_res in resumen_lectura.items():
+                    visibles = int(info_res.get("filas_visibles_estimadas", 0) or 0)
+                    aceptados = int(info_res.get("productos_aceptados", 0) or 0)
+                    omitidos_n = int(info_res.get("productos_omitidos", 0) or 0)
+                    if visibles > 0 and visibles > (aceptados + omitidos_n):
+                        alertas_conteo.append(
+                            f"{archivo_res}: se estiman {visibles} filas visibles, "
+                            f"pero solo {aceptados} fueron aceptadas y {omitidos_n} explicadas como omitidas."
+                        )
+                if alertas_conteo:
+                    st.error(
+                        "🚨 Posible omisión silenciosa detectada:\n\n"
+                        + "\n\n".join(alertas_conteo)
+                    )
         else:
             empty_df = pd.DataFrame(
                 columns=[
