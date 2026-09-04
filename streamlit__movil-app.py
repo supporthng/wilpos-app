@@ -5279,6 +5279,7 @@ def _extraer_proveedor_generico(lineas):
 
 def _extraer_numero_documento_generico(texto):
     patrones = [
+        r"(?im)\bfactura(?:\s+de\s+credito\s+fiscal)?(?:\s+electronica)?\s*[:#\-]?\s*([A-Z0-9\-]{4,})",
         r"(?im)\b(?:factura|fact\.?|no\.?\s*factura|n[uú]mero\s+factura)\s*[:#\-]?\s*([A-Z0-9\-]{4,})",
         r"(?im)\b(?:cotizaci[oó]n|cotizacion)\s*(?:no\.?|n[uú]mero)?\s*[:#\-]?\s*([A-Z0-9\-]{4,})",
         r"(?im)^\s*No\.\s*:\s*([A-Z0-9\-]{4,})\s*$",
@@ -5316,14 +5317,150 @@ def _buscar_header_productos(lineas):
     for idx, raw in enumerate(lineas):
         n = _normalizar_ocr(raw)
 
-        tiene_desc = any(x in n for x in ("descripcion", "detalle", "producto", "articulo"))
+        tiene_desc = any(x in n for x in ("descripcion", "detalle", "producto", "articulo", "descr"))
         tiene_cant = any(x in n for x in ("cantidad", "cant.", " cant ", "qty"))
         tiene_precio = any(x in n for x in ("precio", "p.unit", "precio unit", "importe", "total"))
+        tiene_barra = any(x in n for x in ("codigo de barras", "barras", "barcode"))
 
         if tiene_desc and tiene_cant and tiene_precio:
             return idx
+        if tiene_barra and tiene_desc and tiene_precio:
+            return idx
 
     return None
+
+
+
+def _extraer_empaque_desde_tamano(texto):
+    """
+    Ej.: 6/75 CL -> 6 unidades por caja; 12/70 CL -> 12.
+    Si no hay presentación múltiple, devuelve 1.
+    """
+    t = str(texto or "").upper()
+    m = re.search(r"\b(\d{1,3})\s*/\s*\d+(?:[.,]\d+)?\s*(?:CL|ML|L)\b", t)
+    if m:
+        try:
+            return max(1, int(m.group(1)))
+        except Exception:
+            pass
+    return 1
+
+
+def _parsear_linea_distribuidor_con_barcode(linea):
+    """
+    Reconoce tablas del tipo:
+      1 CAJA 3633 841... 12/75 CL. VINO ... 3,840.00 10% 384.00 18% 622.08 4,078.08
+
+    Devuelve costo SIN ITBIS por línea.
+    """
+    s = " ".join(str(linea or "").split()).strip()
+    if not s:
+        return None
+
+    # Código de barras real: 8 a 14 dígitos.
+    m_bar = re.search(r"\b(\d{8,14})\b", s)
+    if not m_bar:
+        return None
+
+    barcode = m_bar.group(1)
+    antes = s[:m_bar.start()].strip()
+    despues = s[m_bar.end():].strip()
+
+    # Debe haber un código interno cerca del barcode.
+    internos = re.findall(r"\b(\d{3,7})\b", antes)
+    if not internos:
+        return None
+    codigo_interno = internos[-1]
+
+    # Cantidad + unidad antes del código interno. OCR tolerante.
+    cantidad = 1.0
+    unidad_txt = "UND"
+    m_cant = re.search(
+        r"(?i)(\d+(?:[.,]\d+)?)\s+"
+        r"(CAJA|CJA|CJ|BOT(?:ELLA)?S?|UND|UNID(?:AD(?:ES)?)?|PAQ|PACK|PCS?)"
+        r"(?:\s+\S+)?\s*$",
+        antes[:antes.rfind(codigo_interno)].strip(),
+    )
+    if m_cant:
+        try:
+            cantidad = _numero_documento_a_float(m_cant.group(1))
+            unidad_txt = m_cant.group(2).upper()
+        except Exception:
+            cantidad = 1.0
+
+    # Localizar importes monetarios con decimales. El último es importe final.
+    money_matches = list(re.finditer(r"\b\d{1,3}(?:[.,]\d{3})*[.,]\d{2}\b", despues))
+    if len(money_matches) < 2:
+        return None
+
+    primer_money = money_matches[0]
+    descripcion_raw = despues[:primer_money.start()].strip(" -|")
+
+    # Limpiar tamaño inicial y número de columna PREPARADO/DIGITADO al final.
+    descripcion = re.sub(
+        r"(?i)^\s*\d{1,3}\s*/\s*\d+(?:[.,]\d+)?\s*(?:CL|ML|L)\.?\s*",
+        "",
+        descripcion_raw,
+    )
+    descripcion = re.sub(r"(?i)^\s*\d+(?:[.,]\d+)?\s*(?:CL|ML|L)\.?\s*", "", descripcion)
+    descripcion = re.sub(r"\s+\d{1,3}\s*$", "", descripcion).strip(" -|")
+
+    if len(descripcion) < 3:
+        return None
+
+    valores = []
+    for mm in money_matches:
+        try:
+            valores.append(_numero_documento_a_float(mm.group(0)))
+        except Exception:
+            pass
+    if len(valores) < 2:
+        return None
+
+    importe_final = float(valores[-1])
+
+    # Detectar tasa ITBIS en el texto posterior.
+    tasas = re.findall(r"\b(18|16|0)\s*%", despues)
+    tasa_itbis = (float(tasas[-1]) / 100.0) if tasas else 0.18
+
+    # Si existe valor de ITBIS separado, el penúltimo monetario suele ser ITBIS.
+    # Costo neto = importe final - ITBIS. Es más seguro que dividir cuando hay descuento.
+    costo_neto = importe_final
+    if tasa_itbis > 0 and len(valores) >= 3:
+        posible_itbis = float(valores[-2])
+        posible_neto = importe_final - posible_itbis
+        if posible_neto > 0:
+            # Validar relación aproximada impuesto/neto.
+            tasa_calc = posible_itbis / posible_neto
+            if abs(tasa_calc - tasa_itbis) <= 0.035:
+                costo_neto = posible_neto
+            else:
+                costo_neto = importe_final / (1.0 + tasa_itbis)
+        else:
+            costo_neto = importe_final / (1.0 + tasa_itbis)
+    elif tasa_itbis > 0:
+        costo_neto = importe_final / (1.0 + tasa_itbis)
+
+    # Presentación/empaque a partir de 6/75 CL, 12/70 CL, etc.
+    empaque = _extraer_empaque_desde_tamano(descripcion_raw)
+
+    # Si factura dice BOT/BOTELLA, la cantidad ya está en unidades físicas.
+    if unidad_txt.startswith("BOT") or unidad_txt.startswith("UND"):
+        empaque = 1
+
+    return {
+        "codigo": barcode,
+        "codigo_interno": codigo_interno,
+        "nombre": descripcion,
+        "cant": float(cantidad),
+        "emp": int(empaque),
+        "costo_total": round(float(costo_neto), 4),
+        "itbis": float(tasa_itbis),
+        "cat": _inferir_categoria_generica(descripcion),
+        "unidad_original": unidad_txt,
+        "costo_incluia_itbis": False,
+        "itbis_detectado": "separado_por_linea",
+    }
 
 
 def _parsear_linea_producto_generica(linea):
@@ -5431,7 +5568,9 @@ def _extraer_productos_genericos(texto):
         ):
             break
 
-        prod = _parsear_linea_producto_generica(linea)
+        prod = _parsear_linea_distribuidor_con_barcode(linea)
+        if prod is None:
+            prod = _parsear_linea_producto_generica(linea)
 
         if prod:
             productos.append(prod)
@@ -5579,7 +5718,11 @@ def _normalizar_costos_sin_itbis(texto, productos):
 
         p["costo_total_original_documento"] = costo_original
 
-        if incluyen is True and tasa > 0:
+        # Si el parser de línea ya separó explícitamente ITBIS, no tocar de nuevo.
+        if p.get("itbis_detectado") == "separado_por_linea":
+            p["costo_total"] = costo_original
+            p["costo_incluia_itbis"] = False
+        elif incluyen is True and tasa > 0:
             p["costo_total"] = costo_original / (1.0 + tasa)
             p["costo_incluia_itbis"] = True
             p["itbis_detectado"] = "incluido"
@@ -5647,37 +5790,43 @@ def _preparar_variantes_ocr_imagen(imagen):
         if not isinstance(imagen, Image.Image):
             imagen = Image.open(imagen)
 
-        base = ImageOps.exif_transpose(imagen).convert("RGB")
+        base_original = ImageOps.exif_transpose(imagen).convert("RGB")
 
-        # Aumentar tamaño cuando la foto tiene texto pequeño.
-        w, h = base.size
-        lado_largo = max(w, h)
-        escala = 1.0
-        if lado_largo < 2600:
-            escala = min(2.2, 2600.0 / max(lado_largo, 1))
-        if escala > 1.05:
-            base = base.resize(
-                (int(w * escala), int(h * escala)),
-                Image.Resampling.LANCZOS,
-            )
+        # Probar las cuatro orientaciones. WhatsApp/cámara a veces elimina
+        # la información EXIF y la factura queda físicamente girada.
+        for angulo in (0, 90, 180, 270):
+            base = base_original.rotate(angulo, expand=True) if angulo else base_original.copy()
 
-        variantes.append(("original_mejorada", base))
+            # Aumentar tamaño cuando la foto tiene texto pequeño.
+            w, h = base.size
+            lado_largo = max(w, h)
+            escala = 1.0
+            if lado_largo < 2600:
+                escala = min(2.2, 2600.0 / max(lado_largo, 1))
+            if escala > 1.05:
+                base = base.resize(
+                    (int(w * escala), int(h * escala)),
+                    Image.Resampling.LANCZOS,
+                )
 
-        # Escala de grises + autocontraste.
-        gris = ImageOps.grayscale(base)
-        gris = ImageOps.autocontrast(gris, cutoff=1)
-        gris = ImageEnhance.Contrast(gris).enhance(1.45)
-        gris = ImageEnhance.Sharpness(gris).enhance(1.35)
-        variantes.append(("gris_contraste", gris))
+            sufijo = f"rot{angulo}"
+            variantes.append((f"original_{sufijo}", base))
 
-        # Mediana ayuda a reducir ruido/patrón de pantalla (moiré ligero).
-        suave = gris.filter(ImageFilter.MedianFilter(size=3))
-        suave = ImageEnhance.Contrast(suave).enhance(1.35)
-        variantes.append(("antiruido", suave))
+            # Escala de grises + autocontraste.
+            gris = ImageOps.grayscale(base)
+            gris = ImageOps.autocontrast(gris, cutoff=1)
+            gris = ImageEnhance.Contrast(gris).enhance(1.45)
+            gris = ImageEnhance.Sharpness(gris).enhance(1.35)
+            variantes.append((f"gris_{sufijo}", gris))
 
-        # Binarización: útil para tablas y letras negras sobre fondo claro.
-        umbral = suave.point(lambda p: 255 if p > 168 else 0)
-        variantes.append(("binaria", umbral))
+            # Mediana ayuda a reducir ruido/moiré.
+            suave = gris.filter(ImageFilter.MedianFilter(size=3))
+            suave = ImageEnhance.Contrast(suave).enhance(1.35)
+            variantes.append((f"antiruido_{sufijo}", suave))
+
+            # Binarización para tablas.
+            umbral = suave.point(lambda p: 255 if p > 168 else 0)
+            variantes.append((f"binaria_{sufijo}", umbral))
 
     except Exception:
         try:
@@ -5697,8 +5846,11 @@ def _puntuar_texto_ocr_factura(texto):
     score = min(len(t) / 80.0, 20.0)
     claves = {
         "CODIGO": 6,
+        "CODIGO DE BARRAS": 10,
+        "BARRAS": 5,
         "DESCRIPCION": 6,
         "CANTIDAD": 6,
+        "DESCUENTO": 4,
         "PRECIO": 5,
         "IMPORTE": 6,
         "SUBTOTAL": 4,
@@ -7183,8 +7335,17 @@ def render_carga_facturas(titulo=True):
 
         archivos_unicos = list(archivos_por_nombre.values())
 
-        # También evita duplicados por factura aunque tengan nombres de archivo distintos.
-        firmas_detectadas_en_lote = set()
+        # Mismo número de factura puede venir fotografiado en varias páginas.
+        # Solo se omite si la segunda imagen contiene esencialmente los mismos productos.
+        firma_a_indice = {}
+
+        def _firma_producto_pagina(p):
+            return (
+                _codigo_producto_canonico(p.get("codigo", "")),
+                _nombre_producto_canonico(p.get("nombre", "")),
+                round(float(p.get("cant", 0) or 0), 3),
+                round(float(p.get("costo_total", 0) or 0), 2),
+            )
 
         with st.spinner("Leyendo y reconociendo facturas..."):
             for f in archivos_unicos:
@@ -7192,17 +7353,35 @@ def render_carga_facturas(titulo=True):
 
                 if not productos:
                     archivos_invalidos.append(f.name)
+                    continue
 
-                elif firma in firmas_detectadas_en_lote:
-                    # Duplicado REAL dentro de los archivos cargados actualmente.
-                    archivos_duplicados.append(
-                        (f.name, proveedor, num_fac)
-                    )
-
-                else:
-                    firmas_detectadas_en_lote.add(firma)
+                if firma not in firma_a_indice:
+                    firma_a_indice[firma] = len(archivos_validos)
                     archivos_validos.append(
                         (f, firma, proveedor, num_fac, fecha_fac, productos)
+                    )
+                    continue
+
+                # Ya existe la misma factura: determinar si es página adicional.
+                idx_existente = firma_a_indice[firma]
+                f0, firma0, prov0, num0, fecha0, productos0 = archivos_validos[idx_existente]
+
+                sig0 = {_firma_producto_pagina(p) for p in productos0}
+                sig1 = {_firma_producto_pagina(p) for p in productos}
+
+                nuevos = [p for p in productos if _firma_producto_pagina(p) not in sig0]
+
+                if nuevos:
+                    # Página adicional de la misma factura: unir productos.
+                    combinados = list(productos0) + nuevos
+                    archivos_validos[idx_existente] = (
+                        f0, firma0, prov0 or proveedor, num0 or num_fac,
+                        fecha0 or fecha_fac, combinados
+                    )
+                else:
+                    # Mismo contenido: duplicado real.
+                    archivos_duplicados.append(
+                        (f.name, proveedor, num_fac)
                     )
 
         # Acción principal visible inmediatamente después de leer la factura.
