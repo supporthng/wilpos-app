@@ -23,6 +23,20 @@ except ImportError:
     pytesseract = None
     OCR_DISPONIBLE = False
 
+
+# pytesseract puede importar aunque el ejecutable "tesseract" no esté
+# instalado en el servidor.
+TESSERACT_MOTOR_LISTO = False
+TESSERACT_ERROR = ""
+
+if OCR_DISPONIBLE:
+    try:
+        pytesseract.get_tesseract_version()
+        TESSERACT_MOTOR_LISTO = True
+    except Exception as exc:
+        TESSERACT_MOTOR_LISTO = False
+        TESSERACT_ERROR = str(exc)
+
 st.set_page_config(
 page_title="WilPOS Móvil | Procesador de Facturas",
     page_icon="📦",
@@ -5218,6 +5232,16 @@ def _numero_documento_a_float(valor):
         else:
             s = "".join(partes)
 
+    # OCR puede devolver "13.062.60": conservar el último separador como decimal.
+    if s.count(".") > 1 and "," not in s:
+        partes = s.split(".")
+        if len(partes[-1]) == 2:
+            s = "".join(partes[:-1]) + "." + partes[-1]
+    elif s.count(",") > 1 and "." not in s:
+        partes = s.split(",")
+        if len(partes[-1]) == 2:
+            s = "".join(partes[:-1]) + "." + partes[-1]
+
     return float(s)
 
 
@@ -5354,7 +5378,14 @@ def _parsear_linea_distribuidor_con_barcode(linea):
         return None
 
     # Código de barras real: 8 a 14 dígitos.
-    # OCR puede introducir espacios: 8 410035 601094.
+    # OCR suele confundir el 8 inicial con B.
+    s = re.sub(
+        r"(?<![A-Za-z0-9])B(?=\d{7,13}\b)",
+        "8",
+        s,
+        flags=re.IGNORECASE,
+    )
+
     m_bar = re.search(r"\b(\d{8,14})\b", s)
     if m_bar:
         barcode = m_bar.group(1)
@@ -5942,7 +5973,7 @@ def _ocr_multilectura(imagen):
     Esto reduce drásticamente el tiempo frente a probar todas las
     variantes y todos los PSM en las cuatro rotaciones.
     """
-    if not OCR_DISPONIBLE:
+    if not OCR_DISPONIBLE or not TESSERACT_MOTOR_LISTO:
         return ""
 
     angulo = _detectar_mejor_rotacion_ocr(imagen)
@@ -5990,24 +6021,32 @@ def _ocr_multilectura(imagen):
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=64)
 def _ocr_imagen_desde_bytes_cache(raw_bytes):
-    """
-    Cachea el OCR por contenido de archivo.
-    Streamlit puede hacer varios reruns; la misma foto no debe pasar
-    nuevamente por Tesseract en cada uno.
-    """
+    """Cachea OCR por contenido y conserva el motivo real de fallo."""
     if not raw_bytes:
-        return ""
+        return "__OCR_ERROR__:archivo de imagen vacío"
+
+    if not OCR_DISPONIBLE:
+        return "__OCR_ERROR__:la librería pytesseract no está instalada"
+
+    if not TESSERACT_MOTOR_LISTO:
+        return (
+            "__OCR_ERROR__:el motor Tesseract no está instalado en el servidor. "
+            "Agrega packages.txt al repositorio."
+        )
 
     try:
         imagen = Image.open(io.BytesIO(raw_bytes))
-        return _ocr_multilectura(imagen)
-    except Exception:
-        return ""
+        resultado = _ocr_multilectura(imagen)
+        if not str(resultado or "").strip():
+            return "__OCR_ERROR__:Tesseract no produjo texto legible"
+        return resultado
+    except Exception as exc:
+        return f"__OCR_ERROR__:{type(exc).__name__}: {exc}"
 
 
 def _ocr_imagen(image):
     """Compatibilidad con llamadas históricas."""
-    if not OCR_DISPONIBLE:
+    if not OCR_DISPONIBLE or not TESSERACT_MOTOR_LISTO:
         return ""
     try:
         return _ocr_multilectura(image)
@@ -6063,8 +6102,11 @@ def extraer_datos_factura(uploaded_file):
 
     elif file_name.endswith((".png", ".jpg", ".jpeg")):
         if not OCR_DISPONIBLE:
-            errores_locales.append(
-                "OCR no disponible: instala pytesseract y Tesseract para reconocer fotos automáticamente."
+            extracted_text = "__OCR_ERROR__:la librería pytesseract no está instalada"
+        elif not TESSERACT_MOTOR_LISTO:
+            extracted_text = (
+                "__OCR_ERROR__:el motor Tesseract no está instalado en el servidor. "
+                "Agrega packages.txt al repositorio de Streamlit Cloud."
             )
         elif raw is not None:
             try:
@@ -6077,6 +6119,25 @@ def extraer_datos_factura(uploaded_file):
                 )
 
     st.session_state.errores_ocr.extend(errores_locales)
+
+    # ---------------------------------------------------------
+    # ERROR REAL DEL MOTOR OCR
+    # ---------------------------------------------------------
+    if str(extracted_text).startswith("__OCR_ERROR__:"):
+        mensaje_ocr = str(extracted_text).split("__OCR_ERROR__:", 1)[1].strip()
+        try:
+            if "errores_ocr_archivos" not in st.session_state:
+                st.session_state["errores_ocr_archivos"] = {}
+            st.session_state["errores_ocr_archivos"][uploaded_file.name] = mensaje_ocr
+        except Exception:
+            pass
+        return (
+            ("OCR_ERROR", uploaded_file.name),
+            "OCR no disponible",
+            "",
+            "",
+            [],
+        )
 
     # ---------------------------------------------------------
     # IDENTIFICACIÓN AUTOMÁTICA
