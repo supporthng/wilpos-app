@@ -12,6 +12,7 @@ import pdfplumber
 from PIL import Image, ImageOps
 from datetime import datetime
 from urllib.request import Request, urlopen
+from difflib import SequenceMatcher
 
 try:
     import fitz
@@ -3792,7 +3793,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R24":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R25":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3801,7 +3802,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R24":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R24"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R25"
 
 
 # =========================================================
@@ -8851,7 +8852,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R24"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R25"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -10338,8 +10339,8 @@ def modal_confirmacion(validas, duplicadas_count, margen):
 
     if duplicadas_count:
         st.warning(
-            f"⚠️ Se omitieron {duplicadas_count} factura(s) duplicada(s). "
-            "No se incluirán en el consolidado."
+            f"⚠️ Se omitieron {duplicadas_count} archivo(s) de contenido exactamente duplicado. "
+            "Las fotos/páginas distintas con el mismo número de factura sí se procesan."
         )
 
     b1, b2 = st.columns(2)
@@ -10509,6 +10510,176 @@ def modal_confirmacion(validas, duplicadas_count, margen):
 
 
 
+
+
+
+
+# ============================================================
+# DEDUPLICACIÓN MULTIFOTO / MULTIPÁGINA POR FACTURA
+# ============================================================
+def _codigo_articulo_real(prod):
+    """Código confiable para comparar el mismo artículo entre fotos."""
+    if not isinstance(prod, dict):
+        return ""
+    for campo in ("barcode", "codigo", "internal_code"):
+        val = re.sub(r"[^A-Za-z0-9]", "", str(prod.get(campo) or "")).upper()
+        if not val:
+            continue
+        if val.startswith("TMP"):
+            continue
+        # Evitar tratar medidas/valores demasiado cortos como código.
+        if len(val) >= 5 and not re.fullmatch(r"\d+(?:ML|CL|LT|L|OZ|CC)", val):
+            return val
+    return ""
+
+
+def _nombre_articulo_factura(prod):
+    if not isinstance(prod, dict):
+        return ""
+    nombre = (
+        prod.get("nombre_original_lectura")
+        or prod.get("nombre")
+        or prod.get("description")
+        or ""
+    )
+    t = _nombre_producto_canonico(nombre)
+    # Para comparar fotos, ignorar tokens logísticos de caja pero conservar presentación física.
+    t = re.sub(r"\b(?:CAJA|CAJ|CJ|CASE|PACK|PCK|PAQUETE)\s*[- ]?\s*\d{1,3}\b", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _articulos_equivalentes_misma_factura(a, b):
+    """
+    Dos lecturas se consideran el mismo artículo SOLAMENTE dentro de la misma factura.
+
+    Prioridad:
+    - código/barcode real igual;
+    - si faltan códigos, nombre comercial muy parecido.
+    No compara contra otras facturas.
+    """
+    ca = _codigo_articulo_real(a)
+    cb = _codigo_articulo_real(b)
+    if ca and cb:
+        return ca == cb
+
+    na = _nombre_articulo_factura(a)
+    nb = _nombre_articulo_factura(b)
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+
+    # OCR puede variar un carácter entre fotos solapadas.
+    # Sólo aceptar similitud alta para evitar unir productos distintos.
+    if min(len(na), len(nb)) >= 10:
+        ratio = SequenceMatcher(None, na, nb).ratio()
+        if ratio >= 0.94:
+            return True
+
+    return False
+
+
+def _puntaje_calidad_articulo(prod):
+    """Escoge la lectura más completa de una línea repetida; nunca suma ambas."""
+    if not isinstance(prod, dict):
+        return 0
+    score = 0
+    if _codigo_articulo_real(prod):
+        score += 6
+    if str(prod.get("barcode") or "").strip():
+        score += 4
+    if str(prod.get("internal_code") or "").strip():
+        score += 2
+    if str(prod.get("purchase_unit") or prod.get("unidad_original") or "").strip():
+        score += 3
+    if str(prod.get("package_text") or prod.get("presentation") or prod.get("size_text") or "").strip():
+        score += 3
+    try:
+        if int(float(prod.get("emp") or prod.get("units_per_package") or 1)) > 1:
+            score += 3
+    except Exception:
+        pass
+    try:
+        if float(prod.get("costo_total") or 0) > 0:
+            score += 2
+    except Exception:
+        pass
+    try:
+        if float(prod.get("cant") or 0) > 0:
+            score += 1
+    except Exception:
+        pass
+    score += min(3, len(_nombre_articulo_factura(prod)) / 30.0)
+    return score
+
+
+def _fusionar_lecturas_mismo_articulo(existing, nuevo):
+    """
+    Conserva UNA sola línea para el mismo artículo de la misma factura.
+    Usa la lectura más completa y rellena campos faltantes con la otra.
+    NUNCA suma cantidad/costo por ser una foto repetida/solapada.
+    """
+    if not isinstance(existing, dict):
+        return dict(nuevo or {})
+    if not isinstance(nuevo, dict):
+        return dict(existing or {})
+
+    if _puntaje_calidad_articulo(nuevo) > _puntaje_calidad_articulo(existing):
+        base, alt = dict(nuevo), existing
+    else:
+        base, alt = dict(existing), nuevo
+
+    campos_rellenables = (
+        "barcode", "internal_code", "codigo", "nombre", "nombre_original_lectura",
+        "purchase_unit", "unidad_original", "uom", "udm",
+        "package_text", "presentation", "size_text",
+        "itbis", "cat", "moneda",
+    )
+    for campo in campos_rellenables:
+        if not base.get(campo) and alt.get(campo):
+            base[campo] = alt.get(campo)
+
+    # Si una lectura consiguió un empaque explícito >1, conservarlo.
+    try:
+        emp_base = int(float(base.get("emp") or base.get("units_per_package") or 1))
+    except Exception:
+        emp_base = 1
+    try:
+        emp_alt = int(float(alt.get("emp") or alt.get("units_per_package") or 1))
+    except Exception:
+        emp_alt = 1
+    if emp_alt > emp_base:
+        base["emp"] = emp_alt
+        base["units_per_package"] = emp_alt
+
+    avisos = list(base.get("advertencias_lectura") or [])
+    avisos.append("Artículo repetido en otra foto/página de la misma factura: se conservó una sola línea.")
+    base["advertencias_lectura"] = list(dict.fromkeys(avisos))
+    return base
+
+
+def _deduplicar_articulos_misma_factura(productos):
+    """
+    Deduplica artículos sólo dentro de una misma factura.
+    Retorna (productos_unicos, cantidad_repetidos_omitidos).
+    """
+    unicos = []
+    repetidos = 0
+    for p in list(productos or []):
+        if not isinstance(p, dict):
+            continue
+        encontrado = -1
+        for i, existente in enumerate(unicos):
+            if _articulos_equivalentes_misma_factura(existente, p):
+                encontrado = i
+                break
+        if encontrado >= 0:
+            unicos[encontrado] = _fusionar_lecturas_mismo_articulo(unicos[encontrado], p)
+            repetidos += 1
+        else:
+            unicos.append(p)
+    return unicos, repetidos
 
 
 
@@ -10969,7 +11140,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R24_MOTOR_UNIVERSAL_EMPAQUE_20260905"
+EXTRACTOR_CACHE_VERSION = "BASE6_R25_MULTIFOTO_ARTICULO_DEDUP_20260905"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -11475,36 +11646,39 @@ def render_carga_facturas(titulo=True):
         st.session_state["vision_debug"] = {}
         st.session_state.pop("vision_ultimo_error_directo", None)
 
-        # Evita procesar dos veces el mismo nombre de archivo dentro del lote.
-        archivos_por_nombre = {}
+        # IMPORTANTE: dos fotos distintas pueden tener el mismo nombre de archivo.
+        # Sólo se omite un archivo cuando sus BYTES son exactamente iguales.
+        archivos_unicos = []
+        huellas_binarias = {}
         for f in uploaded_files:
-            if f.name in archivos_por_nombre:
+            try:
+                raw_f = f.getvalue()
+            except Exception:
+                f.seek(0)
+                raw_f = f.read()
+                f.seek(0)
+
+            huella = hashlib.sha256(raw_f).hexdigest()
+            if huella in huellas_binarias:
+                original = huellas_binarias[huella]
                 archivos_duplicados.append(
-                    (f.name, "Archivo repetido en esta carga", "")
+                    (f.name, "Contenido idéntico", getattr(original, "name", ""))
                 )
                 _guardar_resultado_archivo_lote(
                     f.name,
                     "duplicado_contenido",
-                    motivo="Nombre de archivo repetido dentro del lote.",
-                    accion="No requiere reprocesamiento si el contenido es el mismo.",
+                    motivo=f"Archivo binariamente idéntico a {getattr(original, 'name', 'otro archivo')}.",
+                    accion="Se omite sólo esta copia exacta; fotos distintas sí se procesan.",
                 )
             else:
-                archivos_por_nombre[f.name] = f
+                huellas_binarias[huella] = f
+                archivos_unicos.append(f)
 
-        archivos_unicos = list(archivos_por_nombre.values())
-
-        # Mismo número de factura puede venir fotografiado en varias páginas.
-        # Solo se omite si la segunda imagen contiene esencialmente los mismos productos.
+        # Mismo número/NCF puede venir en muchas fotos/páginas.
+        # TODAS las fotos distintas se leen. La deduplicación ocurre a nivel
+        # de ARTÍCULO dentro de esa misma factura, nunca por número de factura.
         firma_a_indice = {}
         st.session_state.paginas_lote_detectadas = {}
-
-        def _firma_producto_pagina(p):
-            return (
-                _codigo_producto_canonico(p.get("codigo", "")),
-                _nombre_producto_canonico(p.get("nombre", "")),
-                round(float(p.get("cant", 0) or 0), 3),
-                round(float(p.get("costo_total", 0) or 0), 2),
-            )
 
         progreso_ocr = st.progress(0, text="Preparando lectura de facturas…")
         total_archivos_ocr = max(1, len(archivos_unicos))
@@ -11528,6 +11702,9 @@ def render_carga_facturas(titulo=True):
                 )
                 continue
 
+            # Deduplicar también líneas repetidas dentro de una misma foto.
+            productos, repetidos_internos = _deduplicar_articulos_misma_factura(productos)
+
             if firma not in firma_a_indice:
                 firma_a_indice[firma] = len(archivos_validos)
                 archivos_validos.append(
@@ -11540,51 +11717,64 @@ def render_carga_facturas(titulo=True):
                     proveedor=proveedor,
                     factura=num_fac,
                     productos=len(productos),
-                    motivo="Factura reconocida correctamente.",
+                    productos_repetidos_omitidos=repetidos_internos,
+                    motivo=(
+                        "Factura reconocida correctamente. "
+                        "Los artículos repetidos dentro de esta misma foto/factura se conservaron una sola vez."
+                    ),
                 )
                 continue
 
-            # Ya existe la misma factura: determinar si es página adicional.
+            # Ya existe la misma factura: esta foto NO se descarta.
+            # Se compara artículo por artículo con lo ya leído de ESA factura.
             idx_existente = firma_a_indice[firma]
             f0, firma0, prov0, num0, fecha0, productos0 = archivos_validos[idx_existente]
 
-            sig0 = {_firma_producto_pagina(p) for p in productos0}
-            sig1 = {_firma_producto_pagina(p) for p in productos}
+            combinados = list(productos0)
+            nuevos = 0
+            repetidos_solapados = 0
 
-            nuevos = [p for p in productos if _firma_producto_pagina(p) not in sig0]
+            for p_nuevo in productos:
+                idx_equiv = -1
+                for i_exist, p_exist in enumerate(combinados):
+                    if _articulos_equivalentes_misma_factura(p_exist, p_nuevo):
+                        idx_equiv = i_exist
+                        break
 
-            if nuevos:
-                # Página adicional de la misma factura: unir productos.
-                combinados = list(productos0) + nuevos
-                archivos_validos[idx_existente] = (
-                    f0, firma0, prov0 or proveedor, num0 or num_fac,
-                    fecha0 or fecha_fac, combinados
-                )
-                st.session_state.paginas_lote_detectadas[firma0] = (
-                    int(st.session_state.paginas_lote_detectadas.get(firma0, 1)) + 1
-                )
-                _guardar_resultado_archivo_lote(
-                    f.name,
-                    "pagina_adicional",
-                    proveedor=proveedor or prov0,
-                    factura=num_fac or num0,
-                    productos=len(productos),
-                    productos_nuevos=len(nuevos),
-                    motivo="Página adicional reconocida y unida a la misma factura.",
-                )
-            else:
-                # Mismo contenido: duplicado real.
-                archivos_duplicados.append(
-                    (f.name, proveedor, num_fac)
-                )
-                _guardar_resultado_archivo_lote(
-                    f.name,
-                    "duplicado_contenido",
-                    proveedor=proveedor,
-                    factura=num_fac,
-                    motivo="El contenido coincide con una página/factura ya leída.",
-                    accion="No necesita reprocesarse.",
-                )
+                if idx_equiv >= 0:
+                    combinados[idx_equiv] = _fusionar_lecturas_mismo_articulo(
+                        combinados[idx_equiv],
+                        p_nuevo,
+                    )
+                    repetidos_solapados += 1
+                else:
+                    combinados.append(p_nuevo)
+                    nuevos += 1
+
+            archivos_validos[idx_existente] = (
+                f0, firma0, prov0 or proveedor, num0 or num_fac,
+                fecha0 or fecha_fac, combinados
+            )
+            st.session_state.paginas_lote_detectadas[firma0] = (
+                int(st.session_state.paginas_lote_detectadas.get(firma0, 1)) + 1
+            )
+
+            # Aunque esta foto no aporte artículos nuevos, cuenta como foto/página
+            # reconocida de la misma factura; no se etiqueta como factura duplicada.
+            _guardar_resultado_archivo_lote(
+                f.name,
+                "pagina_adicional",
+                proveedor=proveedor or prov0,
+                factura=num_fac or num0,
+                productos=len(productos),
+                productos_nuevos=nuevos,
+                productos_repetidos_omitidos=(repetidos_internos + repetidos_solapados),
+                motivo=(
+                    "Foto/página adicional de la misma factura. "
+                    f"Se agregaron {nuevos} artículo(s) nuevo(s) y se omitieron "
+                    f"{repetidos_internos + repetidos_solapados} artículo(s) repetido(s) de esta misma factura."
+                ),
+            )
 
         progreso_ocr.progress(100, text="Lectura completada")
         progreso_ocr.empty()
