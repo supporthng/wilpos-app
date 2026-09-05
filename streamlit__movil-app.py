@@ -3792,7 +3792,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R22_1":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R24":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3801,7 +3801,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R22_1":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R22_1"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R24"
 
 
 # =========================================================
@@ -5664,66 +5664,232 @@ def _limpiar_producto_para_exportacion(prod):
     return prod
 
 
-def _validar_empaque_final_producto(prod):
-    """
-    Última barrera antes de calcular stock/costo unitario.
-    Corrige empaques leídos como 1 cuando la factura/descripcion demuestra
-    que el precio corresponde a una caja o multipack.
 
-    Si la unidad impresa es BOT/UND/PZA o una medida individual, NO corrige.
+
+# ============================================================
+# MOTOR UNIVERSAL DE EMPAQUE / COSTO UNITARIO
+# ============================================================
+
+# Excepciones comerciales confirmadas cuando la factura no imprime el empaque.
+# Sólo se usan como último recurso.
+EMPAQUES_CONFIRMADOS_POR_PRODUCTO = (
+    (r"\bPRESIDENTE\s+LIGHT\b.*\bLATA\b", 24),
+    (r"\bPRESIDENTE\s+(?:REG|REGULAR)\b.*\bLATA\b", 24),
+)
+
+
+def _empaque_confirmado_por_nombre(nombre):
+    texto = _nombre_producto_canonico(nombre)
+    for patron, empaque in EMPAQUES_CONFIRMADOS_POR_PRODUCTO:
+        if re.search(patron, texto, flags=re.I):
+            return int(empaque), "catalogo_confirmado"
+    return 1, ""
+
+
+def _parece_empaque_caja(unidad, nombre=""):
+    u = " ".join(str(unidad or "").upper().replace(".", "").split())
+    n = _nombre_producto_canonico(nombre)
+    return bool(
+        re.search(r"\b(?:CA|CAJA|CJ|CAJ|CASE|PACK|PCK|PAQUETE)\b", u)
+        or re.search(r"\b(?:CAJA|CASE|PACK|PAQUETE)\b", n)
+    )
+
+
+def _extraer_empaque_udm_universal(unidad):
+    """
+    Extrae unidades por empaque desde UdM/UMV.
+    Retorna (empaque, fuente, confianza).
+    """
+    u = " ".join(str(unidad or "").upper().replace(",", ".").replace("×", "X").split()).strip()
+    if not u:
+        return 1, "", 0
+
+    # BOT/UND/PZA o medida sola => cantidad ya representa unidades físicas.
+    if _unidad_es_fisica_individual(u):
+        return 1, "udm_unidad_fisica", 100
+
+    # CAJ / 24 PZA, CAJA/12 PCS.
+    m = re.search(
+        r"\b(?:CJ|CAJ|CAJA|CASE|PACK|PCK)\s*/\s*(\d{1,3})\s*"
+        r"(?:PZA|PZAS|PCS|PC|UND|UNIDADES?|BOT|BOTELLAS?)\b",
+        u, flags=re.I
+    )
+    if m:
+        n = int(m.group(1))
+        if 2 <= n <= 1000:
+            return n, "udm_caja_piezas", 100
+
+    # CJ24BOT, CAJA12, Caja 24, CJ 12.
+    m = re.fullmatch(
+        r"\s*(?:CJ|CAJ|CAJA|CASE|PACK|PCK)\s*[- /]?\s*(\d{1,3})\s*"
+        r"(?:BOT|BOTELLAS?|UND|UNIDADES?|PZA|PZAS?|PCS)?\s*",
+        u, flags=re.I
+    )
+    if m:
+        n = int(m.group(1))
+        if 2 <= n <= 1000:
+            return n, "udm_caja_numero", 100
+
+    # 24X330ML / 6X355ML.
+    m = re.search(
+        r"(?<!\d)(\d{1,3})\s*X\s*\d+(?:\.\d+)?\s*(?:ML|CL|L|LT|LTR|OZ|CC)\b",
+        u, flags=re.I
+    )
+    if m:
+        n = int(m.group(1))
+        if 2 <= n <= 1000:
+            return n, "udm_multipack", 100
+
+    return 1, "", 0
+
+
+def _inferir_empaque_universal(prod, proveedor=""):
+    """
+    Devuelve (empaque, fuente, confianza, necesita_revision).
+
+    Prioridad:
+    1) UdM explícita.
+    2) package_text/presentación.
+    3) descripción original.
+    4) units_per_package leído por Vision.
+    5) catálogo comercial confirmado.
+    6) si parece caja y no hay cantidad: revisión obligatoria.
     """
     if not isinstance(prod, dict):
-        return prod
+        return 1, "default", 0, False
 
-    nombre = str(prod.get("nombre") or "")
+    nombre = str(prod.get("nombre_original_lectura") or prod.get("nombre") or "")
     unidad = (
         prod.get("purchase_unit")
         or prod.get("unidad_original")
         or prod.get("uom")
+        or prod.get("udm")
         or ""
     )
-    package_text = (
+    presentacion = (
         prod.get("package_text")
         or prod.get("presentation")
         or prod.get("size_text")
         or ""
     )
 
+    # Depósitos/envases retornables no deben dividirse sólo porque mencionen botellas.
+    n_norm = _normalizar_ocr(nombre)
+    es_deposito = any(
+        x in n_norm for x in
+        ("deposito", "depos.", "depos ", "retornable vacio", "envase vacio")
+    )
+
+    # 1) UdM explícita.
+    emp_udm, fuente_udm, conf_udm = _extraer_empaque_udm_universal(unidad)
+    if conf_udm >= 100:
+        return int(emp_udm), fuente_udm, conf_udm, False
+
+    # 2) Presentación exacta.
+    emp_pres = _extraer_empaque_desde_tamano(presentacion)
+    if emp_pres > 1 and not es_deposito:
+        return int(emp_pres), "presentacion_impresa", 95, False
+
+    # 3) Descripción original.
+    emp_desc = _extraer_empaque_desde_tamano(nombre)
+    if emp_desc > 1 and not es_deposito:
+        return int(emp_desc), "descripcion_impresa", 90, False
+
+    # 4) Valor de Vision.
     try:
-        emp_actual = max(1, int(float(prod.get("emp") or 1)))
+        emp_api = int(float(
+            prod.get("units_per_package")
+            or prod.get("emp")
+            or 1
+        ))
     except Exception:
-        emp_actual = 1
+        emp_api = 1
 
-    # Si la factura dice que se compró BOT/UND/PZA, la cantidad ya es física.
-    if _unidad_es_fisica_individual(unidad):
-        prod["emp"] = 1
-        prod["empaque_validacion_final"] = "unidad_fisica"
+    # Vision >1 es aceptable salvo que sea depósito.
+    if emp_api > 1 and not es_deposito:
+        return int(emp_api), "vision_units_per_package", 80, False
+
+    # 5) Catálogo confirmado: último recurso.
+    emp_catalogo, fuente_catalogo = _empaque_confirmado_por_nombre(nombre)
+    if emp_catalogo > 1 and not es_deposito:
+        return int(emp_catalogo), fuente_catalogo, 75, False
+
+    # 6) Caja sin unidades: no permitir silencio.
+    if _parece_empaque_caja(unidad, nombre):
+        return 1, "caja_sin_cantidad", 0, True
+
+    return 1, "unidad_por_defecto", 60, False
+
+
+def _validar_empaque_final_producto(prod, proveedor=""):
+    """
+    Barrera final antes de calcular inventario/costo.
+
+    Garantiza:
+      unidades_fisicas = cantidad * emp
+      costo_unitario = costo_neto_linea / unidades_fisicas
+
+    Si parece caja y no se logra determinar el contenido, lo marca
+    explícitamente para revisión y evita considerarlo confiable.
+    """
+    if not isinstance(prod, dict):
         return prod
 
-    # Priorizar presentación exacta y luego descripción.
-    inferido = _extraer_empaque_desde_tamano(package_text)
-    if inferido <= 1:
-        inferido = _extraer_empaque_desde_tamano(nombre)
+    try:
+        emp_antes = max(1, int(float(prod.get("emp") or 1)))
+    except Exception:
+        emp_antes = 1
 
-    # No tocar depósitos/envases retornables sólo por mencionar "24 botellas".
-    nombre_norm = _normalizar_ocr(nombre)
-    if any(x in nombre_norm for x in ("deposito", "depos.", "depos ", "retornable vacio", "envase vacio")):
-        prod["empaque_validacion_final"] = "deposito_no_corregido"
-        return prod
+    emp, fuente, confianza, revisar = _inferir_empaque_universal(prod, proveedor)
 
-    if inferido > 1 and (emp_actual <= 1 or emp_actual != inferido):
-        prod["emp_original_antes_validacion"] = emp_actual
-        prod["emp"] = int(inferido)
-        prod["empaque_validacion_final"] = f"corregido_a_{inferido}"
-        advertencias = list(prod.get("advertencias_lectura") or [])
+    prod["emp_original_antes_validacion"] = emp_antes
+    prod["emp"] = int(max(1, emp))
+    prod["empaque_fuente"] = fuente
+    prod["empaque_confianza"] = int(confianza)
+    prod["requiere_revision_empaque"] = bool(revisar)
+
+    advertencias = list(prod.get("advertencias_lectura") or [])
+    if prod["emp"] != emp_antes:
         advertencias.append(
-            f"empaque corregido antes del costo unitario: {emp_actual} → {inferido}"
+            f"empaque corregido antes del costo unitario: {emp_antes} → {prod['emp']} ({fuente})"
         )
-        prod["advertencias_lectura"] = list(dict.fromkeys(advertencias))
-    else:
-        prod["empaque_validacion_final"] = "sin_cambio"
 
+    if revisar:
+        advertencias.append(
+            "REVISAR EMPAQUE: la factura parece cobrar una caja/empaque, "
+            "pero no se pudo determinar cuántas unidades contiene. "
+            "No confiar en costo unitario hasta corregir el empaque."
+        )
+        prod["empaque_validacion_final"] = "REVISAR_EMPAQUE"
+    else:
+        prod["empaque_validacion_final"] = f"{fuente}:{prod['emp']}"
+
+    prod["advertencias_lectura"] = list(dict.fromkeys(advertencias))
     return prod
+
+
+def _calcular_costo_unitario_seguro(prod):
+    """
+    Retorna (unidades_fisicas, costo_unitario).
+    Sólo usa costo neto sin ITBIS.
+    """
+    try:
+        cantidad = float(prod.get("cant") or 0)
+    except Exception:
+        cantidad = 0.0
+    try:
+        emp = max(1, int(float(prod.get("emp") or 1)))
+    except Exception:
+        emp = 1
+    try:
+        costo_linea = float(prod.get("costo_total") or 0)
+    except Exception:
+        costo_linea = 0.0
+
+    unidades = cantidad * emp
+    costo_unitario = (costo_linea / unidades) if unidades > 0 else 0.0
+    return unidades, costo_unitario
+
 
 
 
@@ -8685,7 +8851,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R22_1"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R24"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -8825,6 +8991,18 @@ REGLAS:
 - Distingue código de producto de medidas como 75 CL, 750 ML, 12X750ML, 1.5L.
 - internal_code = CODIGO/MATERIAL/ITEM del proveedor.
 - quantity_packages = columna CANTIDAD.
+- Para determinar units_per_package usa, en este orden: UdM/UMV, TAMAÑO/PRESENTACIÓN, descripción.
+- Patrones reales que debes interpretar:
+  * "CAJA" + "12/75 CL" => 12.
+  * "CA" + "06x50 CL" => 6.
+  * "CJ24BOT" => 24; "CJ12BOT" => 12.
+  * "24X330ML" => 24.
+  * "6X4X355ML" => 24.
+  * "CAJ / 6 PZA" => 6; "CAJ / 24 PZA" => 24.
+  * "CAJA12" / "Caja 12" => 12.
+  * "Caja-24" => 24; "Caja-500" => 500.
+  * BOT/BOTELLA/UND/PZA o una medida sola "700ML"/"75CL" => 1.
+- No confundas presentación con empaque: "8 OZ", "750ML", "1.75L" son tamaño, NO cantidad.
 - purchase_unit = copia EXACTAMENTE la UdM/UMV/unidad impresa: CA, CAJA, BOT, UND,
   CJ12BOT, CJ24BOT, "CAJ / 6 PZA", "CAJ / 12 PZA", etc. NO simplifiques el texto.
 - Si la factura muestra UMV como "CAJ / N PZA", units_per_package=N.
@@ -10217,7 +10395,7 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                 for p in productos_en_archivo:
                     # BASE6-R20: última validación universal de empaque.
                     _emp_antes = int(float(p.get("emp") or 1))
-                    p = _validar_empaque_final_producto(p)
+                    p = _validar_empaque_final_producto(p, proveedor=proveedor)
                     # El empaque ya fue interpretado; ahora limpiar el nombre para
                     # que el Excel conserve sólo producto + presentación.
                     p = _limpiar_producto_para_exportacion(p)
@@ -10228,14 +10406,23 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                             "Código": p.get("codigo", ""),
                             "Empaque leído": _emp_antes,
                             "Empaque corregido": _emp_despues,
+                            "Motivo": p.get("empaque_validacion_final", ""),
+                        })
+
+                    if p.get("requiere_revision_empaque"):
+                        st.session_state.setdefault("empaques_pendientes_revision", []).append({
+                            "Producto": p.get("nombre", ""),
+                            "Código": p.get("codigo", ""),
+                            "Proveedor": proveedor,
+                            "Unidad leída": p.get("purchase_unit") or p.get("unidad_original") or "",
+                            "Presentación": p.get("package_text") or "",
+                            "Empaque actual": p.get("emp", 1),
                         })
 
                     codigo = re.sub(r"[^A-Za-z0-9]", "", str(p["codigo"])).upper()
-                    cantidad_comprada_unidades = float(p["cant"]) * float(p["emp"])
+                    cantidad_comprada_unidades, costo_unitario_preview = _calcular_costo_unitario_seguro(p)
 
-                    # BASE6-R7: el stock debe ser unidades físicas, nunca número de cajas.
-                    # El costo_total de p es el neto de TODA la línea sin ITBIS; al dividir
-                    # posteriormente costo_total / stock obtenemos el costo por botella/unidad.
+                    # El stock siempre son unidades físicas.
                     if cantidad_comprada_unidades <= 0:
                         cantidad_comprada_unidades = float(p["cant"])
 
@@ -10782,7 +10969,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R22_1_DEPLOY_FIX_20260904"
+EXTRACTOR_CACHE_VERSION = "BASE6_R24_MOTOR_UNIVERSAL_EMPAQUE_20260905"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -10965,6 +11152,21 @@ def _mostrar_correcciones_empaque_ui():
         )
         with st.expander(f"Ver correcciones de empaque ({len(eventos)})", expanded=False):
             st.dataframe(pd.DataFrame(eventos), use_container_width=True, hide_index=True)
+
+
+
+def _mostrar_empaques_pendientes_revision_ui():
+    pendientes = st.session_state.get("empaques_pendientes_revision", []) or []
+    if not pendientes:
+        return
+    st.warning(
+        f"📦 {len(pendientes)} producto(s) parecen venir por caja/empaque, "
+        "pero la cantidad por caja no pudo determinarse con seguridad. "
+        "Estos casos deben revisarse antes de confiar en su costo unitario."
+    )
+    with st.expander(f"Ver empaques pendientes de revisión ({len(pendientes)})", expanded=True):
+        st.dataframe(pd.DataFrame(pendientes), use_container_width=True, hide_index=True)
+
 
 
 def _mostrar_archivos_no_procesados_ui():
@@ -11265,6 +11467,7 @@ def render_carga_facturas(titulo=True):
         st.session_state.errores_ocr = []
         st.session_state["resultado_archivos_lote"] = {}
         st.session_state["correcciones_empaque_lote"] = []
+        st.session_state["empaques_pendientes_revision"] = []
 
         # Los errores/diagnósticos pertenecen al intento actual, no a uno anterior.
         # No limpiamos el cache exitoso aquí; sólo descartamos estados visuales viejos.
@@ -11393,6 +11596,7 @@ def render_carga_facturas(titulo=True):
         )
         _mostrar_archivos_no_procesados_ui()
         _mostrar_correcciones_empaque_ui()
+        _mostrar_empaques_pendientes_revision_ui()
 
         _eventos_directos = st.session_state.get("fallback_574652_eventos", {})
         for _nombre_directo, _info_directo in _eventos_directos.items():
