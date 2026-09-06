@@ -3786,6 +3786,9 @@ DEFAULTS = {
     "productos_excluidos": set(),
     "paginas_lote_detectadas": {},
     "modo_oscuro": False,
+    "inventario_referencia_catalogo": [],
+    "inventario_referencia_nombre": "",
+    "matches_catalogo_lote": [],
 }
 
 for key, value in DEFAULTS.items():
@@ -3793,7 +3796,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R27":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R28":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3802,7 +3805,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R27":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R27"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R28"
 
 
 # =========================================================
@@ -8866,7 +8869,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R27"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R28"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -9997,6 +10000,283 @@ def _preservar_barcode_original(valor):
     return s
 
 
+
+# =========================================================
+# INVENTARIO DE REFERENCIA / MATCHING DE CÓDIGOS
+# =========================================================
+def _normalizar_nombre_match_catalogo(valor):
+    """
+    Normalización para comparar producto leído vs catálogo maestro.
+    Conserva marca/modelo/presentación; elimina ruido administrativo.
+    """
+    t = _normalizar_ocr(str(valor or "")).upper()
+    t = re.sub(r"\b(?:CODIGO|BARCODE|EAN|UPC|SKU|ITEM|MATERIAL|PRECIO|ITBIS|IMPORTE)\b", " ", t)
+    t = re.sub(r"\b(?:CAJA|CAJ|CJ|CASE|PACK|PCK|PAQUETE)\s*[- ]?\s*\d{1,4}\b", " ", t)
+    t = re.sub(r"[^A-Z0-9.%]+", " ", t)
+    # Unificar 750 ML / 750ML, 75 CL / 75CL, 1.75 L / 1.75L.
+    t = re.sub(r"\b(\d+(?:\.\d+)?)\s+(ML|CC|CL|L|LT|LTR|LTS|OZ)\b", r"\1\2", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _presentacion_fisica_ml(valor):
+    """
+    Devuelve presentación física aproximada en ml cuando es posible.
+    No usa el número de unidades del empaque.
+    """
+    t = _normalizar_nombre_match_catalogo(valor).replace(",", ".")
+    m = re.search(r"\b(\d+(?:\.\d+)?)(ML|CC|CL|L|LT|LTR|LTS|OZ)\b", t)
+    if not m:
+        return None
+    try:
+        n = float(m.group(1))
+    except Exception:
+        return None
+    u = m.group(2)
+    if u in ("ML", "CC"):
+        return round(n, 2)
+    if u == "CL":
+        return round(n * 10.0, 2)
+    if u in ("L", "LT", "LTR", "LTS"):
+        return round(n * 1000.0, 2)
+    if u == "OZ":
+        return round(n * 29.5735, 1)
+    return None
+
+
+def _tokens_match_catalogo(valor):
+    t = _normalizar_nombre_match_catalogo(valor)
+    stop = {
+        "BOT", "BOTELLA", "BOTELLAS", "UND", "UNIDAD", "UNIDADES",
+        "GENERAL", "PRODUCTO", "CAJA", "CAJ", "CJ", "CASE", "PACK", "PAQUETE"
+    }
+    return {x for x in t.split() if len(x) >= 2 and x not in stop}
+
+
+def _similitud_producto_catalogo(nombre_factura, nombre_catalogo):
+    a = _normalizar_nombre_match_catalogo(nombre_factura)
+    b = _normalizar_nombre_match_catalogo(nombre_catalogo)
+    if not a or not b:
+        return 0.0
+
+    pa = _presentacion_fisica_ml(a)
+    pb = _presentacion_fisica_ml(b)
+    if pa and pb:
+        tolerancia = max(8.0, min(pa, pb) * 0.035)
+        if abs(pa - pb) > tolerancia:
+            return 0.0
+
+    if a == b:
+        return 1.0
+
+    seq = SequenceMatcher(None, a, b).ratio()
+    ta = _tokens_match_catalogo(a)
+    tb = _tokens_match_catalogo(b)
+    jac = (len(ta & tb) / len(ta | tb)) if (ta or tb) else 0.0
+
+    score = (0.58 * seq) + (0.42 * jac)
+    if pa and pb and abs(pa - pb) <= max(8.0, min(pa, pb) * 0.035):
+        score += 0.06
+
+    return min(score, 1.0)
+
+
+def _detectar_columnas_inventario_referencia(df):
+    cols = {str(c).strip().lower(): c for c in df.columns}
+
+    def buscar(opciones):
+        for op in opciones:
+            opn = op.lower()
+            for low, original in cols.items():
+                if low == opn:
+                    return original
+        for op in opciones:
+            opn = op.lower()
+            for low, original in cols.items():
+                if opn in low:
+                    return original
+        return None
+
+    col_nombre = buscar(["Nombre", "Descripción", "Descripcion", "Producto", "Artículo", "Articulo"])
+    col_codigo = buscar(["Código Barra", "Codigo Barra", "Código de Barras", "Codigo de Barras", "Barcode", "EAN", "UPC", "GTIN"])
+    return col_nombre, col_codigo
+
+
+@st.cache_data(show_spinner=False, max_entries=8)
+def _cargar_inventario_referencia_bytes(raw_bytes, nombre_archivo="inventario.xlsx"):
+    """
+    Lee Excel como catálogo de referencia.
+    Los códigos se fuerzan a texto para preservar ceros iniciales.
+    """
+    if not raw_bytes:
+        return [], {"error": "Archivo vacío."}
+
+    try:
+        bio = io.BytesIO(raw_bytes)
+        hojas = pd.read_excel(bio, sheet_name=None, dtype=str)
+    except Exception as exc:
+        return [], {"error": f"No se pudo leer el Excel: {exc}"}
+
+    candidatos = []
+    diagnostico = {"hojas": list(hojas.keys()), "archivo": nombre_archivo}
+
+    orden = list(hojas.keys())
+    orden.sort(key=lambda x: 0 if str(x).strip().lower() in ("productos", "producto", "inventario") else 1)
+
+    for hoja in orden:
+        df = hojas[hoja].copy()
+        col_nombre, col_codigo = _detectar_columnas_inventario_referencia(df)
+        if not col_nombre or not col_codigo:
+            continue
+
+        for _, row in df.iterrows():
+            nombre = " ".join(str(row.get(col_nombre) or "").split()).strip()
+            codigo_raw = str(row.get(col_codigo) or "").strip()
+
+            if nombre.lower() in ("", "nan", "none"):
+                continue
+            if codigo_raw.lower() in ("", "nan", "none"):
+                continue
+
+            codigo = _codigo_producto_mostrar(codigo_raw)
+            if not codigo or codigo.startswith("TMP"):
+                continue
+
+            candidatos.append({
+                "nombre": nombre,
+                "codigo": codigo,
+                "hoja": str(hoja),
+                "nombre_match": _normalizar_nombre_match_catalogo(nombre),
+                "presentacion_ml": _presentacion_fisica_ml(nombre),
+            })
+
+        if candidatos:
+            diagnostico["hoja_usada"] = str(hoja)
+            diagnostico["col_nombre"] = str(col_nombre)
+            diagnostico["col_codigo"] = str(col_codigo)
+            break
+
+    unicos = []
+    vistos = set()
+    for item in candidatos:
+        k = (item["nombre_match"], item["codigo"])
+        if k in vistos:
+            continue
+        vistos.add(k)
+        unicos.append(item)
+
+    diagnostico["productos_validos"] = len(unicos)
+    if not unicos and "error" not in diagnostico:
+        diagnostico["error"] = "No encontré columnas compatibles de Nombre + Código Barra."
+    return unicos, diagnostico
+
+
+def _codigo_es_faltante_o_temporal(prod):
+    if not isinstance(prod, dict):
+        return True
+
+    barcode = _codigo_producto_mostrar(prod.get("barcode") or "")
+    codigo = _codigo_producto_mostrar(prod.get("codigo") or "")
+    status = str(prod.get("code_status") or "").strip().lower()
+
+    if barcode and not barcode.startswith("TMP"):
+        return False
+
+    # Un código interno leído también se respeta.
+    if codigo and not codigo.startswith("TMP") and status == "read":
+        return False
+
+    return (
+        (not codigo)
+        or codigo.startswith("TMP")
+        or status in ("not_printed", "unreadable", "unknown")
+    )
+
+
+def _buscar_codigo_en_inventario_referencia(prod, catalogo=None):
+    """
+    Matching conservador:
+    - sólo para producto sin código confiable;
+    - exige score alto;
+    - exige separación clara frente al segundo candidato;
+    - si hay duda, no asigna nada.
+    """
+    catalogo = catalogo if catalogo is not None else st.session_state.get("inventario_referencia_catalogo", [])
+    if not catalogo or not isinstance(prod, dict):
+        return None
+
+    if not _codigo_es_faltante_o_temporal(prod):
+        return None
+
+    nombre = (
+        prod.get("nombre")
+        or prod.get("nombre_original_lectura")
+        or prod.get("description")
+        or ""
+    )
+    nombre = " ".join(str(nombre).split()).strip()
+    if not nombre:
+        return None
+
+    resultados = []
+    for item in catalogo:
+        score = _similitud_producto_catalogo(nombre, item.get("nombre", ""))
+        if score > 0:
+            resultados.append((score, item))
+
+    if not resultados:
+        return None
+
+    resultados.sort(key=lambda x: x[0], reverse=True)
+    mejor_score, mejor = resultados[0]
+    segundo_score = resultados[1][0] if len(resultados) > 1 else 0.0
+
+    if mejor_score < 0.86:
+        return None
+    if segundo_score >= 0.82 and (mejor_score - segundo_score) < 0.055:
+        return None
+
+    return {
+        "codigo": _codigo_producto_mostrar(mejor.get("codigo")),
+        "nombre_catalogo": mejor.get("nombre", ""),
+        "score": round(float(mejor_score), 4),
+        "segundo_score": round(float(segundo_score), 4),
+        "hoja": mejor.get("hoja", ""),
+    }
+
+
+def _asignar_codigo_desde_inventario_referencia(prod):
+    match = _buscar_codigo_en_inventario_referencia(prod)
+    if not match:
+        return prod
+
+    nuevo = dict(prod)
+    codigo_anterior = _codigo_producto_mostrar(nuevo.get("codigo") or "")
+    nuevo["codigo"] = match["codigo"]
+    nuevo["barcode"] = match["codigo"]
+    nuevo["code_status"] = "read"
+    nuevo["codigo_temporal"] = False
+    nuevo["codigo_fuente"] = "inventario_referencia"
+    nuevo["codigo_match_score"] = match["score"]
+    nuevo["codigo_match_nombre_catalogo"] = match["nombre_catalogo"]
+
+    avisos = list(nuevo.get("advertencias_lectura") or [])
+    avisos.append(
+        f"Código recuperado desde inventario de referencia: {match['codigo']} "
+        f"(coincidencia {match['score']:.0%})."
+    )
+    nuevo["advertencias_lectura"] = list(dict.fromkeys(avisos))
+
+    st.session_state.setdefault("matches_catalogo_lote", []).append({
+        "Producto factura": nuevo.get("nombre", ""),
+        "Código anterior": codigo_anterior or "sin código",
+        "Código asignado": match["codigo"],
+        "Producto catálogo": match["nombre_catalogo"],
+        "Confianza": match["score"],
+    })
+    return nuevo
+
+
 # =========================================================
 # HELPERS DE CONSOLIDACIÓN / EXCEL
 # =========================================================
@@ -10535,6 +10815,11 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                     # El empaque ya fue interpretado; ahora limpiar el nombre para
                     # que el Excel conserve sólo producto + presentación.
                     p = _limpiar_producto_para_exportacion(p)
+
+                    # BASE6-R28: recuperar código desde el inventario de referencia
+                    # sólo si la factura no aportó uno confiable.
+                    p = _asignar_codigo_desde_inventario_referencia(p)
+
                     _emp_despues = int(float(p.get("emp") or 1))
                     if _emp_despues != _emp_antes:
                         st.session_state.setdefault("correcciones_empaque_lote", []).append({
@@ -11284,7 +11569,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R27_PRESERVA_CERO_ORIGINAL_20260905"
+EXTRACTOR_CACHE_VERSION = "BASE6_R28_INVENTARIO_REFERENCIA_MATCH_20260906"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -11627,6 +11912,62 @@ def render_carga_facturas(titulo=True):
 
     """Carga y procesa facturas conservando toda la lógica original."""
 
+    # ---------------------------------------------------------
+    # Catálogo maestro opcional para recuperar códigos faltantes.
+    # ---------------------------------------------------------
+    with st.container(border=True):
+        st.markdown(
+            '<div class="v3-panel-title">Inventario de referencia</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Opcional · úsalo para asignar códigos a productos que la factura no imprime "
+            "o que no pudieron leerse. Los códigos ya leídos de la factura tienen prioridad."
+        )
+
+        archivo_referencia = st.file_uploader(
+            "Cargar inventario de referencia",
+            type=["xlsx", "xls"],
+            accept_multiple_files=False,
+            key="inventario_referencia_uploader_r28",
+            help="Debe contener columnas equivalentes a Nombre y Código Barra.",
+        )
+
+        if archivo_referencia is not None:
+            try:
+                raw_ref = archivo_referencia.getvalue()
+                catalogo_ref, diag_ref = _cargar_inventario_referencia_bytes(
+                    raw_ref,
+                    archivo_referencia.name,
+                )
+                if catalogo_ref:
+                    st.session_state.inventario_referencia_catalogo = catalogo_ref
+                    st.session_state.inventario_referencia_nombre = archivo_referencia.name
+                    st.success(
+                        f"Catálogo listo: {len(catalogo_ref)} producto(s) de "
+                        f"{diag_ref.get('hoja_usada', 'la hoja detectada')}."
+                    )
+                    st.caption(
+                        "Matching automático sólo con alta confianza. "
+                        "No reemplaza códigos que ya fueron leídos correctamente."
+                    )
+                else:
+                    st.warning(diag_ref.get("error", "No se pudo construir el catálogo."))
+            except Exception as exc:
+                st.warning(f"No se pudo cargar el inventario de referencia: {exc}")
+        elif st.session_state.get("inventario_referencia_catalogo"):
+            st.info(
+                f"Catálogo activo: {st.session_state.get('inventario_referencia_nombre') or 'inventario de referencia'} "
+                f"· {len(st.session_state.inventario_referencia_catalogo)} producto(s)."
+            )
+
+        if st.session_state.get("inventario_referencia_catalogo"):
+            if st.button("Quitar inventario de referencia", key="quitar_inventario_ref_r28"):
+                st.session_state.inventario_referencia_catalogo = []
+                st.session_state.inventario_referencia_nombre = ""
+                st.session_state.matches_catalogo_lote = []
+                st.rerun()
+
     with st.container(border=True):
         st.markdown(
             '<div class="v3-panel-title">Cargar facturas o imágenes</div>',
@@ -11782,6 +12123,7 @@ def render_carga_facturas(titulo=True):
         st.session_state.errores_ocr = []
         st.session_state["resultado_archivos_lote"] = {}
         st.session_state["correcciones_empaque_lote"] = []
+        st.session_state["matches_catalogo_lote"] = []
         st.session_state["empaques_pendientes_revision"] = []
 
         # Los errores/diagnósticos pertenecen al intento actual, no a uno anterior.
