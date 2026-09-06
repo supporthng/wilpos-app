@@ -3793,7 +3793,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R26":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R27":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3802,7 +3802,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R26":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R26"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R27"
 
 
 # =========================================================
@@ -8003,8 +8003,9 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
             })
             continue
 
-        barcode = str(item.get("barcode") or "").strip()
-        codigo_interno = str(item.get("internal_code") or "").strip()
+        barcode_raw = str(item.get("barcode") or "").strip()
+        barcode = _preservar_barcode_original(barcode_raw)
+        codigo_interno = _codigo_producto_mostrar(item.get("internal_code") or "")
         nombre = " ".join(str(item.get("description") or "").split()).strip()
         code_status = str(item.get("code_status") or "").strip().lower()
         if code_status not in ("read", "not_printed", "unreadable", "unknown"):
@@ -8024,6 +8025,11 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
 
         razones = []
         advertencias = []
+
+        if barcode_raw and barcode and barcode != _codigo_producto_mostrar(barcode_raw):
+            advertencias.append(
+                f"barcode restaurado conservando cero inicial: {barcode_raw} → {barcode}"
+            )
 
         try:
             cant = float(item.get("quantity_packages") or 0)
@@ -8116,6 +8122,7 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
 
         p = {
             "codigo": codigo,
+            "barcode": barcode,
             "codigo_interno": codigo_interno,
             "nombre": nombre,
             "cant": cant,
@@ -8395,7 +8402,7 @@ REGLAS:
             if not isinstance(p, dict):
                 continue
 
-            barcode = str(item.get("barcode") or "").strip()
+            barcode = _preservar_barcode_original(item.get("barcode") or "")
             interno = str(item.get("internal_code") or "").strip()
             confianza = str(item.get("confidence") or "").strip().lower()
 
@@ -8485,6 +8492,7 @@ def _fusionar_auditoria_con_lectura(data, auditoria, nombre_archivo=""):
             continue
 
         bc_raw = str(f.get("barcode") or "").strip()
+        bc_raw = _preservar_barcode_original(bc_raw)
         ci_raw = str(f.get("internal_code") or "").strip()
         ds_raw = " ".join(str(f.get("description") or "").split()).strip()
 
@@ -8655,7 +8663,10 @@ REGLAS:
 - Sigue horizontalmente cada fila para no mezclar códigos con otros productos.
 - Puede haber código interno y código de barras en columnas separadas.
 - En tickets, el código puede estar en una línea inmediatamente anterior a la descripción.
-- Conserva ceros a la izquierda.
+- Conserva ceros a la izquierda EXACTAMENTE COMO APARECEN.
+- NO agregues un cero a todos los códigos.
+- Si el impreso empieza en 0, devuelve ese 0. Si no empieza en 0, no lo inventes.
+- barcode e internal_code deben ser cadenas JSON entre comillas, nunca números.
 - No confundas cantidades, tamaños, precios, ITBIS, fechas o números de factura con códigos.
 - Si un código es legible, cópialo EXACTAMENTE.
 - Si no se lee, usa null. No inventes.
@@ -8855,7 +8866,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R26"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R27"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -8952,6 +8963,9 @@ REGLAS:
 - AD ROYAL LICOR, ROYAL LICOR y DUSP ROYAL CLUB son nombres de CLIENTE en este flujo;
   nunca deben devolverse como provider salvo que la propia factura demuestre que son el emisor.
 - Si el emisor no es legible, usa provider="Proveedor no identificado"; NO copies el cliente.
+- En códigos de barras: copia EXACTAMENTE lo impreso. Si comienza con 0, conserva ese 0.
+  NO agregues 0 a códigos que no lo tengan.
+- barcode e internal_code deben devolverse como texto JSON entre comillas, nunca como número.
 - Cuenta TODAS las filas de productos visibles y coloca ese total en visible_product_rows.
 - Lee también los totales impresos cuando existan:
   * net_subtotal_before_tax = subtotal neto de mercancía ANTES de ITBIS, después de descuentos.
@@ -9932,6 +9946,57 @@ def convertir_costo_a_dop(costo, moneda, tasa_usd_dop):
     return costo
 
 
+
+def _gtin_check_digit_valido(codigo):
+    """
+    Valida GTIN-8 / UPC-A(12) / EAN-13 / GTIN-14.
+    No modifica el código.
+    """
+    s = re.sub(r"\D", "", str(codigo or ""))
+    if len(s) not in (8, 12, 13, 14):
+        return False
+    try:
+        digitos = [int(x) for x in s]
+    except Exception:
+        return False
+
+    esperado = digitos[-1]
+    cuerpo = digitos[:-1]
+    total = 0
+    for i, d in enumerate(reversed(cuerpo), start=1):
+        total += d * (3 if i % 2 == 1 else 1)
+    calculado = (10 - (total % 10)) % 10
+    return calculado == esperado
+
+
+def _preservar_barcode_original(valor):
+    """
+    Conserva el barcode como texto EXACTO.
+
+    Regla de reparación MUY limitada:
+    - Si Vision/OCR devuelve exactamente 11 dígitos en el campo BARCODE,
+      se prueba únicamente anteponer UN cero.
+    - Sólo se acepta ese cero si el resultado de 12 dígitos pasa la
+      validación oficial de dígito verificador UPC-A/GTIN.
+    - No se agrega cero a códigos de 8, 12, 13 o 14 dígitos.
+    - No se aplica a códigos internos/SKU.
+
+    Ejemplo:
+      85000006986 -> 085000006986  (válido UPC-A)
+      8410302107864 -> se deja igual
+    """
+    s = re.sub(r"[^A-Za-z0-9]", "", str(valor or "")).upper()
+    if not s:
+        return ""
+
+    if s.isdigit() and len(s) == 11:
+        candidato = "0" + s
+        if _gtin_check_digit_valido(candidato):
+            return candidato
+
+    return s
+
+
 # =========================================================
 # HELPERS DE CONSOLIDACIÓN / EXCEL
 # =========================================================
@@ -10490,8 +10555,13 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                             "Empaque actual": p.get("emp", 1),
                         })
 
-                    # Código siempre como TEXTO. No convertir a int/float y no quitar ceros.
-                    codigo = _codigo_producto_mostrar(p["codigo"])
+                    # Barcode primero: conservar exactamente el código leído.
+                    # Sólo el campo BARCODE puede recibir la reparación segura de
+                    # un cero inicial perdido (11 -> 12 dígitos con check válido).
+                    if p.get("barcode"):
+                        codigo = _preservar_barcode_original(p.get("barcode"))
+                    else:
+                        codigo = _codigo_producto_mostrar(p["codigo"])
                     cantidad_comprada_unidades, costo_unitario_preview = _calcular_costo_unitario_seguro(p)
 
                     # El stock siempre son unidades físicas.
@@ -10593,7 +10663,10 @@ def _codigo_articulo_real(prod):
     if not isinstance(prod, dict):
         return ""
     for campo in ("barcode", "codigo", "internal_code"):
-        val = _codigo_producto_mostrar(prod.get(campo) or "")
+        if campo == "barcode":
+            val = _preservar_barcode_original(prod.get(campo) or "")
+        else:
+            val = _codigo_producto_mostrar(prod.get(campo) or "")
         if not val:
             continue
         if val.startswith("TMP"):
@@ -11211,7 +11284,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R26_CODIGOS_CEROS_IZQUIERDA_20260905"
+EXTRACTOR_CACHE_VERSION = "BASE6_R27_PRESERVA_CERO_ORIGINAL_20260905"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
