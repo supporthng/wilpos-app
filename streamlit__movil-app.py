@@ -3793,7 +3793,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R25":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R26":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3802,7 +3802,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R25":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R25"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R26"
 
 
 # =========================================================
@@ -8336,6 +8336,9 @@ Devuelve SOLO JSON valido con este formato:
 
 REGLAS:
 - No inventes ningun codigo.
+- MUY IMPORTANTE: barcode e internal_code deben devolverse como CADENAS JSON entre comillas.
+- Conserva EXACTAMENTE todos los ceros iniciales visibles. Ejemplo: "085000006986" debe seguir siendo "085000006986"; nunca "85000006986".
+- Nunca conviertas un código de barras a número.
 - El barcode puede tener 8, 12, 13 o 14 digitos, o el formato real visible.
 - internal_code puede ser numerico o alfanumerico.
 - Usa row_index para relacionar cada codigo con la fila listada arriba.
@@ -8852,7 +8855,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R25"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R26"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -8908,7 +8911,7 @@ Formato exacto:
   "code_columns_present": true,
   "products": [
     {
-      "barcode": "codigo de barras o null",
+      "barcode": "codigo de barras EXACTO como texto, conservando ceros iniciales, o null",
       "internal_code": "codigo/material/item o null",
       "code_status": "read|not_printed|unreadable|unknown",
       "description": "descripcion completa",
@@ -9934,17 +9937,61 @@ def convertir_costo_a_dop(costo, moneda, tasa_usd_dop):
 # =========================================================
 def _codigo_producto_canonico(valor):
     """
-    Normaliza códigos para evitar que el mismo producto termine duplicado
-    por espacios, guiones o ceros iniciales.
+    Clave interna EXACTA del código.
+
+    IMPORTANTE:
+    Los ceros iniciales forman parte del código de barras y NUNCA se eliminan.
+    Ejemplo:
+        085000006986 != 85000006986
+
+    Sólo se eliminan espacios/separadores accidentales del OCR.
+    """
+    return re.sub(r"[^A-Za-z0-9]", "", str(valor or "")).upper()
+
+
+def _codigo_producto_mostrar(valor):
+    """
+    Código que se muestra y exporta.
+    Siempre texto; preserva todos los ceros iniciales.
     """
     codigo = re.sub(r"[^A-Za-z0-9]", "", str(valor or "")).upper()
-
-    # Para códigos puramente numéricos, 041331027854 y 41331027854
-    # representan el mismo identificador para efectos de consolidación.
-    if codigo.isdigit():
-        codigo = codigo.lstrip("0") or "0"
-
     return codigo
+
+
+def _puntaje_codigo_barra(valor):
+    """
+    Ayuda a escoger el mejor código cuando el mismo producto fue leído
+    de dos formas distintas. Favorece barcodes completos de 8-14 dígitos
+    y, en empate, el código más largo. Nunca elimina ceros.
+    """
+    c = _codigo_producto_mostrar(valor)
+    if not c:
+        return -1
+    score = 0
+    if c.isdigit():
+        if 8 <= len(c) <= 14:
+            score += 100
+        score += len(c)
+        if c.startswith("0"):
+            score += 2
+    else:
+        score += min(len(c), 20)
+    if c.startswith("TMP"):
+        score -= 100
+    return score
+
+
+def _preferir_codigo_mostrar(actual, candidato):
+    """
+    Conserva el código más completo sin modificar su contenido.
+    """
+    a = _codigo_producto_mostrar(actual)
+    b = _codigo_producto_mostrar(candidato)
+    if not a:
+        return b
+    if not b:
+        return a
+    return b if _puntaje_codigo_barra(b) > _puntaje_codigo_barra(a) else a
 
 
 def _nombre_producto_canonico(valor):
@@ -10019,12 +10066,19 @@ def construir_df_productos():
             actual["stock"] += float(data.get("stock", 0))
             actual["costo_total"] += float(data.get("costo_total", 0))
 
+            # Si el mismo producto fue leído con un código más completo,
+            # conservar ese código EXACTO (incluyendo ceros iniciales).
+            actual["codigo_mostrar"] = _preferir_codigo_mostrar(
+                actual.get("codigo_mostrar", ""),
+                codigo_original,
+            )
+
             # Conservar la presentación/empaque más informativa.
             if not actual.get("emp") and data.get("emp"):
                 actual["emp"] = data.get("emp")
         else:
             consolidados[clave] = {
-                "codigo_mostrar": str(codigo_original).strip(),
+                "codigo_mostrar": _codigo_producto_mostrar(codigo_original),
                 "nombre": data.get("nombre", ""),
                 "categoria": data.get("categoria", "General"),
                 "stock": float(data.get("stock", 0)),
@@ -10124,7 +10178,23 @@ def generar_excel_wilpos(df_prod):
     df_prod = construir_df_productos()
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        # Código Barra se escribe como TEXTO para que Excel conserve 0 iniciales.
+        df_prod = df_prod.copy()
+        if "Código Barra" in df_prod.columns:
+            df_prod["Código Barra"] = df_prod["Código Barra"].map(_codigo_producto_mostrar).astype(str)
+
         df_prod.to_excel(writer, index=False, sheet_name="Productos")
+
+        # Refuerzo a nivel de celda: formato Texto (@).
+        ws_productos = writer.book["Productos"]
+        encabezados = {cell.value: cell.column for cell in ws_productos[1]}
+        col_codigo = encabezados.get("Código Barra")
+        if col_codigo:
+            for fila in range(2, ws_productos.max_row + 1):
+                celda = ws_productos.cell(row=fila, column=col_codigo)
+                if celda.value is not None:
+                    celda.value = str(celda.value)
+                    celda.number_format = "@"
 
         pd.DataFrame({
             "Nombre": ["Bebidas", "Insumos", "Cervezas", "Licores", "General"],
@@ -10420,7 +10490,8 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                             "Empaque actual": p.get("emp", 1),
                         })
 
-                    codigo = re.sub(r"[^A-Za-z0-9]", "", str(p["codigo"])).upper()
+                    # Código siempre como TEXTO. No convertir a int/float y no quitar ceros.
+                    codigo = _codigo_producto_mostrar(p["codigo"])
                     cantidad_comprada_unidades, costo_unitario_preview = _calcular_costo_unitario_seguro(p)
 
                     # El stock siempre son unidades físicas.
@@ -10522,7 +10593,7 @@ def _codigo_articulo_real(prod):
     if not isinstance(prod, dict):
         return ""
     for campo in ("barcode", "codigo", "internal_code"):
-        val = re.sub(r"[^A-Za-z0-9]", "", str(prod.get(campo) or "")).upper()
+        val = _codigo_producto_mostrar(prod.get(campo) or "")
         if not val:
             continue
         if val.startswith("TMP"):
@@ -10841,7 +10912,7 @@ def detectar_productos_repetidos_en_facturas(archivos_validos):
         factura_key = (str(proveedor), str(num_fac))
 
         for p in productos:
-            codigo = re.sub(r"[^A-Za-z0-9]", "", str(p["codigo"])).upper()
+            codigo = _codigo_producto_mostrar(p["codigo"])
             if not codigo:
                 continue
 
@@ -11140,7 +11211,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R25_MULTIFOTO_ARTICULO_DEDUP_20260905"
+EXTRACTOR_CACHE_VERSION = "BASE6_R26_CODIGOS_CEROS_IZQUIERDA_20260905"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
