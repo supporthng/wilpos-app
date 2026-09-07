@@ -3801,7 +3801,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_3":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_4":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3818,7 +3818,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_3":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_3"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_4"
 
 
 # =========================================================
@@ -9630,7 +9630,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_3"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_4"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -11666,6 +11666,24 @@ def generar_excel_wilpos(df_prod):
 
         df_prod.to_excel(writer, index=False, sheet_name="Productos")
 
+        # BASE6-R29.1.4:
+        # Hoja separada para auditar la matemática del costo sin alterar
+        # las columnas esperadas por la importación WilPOS en "Productos".
+        df_auditoria_costos = _construir_df_auditoria_costos()
+        if not df_auditoria_costos.empty:
+            df_auditoria_costos = df_auditoria_costos.copy()
+            if "Código" in df_auditoria_costos.columns:
+                df_auditoria_costos["Código"] = (
+                    df_auditoria_costos["Código"]
+                    .map(_codigo_producto_mostrar)
+                    .astype(str)
+                )
+            df_auditoria_costos.to_excel(
+                writer,
+                index=False,
+                sheet_name="Auditoría Costos",
+            )
+
         # Refuerzo a nivel de celda: formato Texto (@).
         ws_productos = writer.book["Productos"]
         encabezados = {cell.value: cell.column for cell in ws_productos[1]}
@@ -11676,6 +11694,17 @@ def generar_excel_wilpos(df_prod):
                 if celda.value is not None:
                     celda.value = str(celda.value)
                     celda.number_format = "@"
+
+        if "Auditoría Costos" in writer.book.sheetnames:
+            ws_auditoria = writer.book["Auditoría Costos"]
+            encabezados_aud = {cell.value: cell.column for cell in ws_auditoria[1]}
+            col_codigo_aud = encabezados_aud.get("Código")
+            if col_codigo_aud:
+                for fila in range(2, ws_auditoria.max_row + 1):
+                    celda = ws_auditoria.cell(row=fila, column=col_codigo_aud)
+                    if celda.value is not None:
+                        celda.value = str(celda.value)
+                        celda.number_format = "@"
 
         pd.DataFrame({
             "Nombre": ["Bebidas", "Insumos", "Cervezas", "Licores", "General"],
@@ -11781,7 +11810,9 @@ def generar_excel_wilpos(df_prod):
 
         pd.DataFrame({
             "Instrucciones para importar en WilPOS": [
-                "Llena la hoja Productos con tus artículos.",
+                "La hoja Productos mantiene el formato de importación WilPOS.",
+                "La hoja Auditoría Costos muestra Cantidad factura, Cantidad por empaque, Cantidad física, Costo por empaque y Costo por unidad.",
+                "Costo por unidad = Costo neto línea sin ITBIS / (Cantidad factura × Cantidad por empaque).",
                 "Generado automáticamente mediante la aplicación web WilPOS.",
             ]
         }).to_excel(writer, index=False, sheet_name="Instrucciones")
@@ -12156,6 +12187,10 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         "requiere_revision_empaque": bool(p.get("requiere_revision_empaque")),
                         "unidades": float(cantidad_comprada_unidades),
                         "costo_total": float(costo_total_dop),
+                        "costo_por_empaque": (
+                            float(costo_total_dop) / float(p.get("cant") or 0)
+                            if float(p.get("cant") or 0) > 0 else 0.0
+                        ),
                         "costo_unitario": float(costo_unitario_dop),
                         "moneda_original": moneda_original,
                         "costo_original": costo_original,
@@ -12978,7 +13013,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_3_COSTO_FISICO_POR_EMPAQUE_20260907"
+EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_4_COLUMNAS_COSTO_EMPAQUE_20260907"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -13146,62 +13181,93 @@ def _resumen_trazabilidad_lote():
 
 
 
-def _render_auditoria_costo_fisico_ui():
+def _construir_df_auditoria_costos():
     """
-    Auditoría exacta de cómo se obtuvo el costo físico:
-    Cantidad factura × Empaque = Unidades físicas
-    Neto línea / Unidades físicas = Costo unidad
+    Construye la auditoría de costo físico por cada aparición/factura.
+
+    Fórmulas:
+      Cantidad física = Cantidad factura × Cantidad por empaque
+      Costo por empaque = Costo neto línea / Cantidad factura
+      Costo por unidad = Costo neto línea / Cantidad física
     """
     filas = []
+
     for codigo, apariciones in (st.session_state.get("origen_productos_facturas", {}) or {}).items():
         for item in apariciones or []:
             try:
-                cantidad = float(item.get("cantidad") or 0)
+                cantidad_factura = float(item.get("cantidad") or 0)
             except Exception:
-                cantidad = 0.0
+                cantidad_factura = 0.0
+
             try:
-                empaque = max(1, int(float(item.get("empaque") or 1)))
+                cantidad_por_empaque = max(1, int(float(item.get("empaque") or 1)))
             except Exception:
-                empaque = 1
+                cantidad_por_empaque = 1
+
             try:
-                unidades = float(item.get("unidades") or 0)
+                cantidad_fisica = float(item.get("unidades") or 0)
             except Exception:
-                unidades = 0.0
+                cantidad_fisica = 0.0
+
+            # Barrera matemática: la cantidad física debe corresponder a
+            # cantidad factura × cantidad por empaque.
+            cantidad_fisica_esperada = cantidad_factura * cantidad_por_empaque
+            if cantidad_fisica_esperada > 0:
+                cantidad_fisica = cantidad_fisica_esperada
+
             try:
-                neto = float(item.get("costo_total") or 0)
+                costo_neto_linea = float(item.get("costo_total") or 0)
             except Exception:
-                neto = 0.0
-            try:
-                costo_u = float(item.get("costo_unitario") or 0)
-            except Exception:
-                costo_u = (neto / unidades) if unidades > 0 else 0.0
+                costo_neto_linea = 0.0
+
+            costo_por_empaque = (
+                costo_neto_linea / cantidad_factura
+                if cantidad_factura > 0 else 0.0
+            )
+            costo_por_unidad = (
+                costo_neto_linea / cantidad_fisica
+                if cantidad_fisica > 0 else 0.0
+            )
 
             filas.append({
                 "Código": codigo,
                 "Producto": item.get("nombre", ""),
                 "Proveedor": item.get("proveedor", ""),
                 "Factura": item.get("factura", ""),
-                "Cantidad factura": cantidad,
+                "Cantidad factura": cantidad_factura,
                 "UDM": item.get("udm", ""),
-                "Empaque": empaque,
-                "Unidades físicas": unidades,
-                "Costo neto línea": round(neto, 4),
-                "Costo unidad": round(costo_u, 4),
+                "Cantidad por empaque": cantidad_por_empaque,
+                "Cantidad física": cantidad_fisica,
+                "Costo neto línea": round(costo_neto_linea, 4),
+                "Costo por empaque": round(costo_por_empaque, 4),
+                "Costo por unidad": round(costo_por_unidad, 4),
                 "Fuente empaque": item.get("empaque_fuente", ""),
-                "Confianza": item.get("empaque_confianza", ""),
-                "Revisar": "Sí" if item.get("requiere_revision_empaque") else "No",
+                "Confianza empaque": item.get("empaque_confianza", ""),
+                "Revisar empaque": "Sí" if item.get("requiere_revision_empaque") else "No",
             })
 
-    if not filas:
+    return pd.DataFrame(filas)
+
+
+def _render_auditoria_costo_fisico_ui():
+    """
+    Muestra las columnas necesarias para verificar visualmente el costo.
+    """
+    df_auditoria = _construir_df_auditoria_costos()
+    if df_auditoria.empty:
         return
 
-    with st.expander("🧮 Auditoría: cantidad, empaque y costo por unidad", expanded=False):
+    with st.expander(
+        "🧮 Auditoría: cantidad, empaque y precio de costo",
+        expanded=False,
+    ):
         st.caption(
-            "Costo unidad = Costo neto de línea sin ITBIS ÷ "
-            "(Cantidad factura × Unidades por empaque)."
+            "Cantidad física = Cantidad factura × Cantidad por empaque · "
+            "Costo por empaque = Costo neto línea ÷ Cantidad factura · "
+            "Costo por unidad = Costo neto línea ÷ Cantidad física."
         )
         st.dataframe(
-            pd.DataFrame(filas),
+            df_auditoria,
             use_container_width=True,
             hide_index=True,
         )
