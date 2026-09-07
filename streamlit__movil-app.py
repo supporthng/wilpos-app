@@ -3801,7 +3801,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_1":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3818,7 +3818,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_1"
 
 
 # =========================================================
@@ -9601,7 +9601,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_1"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -11799,8 +11799,6 @@ def resetear_todo():
     st.session_state.camera_key += 1
 
 
-@st.dialog("Confirmar procesamiento")
-
 # =========================================================
 # ENVASES / DEPÓSITOS RETORNABLES — BASE6-R29.1
 # =========================================================
@@ -11908,6 +11906,7 @@ def _render_envases_retornables_ui():
         )
 
 
+@st.dialog("Confirmar procesamiento")
 def modal_confirmacion(validas, duplicadas_count, margen):
     st.markdown("### 🚀 Consolidar facturas para WilPOS")
     st.caption("Esta acción consolidará productos repetidos por código y preparará los datos para el Excel de WilPOS.")
@@ -12806,7 +12805,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_CANTIDAD_EMPAQUE_ENVASES_20260906"
+EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_1_FIX_DIALOG_DUPLICADO_20260906"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
