@@ -3798,7 +3798,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R28_5":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R28_6":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3807,7 +3807,14 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R28_5":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R28_5"
+
+    # No reutilizar inventario calculado por una versión anterior.
+    st.session_state["inventario_acumulado"] = {}
+    st.session_state["origen_productos_facturas"] = {}
+    st.session_state["firmas_facturas_procesadas"] = set()
+    st.session_state["detalle_facturas_procesadas"] = {}
+    st.session_state["productos_excluidos"] = set()
+    st.session_state["_extractor_runtime_version"] = "BASE6_R28_6"
 
 
 # =========================================================
@@ -5694,7 +5701,10 @@ EMPAQUES_CONFIRMADOS_POR_PRODUCTO = (
 
 
 def _empaque_confirmado_por_nombre(nombre):
-    texto = _nombre_producto_canonico(nombre)
+    # BASE6-R28.6: conservar espacios.
+    # Antes se usaba _nombre_producto_canonico(), que elimina espacios y
+    # hacía imposible que patrones como PRESIDENTE LIGHT / REG coincidieran.
+    texto = " ".join(str(nombre or "").upper().replace(".", " ").split())
     for patron, empaque in EMPAQUES_CONFIRMADOS_POR_PRODUCTO:
         if re.search(patron, texto, flags=re.I):
             return int(empaque), "catalogo_confirmado"
@@ -5936,6 +5946,94 @@ def _inferir_empaque_universal(prod, proveedor=""):
     return 1, "unidad_por_defecto", 60, False
 
 
+
+def _reconciliar_cantidad_desde_costo_y_precio(prod):
+    """
+    Corrige cantidad OCR cuando la línea demuestra:
+        costo_total_neto / precio_unitario = cantidad
+
+    Sólo corrige si el cociente es prácticamente entero y la diferencia
+    con la cantidad leída es clara.
+    """
+    if not isinstance(prod, dict):
+        return prod
+
+    def fnum(v):
+        try:
+            if v in (None, ""):
+                return None
+            if isinstance(v, str):
+                s = re.sub(r"[^0-9,.\-]", "", v).replace(",", "")
+                if s in ("", "-", ".", "-."):
+                    return None
+                return float(s)
+            return float(v)
+        except Exception:
+            return None
+
+    costo_total = fnum(prod.get("costo_total"))
+    if costo_total is None or costo_total <= 0:
+        return prod
+
+    cant_actual = fnum(prod.get("cant")) or 0.0
+
+    precios = []
+    for campo in (
+        "net_price_per_package",
+        "price_unit_per_package",
+        "unit_cost_net",
+        "list_price_per_package",
+    ):
+        valor = fnum(prod.get(campo))
+        if valor is not None and valor > 0:
+            precios.append((campo, valor))
+
+    mejor = None
+    for campo, precio in precios:
+        ratio = costo_total / precio
+        entero = int(round(ratio))
+        if entero < 1 or entero > 1000:
+            continue
+
+        reconstruido = entero * precio
+        tolerancia = max(0.10, abs(costo_total) * 0.01)
+        error = abs(reconstruido - costo_total)
+        if error > tolerancia:
+            continue
+
+        candidato = (error, entero, campo, precio)
+        if mejor is None or candidato < mejor:
+            mejor = candidato
+
+    if mejor is None:
+        return prod
+
+    _, cant_derivada, campo, precio = mejor
+
+    # Si ya coincide, no tocar.
+    if cant_actual > 0 and abs(cant_actual - cant_derivada) < 0.01:
+        return prod
+
+    # Corrección fuerte para OCR=0/1 o diferencias grandes.
+    if cant_actual > 1:
+        diferencia_relativa = abs(cant_actual - cant_derivada) / max(cant_derivada, 1)
+        if diferencia_relativa < 0.25:
+            return prod
+
+    nuevo = dict(prod)
+    nuevo["cant_original_antes_reconciliacion"] = cant_actual
+    nuevo["cant"] = float(cant_derivada)
+    nuevo["cantidad_reconciliada_fuente"] = campo
+
+    advertencias = list(nuevo.get("advertencias_lectura") or [])
+    advertencias.append(
+        f"cantidad corregida por aritmética: {cant_actual:g} → {cant_derivada} "
+        f"porque {costo_total:.2f} / {precio:.2f} = {cant_derivada}"
+    )
+    nuevo["advertencias_lectura"] = list(dict.fromkeys(advertencias))
+    return nuevo
+
+
 def _validar_empaque_final_producto(prod, proveedor=""):
     """
     Barrera final antes de calcular inventario/costo.
@@ -5949,6 +6047,8 @@ def _validar_empaque_final_producto(prod, proveedor=""):
     """
     if not isinstance(prod, dict):
         return prod
+
+    prod = _reconciliar_cantidad_desde_costo_y_precio(prod)
 
     try:
         emp_antes = max(1, int(float(prod.get("emp") or 1)))
@@ -8997,7 +9097,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R28_5"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R28_6"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -11340,6 +11440,8 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         codigo = _preservar_barcode_original(p.get("barcode"))
                     else:
                         codigo = _codigo_producto_mostrar(p["codigo"])
+                    # BASE6-R28.6: última barrera justo antes de acumular.
+                    p = _validar_empaque_final_producto(p, proveedor=proveedor)
                     cantidad_comprada_unidades, costo_unitario_preview = _calcular_costo_unitario_seguro(p)
 
                     # El stock siempre son unidades físicas.
@@ -11419,6 +11521,9 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         "costo_original": costo_original,
                         "tasa_usd_dop": float(tasa_usd_dop) if moneda_original == "USD" else None,
                             "emp": p["emp"],
+                            "cantidad_facturada": float(p.get("cant") or 0),
+                            "empaque_fuente": p.get("empaque_fuente", ""),
+                            "cantidad_reconciliada_fuente": p.get("cantidad_reconciliada_fuente", ""),
                             "itbis": p["itbis"],
                         }
             st.session_state.confirmacion_procesamiento_activa = False
@@ -12064,7 +12169,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R28_5_EMPAQUES_PC_EA_20260906"
+EXTRACTOR_CACHE_VERSION = "BASE6_R28_6_CANTIDAD_EMPAQUE_FINAL_20260906"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
