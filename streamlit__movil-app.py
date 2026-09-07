@@ -3801,7 +3801,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_1":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_3":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3818,7 +3818,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_1":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_1"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_3"
 
 
 # =========================================================
@@ -6589,17 +6589,43 @@ def _validar_empaque_final_producto(prod, proveedor=""):
 
 def _calcular_costo_unitario_seguro(prod):
     """
-    Retorna (unidades_fisicas, costo_unitario).
-    Sólo usa costo neto sin ITBIS.
+    Calcula el costo por UNIDAD FÍSICA, siempre sin ITBIS.
+
+    Fórmula:
+        unidades_fisicas = cantidad_facturada * unidades_por_empaque
+        costo_unitario = costo_neto_linea / unidades_fisicas
+
+    Reglas:
+    - BOT / BOTELLA / UND / UNIDAD / PZA / PIEZA => emp = 1.
+    - CAJA / CJ / CJA / CASE / PC / EA pueden requerir empaque >1
+      cuando la presentación lo confirma.
+    - Si la factura parece caja/empaque y no hay evidencia suficiente,
+      se conserva la marca de revisión; nunca se inventa un divisor.
     """
     try:
         cantidad = float(prod.get("cant") or 0)
     except Exception:
         cantidad = 0.0
+
     try:
         emp = max(1, int(float(prod.get("emp") or 1)))
     except Exception:
         emp = 1
+
+    udm = str(
+        prod.get("purchase_unit")
+        or prod.get("unidad_original")
+        or prod.get("uom")
+        or prod.get("udm")
+        or ""
+    ).upper().strip()
+
+    # UDM que ya representa unidad física: nunca dividir otra vez.
+    if re.search(r"\b(BOT(?:ELLA)?S?|UND|UNID(?:AD(?:ES)?)?|PZA|PZAS|PIEZA|PIEZAS)\b", udm):
+        emp = 1
+        prod["emp"] = 1
+        prod["empaque_fuente"] = prod.get("empaque_fuente") or "udm_unidad_fisica"
+
     try:
         costo_linea = float(prod.get("costo_total") or 0)
     except Exception:
@@ -6607,10 +6633,13 @@ def _calcular_costo_unitario_seguro(prod):
 
     unidades = cantidad * emp
     costo_unitario = (costo_linea / unidades) if unidades > 0 else 0.0
+
+    prod["cantidad_facturada_validada"] = cantidad
+    prod["unidades_fisicas_calculadas"] = unidades
+    prod["costo_neto_linea_validado"] = costo_linea
+    prod["costo_unitario_fisico"] = costo_unitario
+
     return unidades, costo_unitario
-
-
-
 
 
 def _parsear_linea_distribuidor_con_barcode(linea):
@@ -9601,7 +9630,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_1"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_3"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -11505,9 +11534,16 @@ def construir_df_productos():
     filas = []
 
     for _, data in consolidados.items():
+        # BASE6-R29.1.3: barrera final de exportación.
+        # Stock = unidades físicas acumuladas.
+        # Costo = costo neto total sin ITBIS / unidades físicas.
         stock = float(data["stock"])
         costo_total = float(data["costo_total"])
-        costo_unitario = costo_total / stock if stock > 0 else 0
+        unidades_fisicas = float(data.get("unidades_fisicas", stock) or stock)
+        if abs(unidades_fisicas - stock) > 1e-6:
+            # El inventario es la fuente canónica para stock físico.
+            unidades_fisicas = stock
+        costo_unitario = costo_total / unidades_fisicas if unidades_fisicas > 0 else 0
         tasa_itbis = float(data.get("itbis", 0.18) or 0)
         precio_antes_itbis = costo_unitario * factor_ganancia
         precio_venta = round_to_nearest_5(
@@ -12065,7 +12101,11 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         codigo = _preservar_barcode_original(p.get("barcode"))
                     else:
                         codigo = _codigo_producto_mostrar(p["codigo"])
-                    # BASE6-R28.6: última barrera justo antes de acumular.
+                    # BASE6-R29.1.3: barrera física final justo antes de acumular.
+                    # 1) reconciliar cantidad;
+                    # 2) inferir/validar empaque;
+                    # 3) calcular unidades físicas;
+                    # 4) calcular costo neto por unidad física.
                     p = _validar_empaque_final_producto(p, proveedor=proveedor)
                     cantidad_comprada_unidades, costo_unitario_preview = _calcular_costo_unitario_seguro(p)
 
@@ -12081,6 +12121,16 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         tasa_usd_dop,
                     )
 
+                    # El costo unitario DOP se deriva DEL NETO DE LÍNEA convertido,
+                    # no del precio de caja ni de un precio con ITBIS.
+                    costo_unitario_dop = (
+                        float(costo_total_dop) / float(cantidad_comprada_unidades)
+                        if float(cantidad_comprada_unidades) > 0 else 0.0
+                    )
+
+                    p["costo_unitario_dop_validado"] = float(costo_unitario_dop)
+                    p["unidades_fisicas_calculadas"] = float(cantidad_comprada_unidades)
+
                     # Guardar de qué factura provino cada producto.
                     if codigo not in st.session_state.origen_productos_facturas:
                         st.session_state.origen_productos_facturas[codigo] = []
@@ -12093,9 +12143,20 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         "factura": str(num_fac),
                         "fecha": fecha_fac,
                         "cantidad": float(p["cant"]),
+                        "udm": (
+                            p.get("purchase_unit")
+                            or p.get("unidad_original")
+                            or p.get("uom")
+                            or p.get("udm")
+                            or ""
+                        ),
                         "empaque": int(p["emp"]),
+                        "empaque_fuente": p.get("empaque_fuente", ""),
+                        "empaque_confianza": p.get("empaque_confianza", 0),
+                        "requiere_revision_empaque": bool(p.get("requiere_revision_empaque")),
                         "unidades": float(cantidad_comprada_unidades),
                         "costo_total": float(costo_total_dop),
+                        "costo_unitario": float(costo_unitario_dop),
                         "moneda_original": moneda_original,
                         "costo_original": costo_original,
                         "tasa_usd_dop": float(tasa_usd_dop) if moneda_original == "USD" else None,
@@ -12136,9 +12197,25 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         )
                         st.session_state.inventario_acumulado[codigo]["stock"] += cantidad_comprada_unidades
                         st.session_state.inventario_acumulado[codigo]["costo_total"] += float(costo_total_dop)
+                        st.session_state.inventario_acumulado[codigo]["cantidad_facturada"] = float(
+                            st.session_state.inventario_acumulado[codigo].get("cantidad_facturada", 0)
+                        ) + float(p.get("cant") or 0)
                         st.session_state.inventario_acumulado[codigo]["unidades_fisicas"] = float(
                             st.session_state.inventario_acumulado[codigo].get("stock", 0)
                         )
+
+                        # Conservar el empaque más informativo/confiable.
+                        try:
+                            _emp_actual = int(float(st.session_state.inventario_acumulado[codigo].get("emp") or 1))
+                        except Exception:
+                            _emp_actual = 1
+                        try:
+                            _emp_nuevo = int(float(p.get("emp") or 1))
+                        except Exception:
+                            _emp_nuevo = 1
+                        if _emp_nuevo > _emp_actual:
+                            st.session_state.inventario_acumulado[codigo]["emp"] = _emp_nuevo
+                            st.session_state.inventario_acumulado[codigo]["empaque_fuente"] = p.get("empaque_fuente", "")
                     else:
                         st.session_state.inventario_acumulado[codigo] = {
                             "nombre": p["nombre"],
@@ -12151,6 +12228,7 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                             "emp": p["emp"],
                             "cantidad_facturada": float(p.get("cant") or 0),
                             "unidades_fisicas": float(cantidad_comprada_unidades),
+                            "costo_unitario_fisico_ultimo": float(costo_unitario_dop),
                             "udm_factura": (
                                 p.get("purchase_unit")
                                 or p.get("unidad_original")
@@ -12324,10 +12402,105 @@ def _fusionar_lecturas_mismo_articulo(existing, nuevo):
     return base
 
 
+
+def _sumar_lineas_repetidas_misma_pagina(productos):
+    """
+    Consolida filas reales repetidas DENTRO DE LA MISMA foto/página.
+    Misma página => sumar cantidad/costo.
+    Entre páginas => la lógica de solapamiento sigue sin sumar.
+    """
+    consolidados = []
+    repetidos_sumados = 0
+
+    def _num(v):
+        try:
+            return float(v or 0)
+        except Exception:
+            return 0.0
+
+    for p in list(productos or []):
+        if not isinstance(p, dict):
+            continue
+
+        encontrado = -1
+        for i, existente in enumerate(consolidados):
+            if _articulos_equivalentes_misma_factura(existente, p):
+                encontrado = i
+                break
+
+        if encontrado < 0:
+            base = dict(p)
+            base["lineas_reales_misma_pagina"] = int(
+                base.get("lineas_reales_misma_pagina") or 1
+            )
+            consolidados.append(base)
+            continue
+
+        existente = dict(consolidados[encontrado])
+        nuevo = dict(p)
+
+        if _puntaje_calidad_articulo(nuevo) > _puntaje_calidad_articulo(existente):
+            base, alt = dict(nuevo), existente
+        else:
+            base, alt = dict(existente), nuevo
+
+        base["cant"] = _num(existente.get("cant")) + _num(nuevo.get("cant"))
+        base["costo_total"] = _num(existente.get("costo_total")) + _num(nuevo.get("costo_total"))
+        base["lineas_reales_misma_pagina"] = (
+            int(existente.get("lineas_reales_misma_pagina") or 1)
+            + int(nuevo.get("lineas_reales_misma_pagina") or 1)
+        )
+
+        for campo in (
+            "tax_value", "gross_line_total", "subtotal_net",
+            "isc_value", "isc_advalorem_value", "other_tax_value",
+        ):
+            va = _num(existente.get(campo))
+            vb = _num(nuevo.get(campo))
+            if va or vb:
+                base[campo] = va + vb
+
+        for campo in (
+            "barcode", "internal_code", "codigo", "nombre",
+            "nombre_original_lectura", "purchase_unit", "unidad_original",
+            "uom", "udm", "package_text", "presentation", "size_text",
+            "itbis", "cat", "moneda", "net_price_per_package",
+            "price_unit_per_package", "unit_cost_net", "list_price_per_package",
+        ):
+            if not base.get(campo) and alt.get(campo):
+                base[campo] = alt.get(campo)
+
+        try:
+            emp_a = int(float(existente.get("emp") or existente.get("units_per_package") or 1))
+        except Exception:
+            emp_a = 1
+        try:
+            emp_b = int(float(nuevo.get("emp") or nuevo.get("units_per_package") or 1))
+        except Exception:
+            emp_b = 1
+
+        emp_final = max(emp_a, emp_b)
+        base["emp"] = emp_final
+        if emp_final > 1:
+            base["units_per_package"] = emp_final
+
+        avisos = list(base.get("advertencias_lectura") or [])
+        avisos.append(
+            "El mismo producto aparece en varias filas reales de esta página: "
+            "se sumaron cantidad y costo."
+        )
+        base["advertencias_lectura"] = list(dict.fromkeys(avisos))
+
+        consolidados[encontrado] = base
+        repetidos_sumados += 1
+
+    return consolidados, repetidos_sumados
+
+
 def _deduplicar_articulos_misma_factura(productos):
     """
-    Deduplica artículos sólo dentro de una misma factura.
-    Retorna (productos_unicos, cantidad_repetidos_omitidos).
+    Deduplicación conservadora para lecturas SOLAPADAS.
+    No usar para filas reales repetidas de una misma página.
     """
     unicos = []
     repetidos = 0
@@ -12805,7 +12978,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_1_FIX_DIALOG_DUPLICADO_20260906"
+EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_3_COSTO_FISICO_POR_EMPAQUE_20260907"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -12971,6 +13144,67 @@ def _resumen_trazabilidad_lote():
         "errores_api": n("error_api") + n("limite_api"),
     }
 
+
+
+def _render_auditoria_costo_fisico_ui():
+    """
+    Auditoría exacta de cómo se obtuvo el costo físico:
+    Cantidad factura × Empaque = Unidades físicas
+    Neto línea / Unidades físicas = Costo unidad
+    """
+    filas = []
+    for codigo, apariciones in (st.session_state.get("origen_productos_facturas", {}) or {}).items():
+        for item in apariciones or []:
+            try:
+                cantidad = float(item.get("cantidad") or 0)
+            except Exception:
+                cantidad = 0.0
+            try:
+                empaque = max(1, int(float(item.get("empaque") or 1)))
+            except Exception:
+                empaque = 1
+            try:
+                unidades = float(item.get("unidades") or 0)
+            except Exception:
+                unidades = 0.0
+            try:
+                neto = float(item.get("costo_total") or 0)
+            except Exception:
+                neto = 0.0
+            try:
+                costo_u = float(item.get("costo_unitario") or 0)
+            except Exception:
+                costo_u = (neto / unidades) if unidades > 0 else 0.0
+
+            filas.append({
+                "Código": codigo,
+                "Producto": item.get("nombre", ""),
+                "Proveedor": item.get("proveedor", ""),
+                "Factura": item.get("factura", ""),
+                "Cantidad factura": cantidad,
+                "UDM": item.get("udm", ""),
+                "Empaque": empaque,
+                "Unidades físicas": unidades,
+                "Costo neto línea": round(neto, 4),
+                "Costo unidad": round(costo_u, 4),
+                "Fuente empaque": item.get("empaque_fuente", ""),
+                "Confianza": item.get("empaque_confianza", ""),
+                "Revisar": "Sí" if item.get("requiere_revision_empaque") else "No",
+            })
+
+    if not filas:
+        return
+
+    with st.expander("🧮 Auditoría: cantidad, empaque y costo por unidad", expanded=False):
+        st.caption(
+            "Costo unidad = Costo neto de línea sin ITBIS ÷ "
+            "(Cantidad factura × Unidades por empaque)."
+        )
+        st.dataframe(
+            pd.DataFrame(filas),
+            use_container_width=True,
+            hide_index=True,
+        )
 
 
 def _mostrar_correcciones_empaque_ui():
@@ -13427,8 +13661,10 @@ def render_carga_facturas(titulo=True):
                 )
                 continue
 
-            # Deduplicar también líneas repetidas dentro de una misma foto.
-            productos, repetidos_internos = _deduplicar_articulos_misma_factura(productos)
+            # BASE6-R29.1.2:
+            # Repeticiones reales dentro de la MISMA página se SUMAN.
+            # Los solapamientos entre fotos/páginas se deduplican más abajo sin sumar.
+            productos, repetidos_internos = _sumar_lineas_repetidas_misma_pagina(productos)
 
             # BASE6-R29: cualquier formato, incluso uno nunca visto, pasa por
             # las mismas barreras universales de cantidad/empaque/costo.
@@ -13459,10 +13695,11 @@ def render_carga_facturas(titulo=True):
                     productos=len(productos),
                     formato_estado=evaluacion_formato.get("estado", "revisar"),
                     formato_confianza=evaluacion_formato.get("confianza", 0),
-                    productos_repetidos_omitidos=repetidos_internos,
+                    lineas_repetidas_sumadas=repetidos_internos,
                     motivo=(
                         "Factura reconocida correctamente. "
-                        "Los artículos repetidos dentro de esta misma foto/factura se conservaron una sola vez."
+                        "Las filas reales repetidas dentro de esta misma página se sumaron; "
+                        "los solapamientos entre páginas/fotos se deduplican aparte."
                     ),
                 )
                 continue
@@ -13529,7 +13766,36 @@ def render_carga_facturas(titulo=True):
         _mostrar_archivos_no_procesados_ui()
         _mostrar_correcciones_empaque_ui()
         _mostrar_empaques_pendientes_revision_ui()
+        _render_auditoria_costo_fisico_ui()
         _render_envases_retornables_ui()
+
+        _sumas_misma_pagina = [
+            x for x in (st.session_state.get("resultado_archivos_lote", {}) or {}).values()
+            if int(x.get("lineas_repetidas_sumadas", 0) or 0) > 0
+        ]
+        if _sumas_misma_pagina:
+            total_sumadas = sum(
+                int(x.get("lineas_repetidas_sumadas", 0) or 0)
+                for x in _sumas_misma_pagina
+            )
+            st.info(
+                f"➕ {total_sumadas} fila(s) repetida(s) real(es) dentro de la misma "
+                "página fueron sumadas en cantidad/costo."
+            )
+            with st.expander("Ver sumas de filas repetidas", expanded=False):
+                st.dataframe(
+                    pd.DataFrame([
+                        {
+                            "Archivo": x.get("archivo", ""),
+                            "Proveedor": x.get("proveedor", ""),
+                            "Factura": x.get("factura", ""),
+                            "Filas sumadas": int(x.get("lineas_repetidas_sumadas", 0) or 0),
+                        }
+                        for x in _sumas_misma_pagina
+                    ]),
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
         _eventos_directos = st.session_state.get("fallback_574652_eventos", {})
         for _nombre_directo, _info_directo in _eventos_directos.items():
