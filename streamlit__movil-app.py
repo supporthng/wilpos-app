@@ -3791,6 +3791,8 @@ DEFAULTS = {
     "matches_catalogo_lote": [],
     "matches_catalogo_pendientes_lote": [],
     "confirmacion_procesamiento_activa": False,
+    "formatos_adaptativos": {},
+    "formatos_revision_lote": {},
 }
 
 for key, value in DEFAULTS.items():
@@ -3798,7 +3800,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R28_6":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R29":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3814,7 +3816,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R28_6":
     st.session_state["firmas_facturas_procesadas"] = set()
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
-    st.session_state["_extractor_runtime_version"] = "BASE6_R28_6"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R29"
 
 
 # =========================================================
@@ -5694,6 +5696,506 @@ def _limpiar_producto_para_exportacion(prod):
 
 # Excepciones comerciales confirmadas cuando la factura no imprime el empaque.
 # Sólo se usan como último recurso.
+
+# =========================================================
+# MOTOR ADAPTATIVO DE FORMATOS DE FACTURA — BASE6-R29
+# =========================================================
+FORMATOS_ADAPTATIVOS_PATH = os.environ.get(
+    "WILPOS_FORMATOS_PATH",
+    os.path.join(
+        os.path.dirname(os.path.abspath(globals().get("__file__", "streamlit_app.py"))),
+        "formatos_factura_wilpos.json",
+    ),
+)
+
+
+def _cargar_formatos_adaptativos_disco():
+    try:
+        if os.path.exists(FORMATOS_ADAPTATIVOS_PATH):
+            with open(FORMATOS_ADAPTATIVOS_PATH, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+
+def _guardar_formatos_adaptativos_disco(formatos):
+    try:
+        with open(FORMATOS_ADAPTATIVOS_PATH, "w", encoding="utf-8") as fh:
+            json.dump(formatos or {}, fh, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def _clave_proveedor_formato(proveedor):
+    t = " ".join(str(proveedor or "").upper().split())
+    t = re.sub(r"[^A-Z0-9]+", "", t)
+    return t or "PROVEEDORNOIDENTIFICADO"
+
+
+def _token_udm_formato(valor):
+    return " ".join(str(valor or "").upper().replace(".", "").split()).strip()
+
+
+def _firma_semantica_formato(productos):
+    """Resume la estructura del documento sin usar precios/códigos concretos."""
+    productos = [p for p in (productos or []) if isinstance(p, dict)]
+    if not productos:
+        return "VACIO"
+
+    udms = sorted({
+        _token_udm_formato(
+            p.get("purchase_unit") or p.get("unidad_original") or p.get("uom") or p.get("udm")
+        )
+        for p in productos
+        if _token_udm_formato(
+            p.get("purchase_unit") or p.get("unidad_original") or p.get("uom") or p.get("udm")
+        )
+    })
+
+    campos = []
+    for campo in (
+        "package_text",
+        "net_price_per_package",
+        "price_unit_per_package",
+        "line_cost_net",
+        "subtotal_net",
+        "tax_value",
+        "gross_line_total",
+    ):
+        ratio = sum(
+            1 for p in productos
+            if p.get(campo) not in (None, "", 0)
+        ) / max(1, len(productos))
+        if ratio >= 0.35:
+            campos.append(campo)
+
+    return json.dumps(
+        {"udm": udms[:12], "campos": sorted(campos)},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _perfil_formato_existente(proveedor, productos):
+    formatos = st.session_state.get("formatos_adaptativos", {}) or {}
+    prov_key = _clave_proveedor_formato(proveedor)
+    firma = _firma_semantica_formato(productos)
+
+    exact = formatos.get(f"{prov_key}|{firma}")
+    if isinstance(exact, dict):
+        return exact
+
+    candidatos = [
+        v for v in formatos.values()
+        if isinstance(v, dict) and str(v.get("proveedor_key") or "") == prov_key
+    ]
+    if candidatos:
+        return sorted(
+            candidatos,
+            key=lambda x: str(x.get("actualizado") or ""),
+            reverse=True,
+        )[0]
+    return None
+
+
+def _ratio_lineas_con_aritmetica(productos):
+    buenas = 0.0
+    total = 0
+
+    for p in productos or []:
+        if not isinstance(p, dict):
+            continue
+        total += 1
+
+        try:
+            cant = float(p.get("cant") or 0)
+            costo = float(p.get("costo_total") or 0)
+        except Exception:
+            continue
+
+        if cant <= 0 or costo <= 0:
+            continue
+
+        precios = []
+        for campo in (
+            "net_price_per_package",
+            "price_unit_per_package",
+            "unit_cost_net",
+            "list_price_per_package",
+        ):
+            try:
+                valor = float(p.get(campo) or 0)
+            except Exception:
+                valor = 0
+            if valor > 0:
+                precios.append(valor)
+
+        if not precios:
+            buenas += 0.45
+            continue
+
+        ok = False
+        for precio in precios:
+            esperado = cant * precio
+            tolerancia = max(0.10, abs(costo) * 0.02)
+            if abs(esperado - costo) <= tolerancia:
+                ok = True
+                break
+
+            ratio = costo / precio if precio else 0
+            if ratio >= 1 and abs(ratio - round(ratio)) <= 0.03:
+                ok = True
+                break
+
+        if ok:
+            buenas += 1.0
+
+    return buenas / max(1, total)
+
+
+def _evaluar_formato_factura(proveedor, productos):
+    """
+    Estados:
+      reconocido
+      auto_interpretado
+      revisar
+      no_reconocido
+    """
+    productos = [p for p in (productos or []) if isinstance(p, dict)]
+    if not productos:
+        return {
+            "estado": "no_reconocido",
+            "confianza": 0.0,
+            "motivos": ["No se extrajeron productos."],
+            "proveedor": proveedor,
+            "productos": 0,
+        }
+
+    perfil = _perfil_formato_existente(proveedor, productos)
+    n = len(productos)
+
+    def _positivo(campo):
+        total_ok = 0
+        for p in productos:
+            try:
+                if float(p.get(campo) or 0) > 0:
+                    total_ok += 1
+            except Exception:
+                pass
+        return total_ok / n
+
+    con_cantidad = _positivo("cant")
+    con_costo = _positivo("costo_total")
+    con_udm = sum(
+        1 for p in productos
+        if str(
+            p.get("purchase_unit")
+            or p.get("unidad_original")
+            or p.get("uom")
+            or p.get("udm")
+            or ""
+        ).strip()
+    ) / n
+
+    empaques_resueltos = 0
+    pendientes = 0
+    for p in productos:
+        try:
+            emp, fuente, conf, revisar = _inferir_empaque_universal(p, proveedor)
+            if emp >= 1 and conf >= 75 and not revisar:
+                empaques_resueltos += 1
+            if revisar:
+                pendientes += 1
+        except Exception:
+            pendientes += 1
+
+    ratio_emp = empaques_resueltos / n
+    ratio_math = _ratio_lineas_con_aritmetica(productos)
+
+    confianza = (
+        0.24 * con_cantidad
+        + 0.24 * con_costo
+        + 0.12 * con_udm
+        + 0.25 * ratio_emp
+        + 0.15 * ratio_math
+    )
+    confianza = max(0.0, min(1.0, confianza))
+
+    motivos = []
+    if con_cantidad < 0.90:
+        motivos.append("faltan cantidades confiables en algunas líneas")
+    if con_costo < 0.90:
+        motivos.append("faltan costos netos confiables en algunas líneas")
+    if ratio_emp < 0.85:
+        motivos.append("hay empaques sin evidencia suficiente")
+    if ratio_math < 0.65:
+        motivos.append("la aritmética de varias líneas no pudo comprobarse")
+    if pendientes:
+        motivos.append(f"{pendientes} línea(s) requieren revisión de empaque")
+
+    if perfil:
+        estado = "reconocido"
+        confianza = max(confianza, 0.96)
+    elif confianza >= 0.88 and not pendientes:
+        estado = "auto_interpretado"
+    elif confianza >= 0.62:
+        estado = "revisar"
+    else:
+        estado = "no_reconocido"
+
+    return {
+        "estado": estado,
+        "confianza": round(confianza, 4),
+        "motivos": motivos,
+        "proveedor": proveedor,
+        "firma_semantica": _firma_semantica_formato(productos),
+        "perfil_existente": bool(perfil),
+        "productos": n,
+    }
+
+
+def _registrar_formato_adaptativo(proveedor, productos, nombre_archivo=""):
+    """
+    Guarda estructura, nunca precios/códigos/costos concretos.
+    """
+    productos = [p for p in (productos or []) if isinstance(p, dict)]
+    if not productos:
+        return False, "No hay productos para aprender."
+
+    prov_key = _clave_proveedor_formato(proveedor)
+    firma = _firma_semantica_formato(productos)
+
+    udms = sorted({
+        _token_udm_formato(
+            p.get("purchase_unit") or p.get("unidad_original") or p.get("uom") or p.get("udm")
+        )
+        for p in productos
+        if _token_udm_formato(
+            p.get("purchase_unit") or p.get("unidad_original") or p.get("uom") or p.get("udm")
+        )
+    })
+
+    ejemplos = []
+    for p in productos[:12]:
+        try:
+            emp = int(float(p.get("emp") or 1))
+        except Exception:
+            emp = 1
+        ejemplos.append({
+            "nombre": str(p.get("nombre") or "")[:120],
+            "udm": str(
+                p.get("purchase_unit")
+                or p.get("unidad_original")
+                or p.get("uom")
+                or p.get("udm")
+                or ""
+            )[:30],
+            "empaque": emp,
+            "fuente_empaque": str(
+                p.get("empaque_fuente") or p.get("fuente_empaque") or ""
+            )[:80],
+        })
+
+    perfil = {
+        "proveedor": str(proveedor or "Proveedor no identificado"),
+        "proveedor_key": prov_key,
+        "firma_semantica": firma,
+        "archivo_ejemplo": str(nombre_archivo or ""),
+        "udm_observadas": udms,
+        "preferir_presentacion_sobre_pc_ea": True,
+        "reconciliar_cantidad_por_aritmetica": True,
+        "validar_costo_sin_itbis": True,
+        "ejemplos": ejemplos,
+        "actualizado": datetime.now().isoformat(timespec="seconds"),
+    }
+
+    clave = f"{prov_key}|{firma}"
+    formatos = st.session_state.setdefault("formatos_adaptativos", {})
+    formatos[clave] = perfil
+    _guardar_formatos_adaptativos_disco(formatos)
+    return True, clave
+
+
+def _aplicar_motor_adaptativo_productos(proveedor, productos):
+    salida = []
+    for p in productos or []:
+        if not isinstance(p, dict):
+            continue
+        salida.append(
+            _validar_empaque_final_producto(dict(p), proveedor=proveedor)
+        )
+    return salida
+
+
+def _render_formatos_adaptativos_ui(archivos_validos):
+    info = st.session_state.get("formatos_revision_lote", {}) or {}
+    if not info:
+        return
+
+    revisar = [
+        (nombre, meta)
+        for nombre, meta in info.items()
+        if isinstance(meta, dict)
+        and meta.get("estado") in ("revisar", "no_reconocido")
+    ]
+    nuevos_ok = [
+        (nombre, meta)
+        for nombre, meta in info.items()
+        if isinstance(meta, dict)
+        and meta.get("estado") == "auto_interpretado"
+    ]
+
+    if nuevos_ok:
+        st.info(
+            f"🔵 {len(nuevos_ok)} formato(s) nuevo(s) fueron interpretados automáticamente "
+            "con alta confianza. Puedes registrarlos para reconocerlos directamente en el futuro."
+        )
+
+    if revisar:
+        st.warning(
+            f"⚠️ Hay {len(revisar)} factura(s) con formato nuevo o con dudas de "
+            "cantidad/empaque. Revísalas antes de consolidar."
+        )
+
+    candidatos = nuevos_ok + revisar
+    if not candidatos:
+        return
+
+    mapa = {
+        getattr(f, "name", ""): (proveedor, productos)
+        for f, _firma, proveedor, _num, _fecha, productos in archivos_validos
+    }
+
+    with st.expander(
+        f"🧠 Formatos nuevos / por registrar ({len(candidatos)})",
+        expanded=bool(revisar),
+    ):
+        st.caption(
+            "Registrar un formato guarda sólo estructura y reglas seguras. "
+            "No guarda precios ni códigos concretos."
+        )
+
+        for idx, (nombre, meta) in enumerate(candidatos):
+            proveedor, productos = mapa.get(
+                nombre,
+                (meta.get("proveedor", ""), []),
+            )
+            confianza = float(meta.get("confianza") or 0)
+            estado = meta.get("estado") or "revisar"
+            etiqueta = {
+                "auto_interpretado": "🔵 Nuevo interpretado",
+                "revisar": "🟡 Revisar",
+                "no_reconocido": "🔴 No reconocido",
+            }.get(estado, estado)
+
+            st.markdown(
+                f"**{html.escape(nombre)}** · {etiqueta} · "
+                f"confianza **{confianza:.0%}** · "
+                f"{html.escape(str(proveedor or 'Proveedor no identificado'))}"
+            )
+
+            motivos = meta.get("motivos") or []
+            if motivos:
+                st.caption(" · ".join(str(x) for x in motivos[:4]))
+
+            filas = []
+            for p in (productos or [])[:4]:
+                filas.append({
+                    "Producto": p.get("nombre", ""),
+                    "Cantidad": p.get("cant", ""),
+                    "UDM": (
+                        p.get("purchase_unit")
+                        or p.get("unidad_original")
+                        or ""
+                    ),
+                    "Empaque": p.get("emp", 1),
+                    "Costo línea": p.get("costo_total", 0),
+                })
+            if filas:
+                st.dataframe(
+                    pd.DataFrame(filas),
+                    hide_index=True,
+                    use_container_width=True,
+                )
+
+            if st.button(
+                "✅ Registrar este formato",
+                key=(
+                    f"registrar_formato_r29_{idx}_"
+                    f"{hashlib.md5(nombre.encode('utf-8')).hexdigest()[:8]}"
+                ),
+                use_container_width=True,
+            ):
+                ok, msg = _registrar_formato_adaptativo(
+                    proveedor,
+                    productos,
+                    nombre,
+                )
+                if ok:
+                    st.success(
+                        "Formato registrado. Las próximas facturas similares "
+                        "se marcarán como reconocidas."
+                    )
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+        archivo_registro = st.file_uploader(
+            "Importar registro de formatos",
+            type=["json"],
+            accept_multiple_files=False,
+            key="importar_formatos_r29",
+            help="Restaura formatos aprendidos después de un nuevo despliegue.",
+        )
+        if archivo_registro is not None:
+            try:
+                data_importada = json.loads(
+                    archivo_registro.getvalue().decode("utf-8")
+                )
+                if isinstance(data_importada, dict):
+                    actuales = st.session_state.setdefault(
+                        "formatos_adaptativos",
+                        {},
+                    )
+                    actuales.update(data_importada)
+                    _guardar_formatos_adaptativos_disco(actuales)
+                    st.success(
+                        f"Se importaron {len(data_importada)} perfil(es) de formato."
+                    )
+                else:
+                    st.error(
+                        "El JSON no contiene un registro de formatos válido."
+                    )
+            except Exception as exc:
+                st.error(f"No se pudo importar el registro: {exc}")
+
+        formatos = st.session_state.get("formatos_adaptativos", {}) or {}
+        if formatos:
+            st.download_button(
+                "⬇️ Exportar registro de formatos",
+                data=json.dumps(
+                    formatos,
+                    ensure_ascii=False,
+                    indent=2,
+                ).encode("utf-8"),
+                file_name="formatos_factura_wilpos.json",
+                mime="application/json",
+                use_container_width=True,
+                key="descargar_formatos_r29",
+            )
+
+
+# Carga perezosa del registro aprendido.
+try:
+    if not st.session_state.get("formatos_adaptativos"):
+        st.session_state["formatos_adaptativos"] = _cargar_formatos_adaptativos_disco()
+except Exception:
+    pass
+
+
 EMPAQUES_CONFIRMADOS_POR_PRODUCTO = (
     (r"\bPRESIDENTE\s+LIGHT\b.*\bLATA\b", 24),
     (r"\bPRESIDENTE\s+(?:REG|REGULAR)\b.*\bLATA\b", 24),
@@ -9097,7 +9599,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R28_6"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -12169,7 +12671,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R28_6_CANTIDAD_EMPAQUE_FINAL_20260906"
+EXTRACTOR_CACHE_VERSION = "BASE6_R29_MOTOR_ADAPTATIVO_FORMATOS_20260906"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -12727,6 +13229,7 @@ def render_carga_facturas(titulo=True):
         st.session_state["matches_catalogo_lote"] = []
         st.session_state["matches_catalogo_pendientes_lote"] = []
         st.session_state["empaques_pendientes_revision"] = []
+        st.session_state["formatos_revision_lote"] = {}
 
         # Los errores/diagnósticos pertenecen al intento actual, no a uno anterior.
         # No limpiamos el cache exitoso aquí; sólo descartamos estados visuales viejos.
@@ -12793,6 +13296,21 @@ def render_carga_facturas(titulo=True):
             # Deduplicar también líneas repetidas dentro de una misma foto.
             productos, repetidos_internos = _deduplicar_articulos_misma_factura(productos)
 
+            # BASE6-R29: cualquier formato, incluso uno nunca visto, pasa por
+            # las mismas barreras universales de cantidad/empaque/costo.
+            productos = _aplicar_motor_adaptativo_productos(
+                proveedor,
+                productos,
+            )
+            evaluacion_formato = _evaluar_formato_factura(
+                proveedor,
+                productos,
+            )
+            st.session_state.setdefault(
+                "formatos_revision_lote",
+                {},
+            )[f.name] = evaluacion_formato
+
             if firma not in firma_a_indice:
                 firma_a_indice[firma] = len(archivos_validos)
                 archivos_validos.append(
@@ -12805,6 +13323,8 @@ def render_carga_facturas(titulo=True):
                     proveedor=proveedor,
                     factura=num_fac,
                     productos=len(productos),
+                    formato_estado=evaluacion_formato.get("estado", "revisar"),
+                    formato_confianza=evaluacion_formato.get("confianza", 0),
                     productos_repetidos_omitidos=repetidos_internos,
                     motivo=(
                         "Factura reconocida correctamente. "
@@ -12900,6 +13420,9 @@ def render_carga_facturas(titulo=True):
                     f"📐 {_archivo_fb}: reconocimiento recuperado con rotación "
                     f"{_info_fb.get('angulo')}° · {_info_fb.get('productos')} productos detectados."
                 )
+
+        # BASE6-R29: formatos nuevos/dudosos y aprendizaje asistido.
+        _render_formatos_adaptativos_ui(archivos_validos)
 
         # Acción principal visible inmediatamente después de leer la factura.
         # BASE6-R28.1: la confirmación debe persistir entre reruns de Streamlit.
