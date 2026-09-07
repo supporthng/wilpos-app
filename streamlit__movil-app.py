@@ -3789,6 +3789,8 @@ DEFAULTS = {
     "inventario_referencia_catalogo": [],
     "inventario_referencia_nombre": "",
     "matches_catalogo_lote": [],
+    "matches_catalogo_pendientes_lote": [],
+    "confirmacion_procesamiento_activa": False,
 }
 
 for key, value in DEFAULTS.items():
@@ -3796,7 +3798,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R28":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R28_3":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3805,7 +3807,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R28":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R28"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R28_3"
 
 
 # =========================================================
@@ -5747,17 +5749,98 @@ def _extraer_empaque_udm_universal(unidad):
     return 1, "", 0
 
 
+
+def _descripcion_tiene_empaque_fuerte(prod):
+    """
+    Evidencia fuerte de que la unidad facturada es un empaque/caja.
+    Evita tratar números sueltos como '12 1' como factor de empaque.
+    """
+    textos = [
+        prod.get("package_text"),
+        prod.get("presentation"),
+        prod.get("size_text"),
+        prod.get("nombre_original_lectura"),
+        prod.get("nombre"),
+    ]
+    t = " ".join(str(x or "") for x in textos).upper()
+    t = t.replace("×", "X").replace(",", ".")
+
+    patrones = [
+        r"\b(?:CAJA|CAJ|CJ|CASE|PACK|PCK|PAQUETE)\s*[- /]?\s*\d{1,3}\b",
+        r"\b(?:CJ|CAJ|CAJA)\s*\d{1,3}\s*(?:BOT|BOTELLAS?|UND|UNIDADES?|PZA|PCS)\b",
+        r"(?<!\d)\d{1,3}\s*X\s*\d{1,3}\s*X\s*\d+(?:\.\d+)?\s*(?:ML|CL|L|LT|OZ|CC)\b",
+        r"(?<!\d)\d{1,3}\s*X\s*\d+(?:\.\d+)?\s*(?:ML|CL|L|LT|OZ|CC)\b",
+        r"(?<!\d)\d{1,3}\s*/\s*\d{1,3}\s*/\s*\d+(?:\.\d+)?\s*(?:ML|CL|L|LT|OZ|CC)\b",
+        r"(?<!\d)\d{1,3}\s*/\s*\d+(?:\.\d+)?\s*(?:ML|CL|L|LT|OZ|CC)\b",
+    ]
+    return any(re.search(p, t, flags=re.I) for p in patrones)
+
+
+def _linea_demuestra_precio_por_unidad_facturada(prod):
+    """
+    Comprueba si la factura trae cantidad × precio = total de línea.
+
+    Esto demuestra el precio de la unidad facturada; la UDM decide si
+    esa unidad es física o una caja. Si la UDM está vacía, esta evidencia
+    evita aceptar empaques débiles inventados por OCR/Vision.
+    """
+    def fnum(v):
+        try:
+            if v in (None, ""):
+                return None
+            if isinstance(v, str):
+                s = re.sub(r"[^0-9,.\-]", "", v).replace(",", "")
+                if s in ("", "-", ".", "-."):
+                    return None
+                return float(s)
+            return float(v)
+        except Exception:
+            return None
+
+    q = fnum(prod.get("cant"))
+    if not q or q <= 0:
+        return False
+
+    costo_linea = fnum(prod.get("costo_total"))
+    if costo_linea is None or costo_linea <= 0:
+        return False
+
+    for raw in (
+        prod.get("net_price_per_package"),
+        prod.get("price_unit_per_package"),
+        prod.get("subtotal_net"),
+    ):
+        precio = fnum(raw)
+        if precio is None or precio <= 0:
+            continue
+        esperado = precio * q
+        tol = max(0.10, abs(costo_linea) * 0.015)
+        if abs(esperado - costo_linea) <= tol:
+            return True
+
+    fuente = str(prod.get("fuente_costo") or "").lower()
+    if any(x in fuente for x in (
+        "precio_unit_empaque_x_cantidad",
+        "precio_neto_empaque_x_cantidad",
+        "unit_cost_net_x_cantidad",
+    )):
+        return True
+
+    return False
+
+
 def _inferir_empaque_universal(prod, proveedor=""):
     """
     Devuelve (empaque, fuente, confianza, necesita_revision).
 
     Prioridad:
-    1) UdM explícita.
-    2) package_text/presentación.
-    3) descripción original.
-    4) units_per_package leído por Vision.
-    5) catálogo comercial confirmado.
-    6) si parece caja y no hay cantidad: revisión obligatoria.
+    1) UdM explícita (unidad física o caja).
+    2) Aritmética de línea cuando no hay UdM y no existe empaque fuerte.
+    3) package_text/presentación.
+    4) descripción original con notación fuerte.
+    5) units_per_package leído por Vision.
+    6) catálogo comercial confirmado.
+    7) si parece caja y no hay cantidad: revisión obligatoria.
     """
     if not isinstance(prod, dict):
         return 1, "default", 0, False
@@ -5785,9 +5868,24 @@ def _inferir_empaque_universal(prod, proveedor=""):
     )
 
     # 1) UdM explícita.
+    # La UDM manda sobre cualquier número de empaque de la descripción.
+    # Ej.: PC + "BULL LT 24/250ML" => PC es pieza física => emp=1.
     emp_udm, fuente_udm, conf_udm = _extraer_empaque_udm_universal(unidad)
     if conf_udm >= 100:
         return int(emp_udm), fuente_udm, conf_udm, False
+
+    # BASE6-R28.3:
+    # Si NO hay UDM explícita, la línea demuestra cantidad × precio = total
+    # y tampoco hay una notación fuerte de caja/multipack, considerar que la
+    # cantidad ya son unidades físicas. Esto evita que Vision convierta
+    # números débiles como "12 1" en un empaque de 12.
+    unidad_vacia = not str(unidad or "").strip()
+    if (
+        unidad_vacia
+        and _linea_demuestra_precio_por_unidad_facturada(prod)
+        and not _descripcion_tiene_empaque_fuerte(prod)
+    ):
+        return 1, "aritmetica_linea_sin_udm", 98, False
 
     # 2) Presentación exacta.
     emp_pres = _extraer_empaque_desde_tamano(presentacion)
@@ -8869,7 +8967,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R28"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R28_3"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -10006,32 +10104,85 @@ def _preservar_barcode_original(valor):
 # =========================================================
 def _normalizar_nombre_match_catalogo(valor):
     """
-    Normalización para comparar producto leído vs catálogo maestro.
-    Conserva marca/modelo/presentación; elimina ruido administrativo.
+    Normalización fuerte para comparar el nombre leído de la factura
+    con el nombre del inventario maestro.
+
+    Importante:
+    - No usa el código para decidir el match.
+    - Elimina ruido logístico (caja/pack/cantidad por caja).
+    - Conserva marca, variante/sabor y presentación física.
     """
-    t = _normalizar_ocr(str(valor or "")).upper()
-    t = re.sub(r"\b(?:CODIGO|BARCODE|EAN|UPC|SKU|ITEM|MATERIAL|PRECIO|ITBIS|IMPORTE)\b", " ", t)
-    t = re.sub(r"\b(?:CAJA|CAJ|CJ|CASE|PACK|PCK|PAQUETE)\s*[- ]?\s*\d{1,4}\b", " ", t)
+    import unicodedata
+
+    t = str(valor or "").upper().strip()
+    t = "".join(
+        c for c in unicodedata.normalize("NFKD", t)
+        if not unicodedata.combining(c)
+    )
+
+    # OCR frecuente: "1000M L" -> "1000ML", "16 ON Z" -> "16OZ".
+    t = re.sub(r"(\d)\s*M\s*L\b", r"\1ML", t)
+    t = re.sub(r"(\d)\s*C\s*L\b", r"\1CL", t)
+    t = re.sub(r"(\d)\s*O\s*Z\b", r"\1OZ", t)
+    t = re.sub(r"(\d)\s*ON\s*Z\b", r"\1OZ", t)
+    t = re.sub(r"(\d)\s*L\s*T\b", r"\1LT", t)
+
+    # Separar letras/números sólo cuando ayuda a estandarizar unidades.
+    t = re.sub(r"\b(\d+(?:[.,]\d+)?)\s*(ML|CC|CL|LT|LTR|LTS|L|OZ)\b", r"\1\2", t)
+    t = t.replace(",", ".")
+
+    # Quitar metadatos administrativos.
+    t = re.sub(
+        r"\b(?:CODIGO|BARCODE|EAN|UPC|GTIN|SKU|ITEM|MATERIAL|PRECIO|ITBIS|IMPORTE|TOTAL)\b",
+        " ",
+        t,
+    )
+
+    # Quitar expresiones logísticas que no identifican el producto físico.
+    # Ej.: "12 1", "24/1", "CAJA-24", "CJ12BOT", "12X1".
+    t = re.sub(r"\b(?:CAJA|CAJ|CJ|CASE|PACK|PCK|PAQUETE)\s*[- ]?\s*\d{1,4}\s*(?:BOT|BOTELLA|UND|UNID)?\b", " ", t)
+    t = re.sub(r"\bCJ\s*\d{1,4}\s*BOT\b", " ", t)
+    t = re.sub(r"\b\d{1,3}\s*[X/]\s*1\b", " ", t)
+    t = re.sub(r"\b\d{1,3}\s+1\b", " ", t)
+
+    # Forma del envase no debe impedir encontrar el mismo producto.
+    t = re.sub(
+        r"\b(?:LATA|BOT|BOTELLA|BOTELLAS|VIDRIO|PET|UND|UNIDAD|UNIDADES)\b",
+        " ",
+        t,
+    )
+
+    # Palabras genéricas que suelen aparecer en un archivo y no en el otro.
+    t = re.sub(
+        r"\b(?:BEBIDA|ENERGIZANTE|REFRESCO|FLAVORED|FLAVOUR|WATER|DRINK)\b",
+        " ",
+        t,
+    )
+
+    # "AGUA DE COCO" y "AGUA COCO" deben quedar comparables.
+    t = re.sub(r"\bDE\b", " ", t)
+
     t = re.sub(r"[^A-Z0-9.%]+", " ", t)
-    # Unificar 750 ML / 750ML, 75 CL / 75CL, 1.75 L / 1.75L.
-    t = re.sub(r"\b(\d+(?:\.\d+)?)\s+(ML|CC|CL|L|LT|LTR|LTS|OZ)\b", r"\1\2", t)
     t = re.sub(r"\s+", " ", t).strip()
     return t
 
 
 def _presentacion_fisica_ml(valor):
     """
-    Devuelve presentación física aproximada en ml cuando es posible.
-    No usa el número de unidades del empaque.
+    Convierte una presentación visible a ml aproximados.
+    Sirve como barrera de seguridad: 375 ml no debe casar con 750 ml.
     """
-    t = _normalizar_nombre_match_catalogo(valor).replace(",", ".")
-    m = re.search(r"\b(\d+(?:\.\d+)?)(ML|CC|CL|L|LT|LTR|LTS|OZ)\b", t)
+    t = _normalizar_nombre_match_catalogo(valor)
+
+    m = re.search(r"\b(\d+(?:\.\d+)?)(ML|CC|CL|LT|LTR|LTS|L|OZ)\b", t)
     if not m:
         return None
+
     try:
         n = float(m.group(1))
     except Exception:
         return None
+
     u = m.group(2)
     if u in ("ML", "CC"):
         return round(n, 2)
@@ -10044,41 +10195,117 @@ def _presentacion_fisica_ml(valor):
     return None
 
 
-def _tokens_match_catalogo(valor):
+def _tokens_identidad_catalogo(valor):
+    """
+    Tokens realmente útiles para reconocer el producto.
+    Presentaciones se comparan aparte, por eso se excluyen del set.
+    """
     t = _normalizar_nombre_match_catalogo(valor)
+
     stop = {
-        "BOT", "BOTELLA", "BOTELLAS", "UND", "UNIDAD", "UNIDADES",
-        "GENERAL", "PRODUCTO", "CAJA", "CAJ", "CJ", "CASE", "PACK", "PAQUETE"
+        "AGUA", "CERVEZA", "VINO", "WHISKY", "WHISKEY", "RON", "VODKA",
+        "TEQUILA", "GIN", "GINEBRA", "LICOR",
+        "REG", "REGULAR", "ST", "GL",
     }
-    return {x for x in t.split() if len(x) >= 2 and x not in stop}
+
+    out = []
+    for token in t.split():
+        if re.fullmatch(r"\d+(?:\.\d+)?(?:ML|CC|CL|LT|LTR|LTS|L|OZ)", token):
+            continue
+        if token in stop:
+            continue
+        if len(token) < 2:
+            continue
+        out.append(token)
+    return out
+
+
+def _token_equivalente_catalogo(a, b):
+    if a == b:
+        return True
+    # Permitir errores OCR/abreviaciones pequeñas, pero no aproximaciones laxas.
+    if len(a) >= 5 and len(b) >= 5:
+        return SequenceMatcher(None, a, b).ratio() >= 0.88
+    return False
+
+
+def _cobertura_tokens_catalogo(tokens_a, tokens_b):
+    if not tokens_a or not tokens_b:
+        return 0.0, 0
+
+    usados = set()
+    matches = 0
+    for a in tokens_a:
+        for j, b in enumerate(tokens_b):
+            if j in usados:
+                continue
+            if _token_equivalente_catalogo(a, b):
+                usados.add(j)
+                matches += 1
+                break
+
+    # Cobertura sobre el nombre más corto: útil para casos como
+    # "MONSTER MANGO LOCO" vs "BEBIDA ENERGIZANTE MONSTER MANGO LOCO 473ML".
+    base = max(1, min(len(tokens_a), len(tokens_b)))
+    return matches / base, matches
 
 
 def _similitud_producto_catalogo(nombre_factura, nombre_catalogo):
+    """
+    Score 0..1. Combina:
+    - similitud de texto;
+    - cobertura de palabras distintivas;
+    - presentación física;
+    - contención del nombre simplificado.
+
+    Una presentación incompatible produce score 0.
+    """
     a = _normalizar_nombre_match_catalogo(nombre_factura)
     b = _normalizar_nombre_match_catalogo(nombre_catalogo)
     if not a or not b:
         return 0.0
 
-    pa = _presentacion_fisica_ml(a)
-    pb = _presentacion_fisica_ml(b)
+    pa = _presentacion_fisica_ml(nombre_factura)
+    pb = _presentacion_fisica_ml(nombre_catalogo)
+    misma_presentacion = False
+
     if pa and pb:
-        tolerancia = max(8.0, min(pa, pb) * 0.035)
+        tolerancia = max(10.0, min(pa, pb) * 0.04)
         if abs(pa - pb) > tolerancia:
             return 0.0
+        misma_presentacion = True
 
-    if a == b:
-        return 1.0
+    ta = _tokens_identidad_catalogo(a)
+    tb = _tokens_identidad_catalogo(b)
+    cobertura, nmatch = _cobertura_tokens_catalogo(ta, tb)
 
-    seq = SequenceMatcher(None, a, b).ratio()
-    ta = _tokens_match_catalogo(a)
-    tb = _tokens_match_catalogo(b)
-    jac = (len(ta & tb) / len(ta | tb)) if (ta or tb) else 0.0
+    # Texto sin presentación para no castigar "473ML" ausente en uno de los lados.
+    aa = re.sub(r"\b\d+(?:\.\d+)?(?:ML|CC|CL|LT|LTR|LTS|L|OZ)\b", " ", a)
+    bb = re.sub(r"\b\d+(?:\.\d+)?(?:ML|CC|CL|LT|LTR|LTS|L|OZ)\b", " ", b)
+    aa = re.sub(r"\s+", " ", aa).strip()
+    bb = re.sub(r"\s+", " ", bb).strip()
 
-    score = (0.58 * seq) + (0.42 * jac)
-    if pa and pb and abs(pa - pb) <= max(8.0, min(pa, pb) * 0.035):
-        score += 0.06
+    seq = SequenceMatcher(None, aa, bb).ratio() if aa and bb else 0.0
+    contiene = bool(aa and bb and (aa in bb or bb in aa))
 
-    return min(score, 1.0)
+    # Exactitud de identidad.
+    if aa == bb and aa:
+        score = 0.98
+    else:
+        score = (0.52 * cobertura) + (0.38 * seq)
+        if contiene:
+            score += 0.08
+        if misma_presentacion:
+            score += 0.08
+
+    # Un solo token puede ser suficiente únicamente si la presentación
+    # física coincide y el texto también es muy parecido.
+    if nmatch == 0:
+        return 0.0
+    if nmatch == 1 and not misma_presentacion and seq < 0.90:
+        score = min(score, 0.72)
+
+    return max(0.0, min(float(score), 1.0))
 
 
 def _detectar_columnas_inventario_referencia(df):
@@ -10097,16 +10324,21 @@ def _detectar_columnas_inventario_referencia(df):
                     return original
         return None
 
-    col_nombre = buscar(["Nombre", "Descripción", "Descripcion", "Producto", "Artículo", "Articulo"])
-    col_codigo = buscar(["Código Barra", "Codigo Barra", "Código de Barras", "Codigo de Barras", "Barcode", "EAN", "UPC", "GTIN"])
+    col_nombre = buscar([
+        "Nombre", "Descripción", "Descripcion", "Producto",
+        "Artículo", "Articulo",
+    ])
+    col_codigo = buscar([
+        "Código Barra", "Codigo Barra", "Código de Barras",
+        "Codigo de Barras", "Barcode", "EAN", "UPC", "GTIN",
+    ])
     return col_nombre, col_codigo
 
 
 @st.cache_data(show_spinner=False, max_entries=8)
 def _cargar_inventario_referencia_bytes(raw_bytes, nombre_archivo="inventario.xlsx"):
     """
-    Lee Excel como catálogo de referencia.
-    Los códigos se fuerzan a texto para preservar ceros iniciales.
+    Lee el Excel maestro como catálogo. Los códigos se fuerzan a texto.
     """
     if not raw_bytes:
         return [], {"error": "Archivo vacío."}
@@ -10121,7 +10353,11 @@ def _cargar_inventario_referencia_bytes(raw_bytes, nombre_archivo="inventario.xl
     diagnostico = {"hojas": list(hojas.keys()), "archivo": nombre_archivo}
 
     orden = list(hojas.keys())
-    orden.sort(key=lambda x: 0 if str(x).strip().lower() in ("productos", "producto", "inventario") else 1)
+    orden.sort(
+        key=lambda x: 0
+        if str(x).strip().lower() in ("productos", "producto", "inventario")
+        else 1
+    )
 
     for hoja in orden:
         df = hojas[hoja].copy()
@@ -10167,60 +10403,163 @@ def _cargar_inventario_referencia_bytes(raw_bytes, nombre_archivo="inventario.xl
 
     diagnostico["productos_validos"] = len(unicos)
     if not unicos and "error" not in diagnostico:
-        diagnostico["error"] = "No encontré columnas compatibles de Nombre + Código Barra."
+        diagnostico["error"] = (
+            "No encontré columnas compatibles de Nombre + Código Barra."
+        )
     return unicos, diagnostico
 
 
-def _codigo_es_faltante_o_temporal(prod):
+def _codigo_confirmado_producto(prod):
+    """
+    Regla R28.2:
+    CUALQUIER código real que ya tenga el producto se considera confirmado
+    para este matching y NO se reemplaza.
+
+    Sólo se intenta completar:
+    - vacío;
+    - TMP...
+    """
     if not isinstance(prod, dict):
-        return True
+        return False
 
     barcode = _codigo_producto_mostrar(prod.get("barcode") or "")
     codigo = _codigo_producto_mostrar(prod.get("codigo") or "")
-    status = str(prod.get("code_status") or "").strip().lower()
 
-    if barcode and not barcode.startswith("TMP"):
-        return False
+    if barcode and not barcode.upper().startswith("TMP"):
+        return True
+    if codigo and not codigo.upper().startswith("TMP"):
+        return True
+    return False
 
-    # Un código interno leído también se respeta.
-    if codigo and not codigo.startswith("TMP") and status == "read":
-        return False
 
-    return (
-        (not codigo)
-        or codigo.startswith("TMP")
-        or status in ("not_printed", "unreadable", "unknown")
-    )
+def _codigo_es_faltante_o_temporal(prod):
+    return not _codigo_confirmado_producto(prod)
+
+
+def _nombres_candidatos_producto(prod):
+    """
+    Usa tanto el nombre limpio como la lectura original, si existe.
+    Esto evita perder información útil por la limpieza de exportación.
+    """
+    valores = [
+        prod.get("nombre"),
+        prod.get("nombre_original_lectura"),
+        prod.get("description"),
+        prod.get("descripcion"),
+    ]
+    out = []
+    vistos = set()
+    for v in valores:
+        s = " ".join(str(v or "").split()).strip()
+        if not s:
+            continue
+        k = _normalizar_nombre_match_catalogo(s)
+        if not k or k in vistos:
+            continue
+        vistos.add(k)
+        out.append(s)
+    return out
 
 
 def _buscar_codigo_en_inventario_referencia(prod, catalogo=None):
     """
-    Matching conservador:
-    - sólo para producto sin código confiable;
-    - exige score alto;
-    - exige separación clara frente al segundo candidato;
-    - si hay duda, no asigna nada.
+    Busca por similitud de NOMBRES entre factura y archivo maestro.
+
+    Seguridad:
+    - jamás toca un código ya confirmado;
+    - una presentación incompatible elimina el candidato;
+    - exige alta confianza;
+    - exige diferencia frente al segundo mejor candidato.
     """
-    catalogo = catalogo if catalogo is not None else st.session_state.get("inventario_referencia_catalogo", [])
+    catalogo = (
+        catalogo
+        if catalogo is not None
+        else st.session_state.get("inventario_referencia_catalogo", [])
+    )
+
     if not catalogo or not isinstance(prod, dict):
         return None
 
-    if not _codigo_es_faltante_o_temporal(prod):
+    if _codigo_confirmado_producto(prod):
         return None
 
-    nombre = (
-        prod.get("nombre")
-        or prod.get("nombre_original_lectura")
-        or prod.get("description")
-        or ""
-    )
-    nombre = " ".join(str(nombre).split()).strip()
-    if not nombre:
+    nombres_factura = _nombres_candidatos_producto(prod)
+    if not nombres_factura:
         return None
 
     resultados = []
     for item in catalogo:
-        score = _similitud_producto_catalogo(nombre, item.get("nombre", ""))
+        mejor_score_item = 0.0
+        mejor_nombre_factura = ""
+        for nombre_factura in nombres_factura:
+            score = _similitud_producto_catalogo(
+                nombre_factura,
+                item.get("nombre", ""),
+            )
+            if score > mejor_score_item:
+                mejor_score_item = score
+                mejor_nombre_factura = nombre_factura
+
+        if mejor_score_item > 0:
+            resultados.append(
+                (mejor_score_item, item, mejor_nombre_factura)
+            )
+
+    if not resultados:
+        return None
+
+    resultados.sort(key=lambda x: x[0], reverse=True)
+
+    mejor_score, mejor, nombre_usado = resultados[0]
+    segundo_score = resultados[1][0] if len(resultados) > 1 else 0.0
+
+    # Umbral alto pero no tan rígido como R28/R28.1.
+    # Los nombres reales de factura suelen incluir abreviaturas, pack y OCR.
+    if mejor_score < 0.82:
+        return None
+
+    # Si el segundo candidato también es fuerte, no arriesgar.
+    if segundo_score >= 0.78 and (mejor_score - segundo_score) < 0.07:
+        return None
+
+    return {
+        "codigo": _codigo_producto_mostrar(mejor.get("codigo")),
+        "nombre_catalogo": mejor.get("nombre", ""),
+        "nombre_factura_usado": nombre_usado,
+        "score": round(float(mejor_score), 4),
+        "segundo_score": round(float(segundo_score), 4),
+        "hoja": mejor.get("hoja", ""),
+    }
+
+
+def _mejor_candidato_catalogo_para_revision(prod, catalogo=None):
+    """
+    Sólo diagnóstico: muestra el mejor candidato cuando no fue suficientemente
+    seguro para asignarlo. NO cambia ningún código.
+    """
+    catalogo = (
+        catalogo
+        if catalogo is not None
+        else st.session_state.get("inventario_referencia_catalogo", [])
+    )
+    if not catalogo or not isinstance(prod, dict):
+        return None
+    if _codigo_confirmado_producto(prod):
+        return None
+
+    nombres_factura = _nombres_candidatos_producto(prod)
+    if not nombres_factura:
+        return None
+
+    resultados = []
+    for item in catalogo:
+        score = max(
+            (
+                _similitud_producto_catalogo(n, item.get("nombre", ""))
+                for n in nombres_factura
+            ),
+            default=0.0,
+        )
         if score > 0:
             resultados.append((score, item))
 
@@ -10228,29 +10567,60 @@ def _buscar_codigo_en_inventario_referencia(prod, catalogo=None):
         return None
 
     resultados.sort(key=lambda x: x[0], reverse=True)
-    mejor_score, mejor = resultados[0]
-    segundo_score = resultados[1][0] if len(resultados) > 1 else 0.0
-
-    if mejor_score < 0.86:
-        return None
-    if segundo_score >= 0.82 and (mejor_score - segundo_score) < 0.055:
+    score, item = resultados[0]
+    if score < 0.50:
         return None
 
     return {
-        "codigo": _codigo_producto_mostrar(mejor.get("codigo")),
-        "nombre_catalogo": mejor.get("nombre", ""),
-        "score": round(float(mejor_score), 4),
-        "segundo_score": round(float(segundo_score), 4),
-        "hoja": mejor.get("hoja", ""),
+        "Producto factura": prod.get("nombre") or nombres_factura[0],
+        "Mejor candidato maestro": item.get("nombre", ""),
+        "Código candidato": item.get("codigo", ""),
+        "Confianza": round(float(score), 4),
+        "Estado": "Revisar - no asignado",
     }
 
 
 def _asignar_codigo_desde_inventario_referencia(prod):
+    """
+    Sólo reemplaza vacío/TMP. Un código real existente queda intacto.
+    """
+    if not isinstance(prod, dict):
+        return prod
+
+    # Barrera final: código existente/confirmado = intocable.
+    if _codigo_confirmado_producto(prod):
+        return prod
+
     match = _buscar_codigo_en_inventario_referencia(prod)
+
     if not match:
+        pendiente = _mejor_candidato_catalogo_para_revision(prod)
+        if pendiente:
+            lista = st.session_state.setdefault(
+                "matches_catalogo_pendientes_lote", []
+            )
+            llave = (
+                str(pendiente.get("Producto factura", "")),
+                str(pendiente.get("Código candidato", "")),
+            )
+            existentes = {
+                (
+                    str(x.get("Producto factura", "")),
+                    str(x.get("Código candidato", "")),
+                )
+                for x in lista
+                if isinstance(x, dict)
+            }
+            if llave not in existentes:
+                lista.append(pendiente)
         return prod
 
     nuevo = dict(prod)
+
+    # Segunda barrera por seguridad.
+    if _codigo_confirmado_producto(nuevo):
+        return prod
+
     codigo_anterior = _codigo_producto_mostrar(nuevo.get("codigo") or "")
     nuevo["codigo"] = match["codigo"]
     nuevo["barcode"] = match["codigo"]
@@ -10262,18 +10632,34 @@ def _asignar_codigo_desde_inventario_referencia(prod):
 
     avisos = list(nuevo.get("advertencias_lectura") or [])
     avisos.append(
-        f"Código recuperado desde inventario de referencia: {match['codigo']} "
-        f"(coincidencia {match['score']:.0%})."
+        f"Código recuperado desde inventario maestro: {match['codigo']} "
+        f"(coincidencia de nombre {match['score']:.0%})."
     )
     nuevo["advertencias_lectura"] = list(dict.fromkeys(avisos))
 
-    st.session_state.setdefault("matches_catalogo_lote", []).append({
+    lista = st.session_state.setdefault("matches_catalogo_lote", [])
+    registro = {
         "Producto factura": nuevo.get("nombre", ""),
         "Código anterior": codigo_anterior or "sin código",
         "Código asignado": match["codigo"],
-        "Producto catálogo": match["nombre_catalogo"],
+        "Producto maestro": match["nombre_catalogo"],
         "Confianza": match["score"],
-    })
+    }
+    llave = (
+        str(registro["Producto factura"]),
+        str(registro["Código asignado"]),
+    )
+    existentes = {
+        (
+            str(x.get("Producto factura", "")),
+            str(x.get("Código asignado", "")),
+        )
+        for x in lista
+        if isinstance(x, dict)
+    }
+    if llave not in existentes:
+        lista.append(registro)
+
     return nuevo
 
 
@@ -10928,10 +11314,12 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                             "emp": p["emp"],
                             "itbis": p["itbis"],
                         }
+            st.session_state.confirmacion_procesamiento_activa = False
             st.rerun()
 
     with b2:
         if st.button("Cancelar", use_container_width=True):
+            st.session_state.confirmacion_procesamiento_activa = False
             st.rerun()
 
 
@@ -11569,7 +11957,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R28_INVENTARIO_REFERENCIA_MATCH_20260906"
+EXTRACTOR_CACHE_VERSION = "BASE6_R28_3_COSTO_UDM_ARITMETICA_20260906"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -11966,6 +12354,7 @@ def render_carga_facturas(titulo=True):
                 st.session_state.inventario_referencia_catalogo = []
                 st.session_state.inventario_referencia_nombre = ""
                 st.session_state.matches_catalogo_lote = []
+                st.session_state.matches_catalogo_pendientes_lote = []
                 st.rerun()
 
     with st.container(border=True):
@@ -12124,6 +12513,7 @@ def render_carga_facturas(titulo=True):
         st.session_state["resultado_archivos_lote"] = {}
         st.session_state["correcciones_empaque_lote"] = []
         st.session_state["matches_catalogo_lote"] = []
+        st.session_state["matches_catalogo_pendientes_lote"] = []
         st.session_state["empaques_pendientes_revision"] = []
 
         # Los errores/diagnósticos pertenecen al intento actual, no a uno anterior.
@@ -12300,19 +12690,38 @@ def render_carga_facturas(titulo=True):
                 )
 
         # Acción principal visible inmediatamente después de leer la factura.
+        # BASE6-R28.1: la confirmación debe persistir entre reruns de Streamlit.
+        # Antes estaba anidada directamente dentro del click de este botón,
+        # por lo que el segundo botón ("Confirmar y consolidar") desaparecía
+        # en el siguiente rerun y parecía que "Procesar" no hacía nada.
         st.markdown("<div class='v3-process-top'></div>", unsafe_allow_html=True)
+
+        puede_procesar = bool(archivos_validos) and margen_porcentaje > 0
+
         if st.button(
             "🚀  Procesar Factura",
             type="primary",
             use_container_width=True,
-            disabled=False,
+            disabled=not puede_procesar,
             key="procesar_facturas_principal",
         ):
+            st.session_state.confirmacion_procesamiento_activa = True
+            st.rerun()
+
+        if not puede_procesar:
+            st.caption(
+                "Necesitas al menos una factura reconocida y una ganancia mayor a 0%."
+            )
+
+        if st.session_state.get("confirmacion_procesamiento_activa") and puede_procesar:
             modal_confirmacion(
                 archivos_validos,
                 len(archivos_duplicados),
                 margen_porcentaje,
             )
+
+    if not uploaded_files or not archivos_validos:
+        st.session_state.confirmacion_procesamiento_activa = False
 
     if uploaded_files:
         # -----------------------------------------------------
