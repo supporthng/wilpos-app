@@ -3793,6 +3793,7 @@ DEFAULTS = {
     "confirmacion_procesamiento_activa": False,
     "formatos_adaptativos": {},
     "formatos_revision_lote": {},
+    "envases_retornables_lote": [],
 }
 
 for key, value in DEFAULTS.items():
@@ -3800,7 +3801,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R29":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3816,7 +3817,8 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R29":
     st.session_state["firmas_facturas_procesadas"] = set()
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
-    st.session_state["_extractor_runtime_version"] = "BASE6_R29"
+    st.session_state["envases_retornables_lote"] = []
+    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1"
 
 
 # =========================================================
@@ -9599,7 +9601,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -11492,6 +11494,9 @@ def construir_df_productos():
                 "stock": float(data.get("stock", 0)),
                 "costo_total": float(data.get("costo_total", 0)),
                 "emp": data.get("emp", 1),
+                "cantidad_facturada": data.get("cantidad_facturada", 0),
+                "unidades_fisicas": data.get("unidades_fisicas", data.get("stock", 0)),
+                "udm_factura": data.get("udm_factura", ""),
                 "itbis": data.get("itbis", 0.18),
             }
             if nombre_key:
@@ -11795,6 +11800,114 @@ def resetear_todo():
 
 
 @st.dialog("Confirmar procesamiento")
+
+# =========================================================
+# ENVASES / DEPÓSITOS RETORNABLES — BASE6-R29.1
+# =========================================================
+def _es_envase_retorno_no_inventariable(prod):
+    """Detecta depósitos, huacales y envases retornables no vendibles."""
+    if not isinstance(prod, dict):
+        return False
+
+    texto = " ".join([
+        str(prod.get("nombre") or ""),
+        str(prod.get("nombre_original_lectura") or ""),
+        str(prod.get("description") or ""),
+    ]).upper()
+    texto = re.sub(r"[^A-Z0-9ÁÉÍÓÚÑ]+", " ", texto)
+    texto = " ".join(texto.split())
+
+    patrones = (
+        r"\bDEPOS(?:ITO|ITOS)?\b",
+        r"\bDEPOS\b",
+        r"\bENVASE(?:S)?\b",
+        r"\bRETORNABLE(?:S)?\b",
+        r"\bHUACAL(?:ES)?\b",
+        r"\bHUA\s*CAL\b",
+        r"\bHUALCAL\b",
+        r"\bCAJON(?:ES)?\b",
+    )
+    return any(re.search(p, texto, flags=re.I) for p in patrones)
+
+
+def _registrar_envase_retorno_lote(prod, proveedor="", factura="", fecha=""):
+    if not _es_envase_retorno_no_inventariable(prod):
+        return False
+
+    try:
+        cant = float(prod.get("cant") or 0)
+    except Exception:
+        cant = 0.0
+    try:
+        emp = max(1, int(float(prod.get("emp") or 1)))
+    except Exception:
+        emp = 1
+    try:
+        costo_total = float(prod.get("costo_total") or 0)
+    except Exception:
+        costo_total = 0.0
+
+    fila = {
+        "Descripción": str(prod.get("nombre") or ""),
+        "Código": _codigo_producto_mostrar(
+            prod.get("barcode")
+            or prod.get("codigo")
+            or prod.get("codigo_interno")
+            or ""
+        ),
+        "Proveedor": _normalizar_proveedor_factura(proveedor, ""),
+        "Factura": str(factura or ""),
+        "Fecha": fecha,
+        "Cantidad facturada": cant,
+        "Empaque": emp,
+        "Unidades físicas": cant * emp,
+        "Importe neto": costo_total,
+        "Estado": "Excluido del inventario vendible",
+    }
+
+    lista = st.session_state.setdefault("envases_retornables_lote", [])
+    llave = (
+        _nombre_producto_canonico(fila["Descripción"]),
+        fila["Código"],
+        fila["Factura"],
+        round(float(fila["Importe neto"]), 2),
+    )
+    existentes = {
+        (
+            _nombre_producto_canonico(str(x.get("Descripción") or "")),
+            str(x.get("Código") or ""),
+            str(x.get("Factura") or ""),
+            round(float(x.get("Importe neto") or 0), 2),
+        )
+        for x in lista
+        if isinstance(x, dict)
+    }
+    if llave not in existentes:
+        lista.append(fila)
+
+    return True
+
+
+def _render_envases_retornables_ui():
+    filas = st.session_state.get("envases_retornables_lote", []) or []
+    if not filas:
+        return
+
+    st.info(
+        f"♻️ {len(filas)} concepto(s) de depósito/envase retornable fueron "
+        "excluidos automáticamente del inventario vendible."
+    )
+    with st.expander(
+        f"♻️ Ver depósitos / envases excluidos ({len(filas)})",
+        expanded=False,
+    ):
+        st.dataframe(
+            pd.DataFrame(filas),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+
 def modal_confirmacion(validas, duplicadas_count, margen):
     st.markdown("### 🚀 Consolidar facturas para WilPOS")
     st.caption("Esta acción consolidará productos repetidos por código y preparará los datos para el Excel de WilPOS.")
@@ -11870,6 +11983,7 @@ def modal_confirmacion(validas, duplicadas_count, margen):
             st.session_state.origen_productos_facturas = {}
             st.session_state.productos_excluidos = set()
             st.session_state.articulos_repetidos_notif = []
+            st.session_state.envases_retornables_lote = []
 
             # Solo se recorren facturas válidas y únicas del lote actual.
             for archivo, firma, proveedor, num_fac, fecha_fac, productos_en_archivo in validas:
@@ -11911,8 +12025,18 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                     # que el Excel conserve sólo producto + presentación.
                     p = _limpiar_producto_para_exportacion(p)
 
-                    # BASE6-R28: recuperar código desde el inventario de referencia
-                    # sólo si la factura no aportó uno confiable.
+                    # BASE6-R29.1: depósitos/huacales/envases retornables
+                    # no se exportan como productos vendibles.
+                    if _registrar_envase_retorno_lote(
+                        p,
+                        proveedor=proveedor,
+                        factura=num_fac,
+                        fecha=fecha_fac,
+                    ):
+                        continue
+
+                    # Recuperar código desde inventario de referencia sólo
+                    # cuando la factura no aportó uno confiable.
                     p = _asignar_codigo_desde_inventario_referencia(p)
 
                     _emp_despues = int(float(p.get("emp") or 1))
@@ -12013,6 +12137,9 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         )
                         st.session_state.inventario_acumulado[codigo]["stock"] += cantidad_comprada_unidades
                         st.session_state.inventario_acumulado[codigo]["costo_total"] += float(costo_total_dop)
+                        st.session_state.inventario_acumulado[codigo]["unidades_fisicas"] = float(
+                            st.session_state.inventario_acumulado[codigo].get("stock", 0)
+                        )
                     else:
                         st.session_state.inventario_acumulado[codigo] = {
                             "nombre": p["nombre"],
@@ -12024,6 +12151,14 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         "tasa_usd_dop": float(tasa_usd_dop) if moneda_original == "USD" else None,
                             "emp": p["emp"],
                             "cantidad_facturada": float(p.get("cant") or 0),
+                            "unidades_fisicas": float(cantidad_comprada_unidades),
+                            "udm_factura": (
+                                p.get("purchase_unit")
+                                or p.get("unidad_original")
+                                or p.get("uom")
+                                or p.get("udm")
+                                or ""
+                            ),
                             "empaque_fuente": p.get("empaque_fuente", ""),
                             "cantidad_reconciliada_fuente": p.get("cantidad_reconciliada_fuente", ""),
                             "itbis": p["itbis"],
@@ -12671,7 +12806,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R29_MOTOR_ADAPTATIVO_FORMATOS_20260906"
+EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_CANTIDAD_EMPAQUE_ENVASES_20260906"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -13395,6 +13530,7 @@ def render_carga_facturas(titulo=True):
         _mostrar_archivos_no_procesados_ui()
         _mostrar_correcciones_empaque_ui()
         _mostrar_empaques_pendientes_revision_ui()
+        _render_envases_retornables_ui()
 
         _eventos_directos = st.session_state.get("fallback_574652_eventos", {})
         for _nombre_directo, _info_directo in _eventos_directos.items():
@@ -14405,6 +14541,54 @@ elif pagina == "📦 Productos consolidados":
                 type="primary",
                 key="download_excel_inventario",
             )
+
+        # BASE6-R29.1: auditoría física del inventario.
+        filas_auditoria = []
+        for codigo_audit, data_audit in st.session_state.inventario_acumulado.items():
+            if producto_esta_excluido(
+                codigo_audit,
+                data_audit.get("nombre", ""),
+            ):
+                continue
+
+            stock_audit = float(data_audit.get("stock", 0) or 0)
+            costo_total_audit = float(data_audit.get("costo_total", 0) or 0)
+            filas_auditoria.append({
+                "Código": _codigo_producto_mostrar(codigo_audit),
+                "Producto": data_audit.get("nombre", ""),
+                "Cantidad factura": data_audit.get("cantidad_facturada", ""),
+                "UDM": data_audit.get("udm_factura", ""),
+                "Empaque": data_audit.get("emp", 1),
+                "Unidades físicas": stock_audit,
+                "Costo unidad": (
+                    costo_total_audit / stock_audit
+                    if stock_audit > 0
+                    else 0
+                ),
+            })
+
+        if filas_auditoria:
+            with st.expander(
+                "📐 Ver cantidad facturada, empaque y unidades físicas",
+                expanded=False,
+            ):
+                st.caption(
+                    "Cantidad factura = unidades comerciales compradas. "
+                    "Unidades físicas = cantidad factura × empaque. "
+                    "El Stock exportado a WilPOS usa las unidades físicas."
+                )
+                st.dataframe(
+                    pd.DataFrame(filas_auditoria),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Costo unidad": st.column_config.NumberColumn(
+                            format="RD$ %.4f"
+                        ),
+                    },
+                )
+
+        _render_envases_retornables_ui()
 
         render_gestor_exclusion_productos(
             df_productos,
