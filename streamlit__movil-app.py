@@ -13,6 +13,7 @@ from PIL import Image, ImageOps
 from datetime import datetime
 from urllib.request import Request, urlopen
 from difflib import SequenceMatcher
+import math
 
 try:
     import fitz
@@ -3801,7 +3802,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_1":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3818,7 +3819,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_6"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_6_1"
 
 
 # =========================================================
@@ -9702,7 +9703,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_6"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_6_1"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -13145,7 +13146,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_6_RESOLVER_COSTO_ARITMETICO_20260907"
+EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_6_1_FIX_IMPORT_MATH_20260907"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
