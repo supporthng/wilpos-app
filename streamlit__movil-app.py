@@ -3798,7 +3798,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R28_4":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R28_5":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3807,7 +3807,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R28_4":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R28_4"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R28_5"
 
 
 # =========================================================
@@ -5561,12 +5561,21 @@ def _unidad_es_fisica_individual(unidad):
     u = " ".join(str(unidad or "").upper().replace(".", "").split()).strip()
     if not u:
         return False
-    if re.fullmatch(r"(?:BOT|BOTELLA|BOTELLAS|UND|UNIDAD|UNIDADES|PZA|PIEZA|PIEZAS|EA|PC|PCS)", u):
+    # BOT/UND/PZA son unidades físicas inequívocas.
+    # EA/PC/PCS son unidades comerciales ambiguas: pueden representar
+    # una pieza física o una caja/multipack según la descripción.
+    if re.fullmatch(r"(?:BOT|BOTELLA|BOTELLAS|UND|UNIDAD|UNIDADES|PZA|PIEZA|PIEZAS)", u):
         return True
     if re.fullmatch(r"\d+(?:[.,]\d+)?\s*(?:ML|CL|L|LT|OZ|CC)", u):
         return True
     return False
 
+
+
+def _unidad_es_comercial_ambigua(unidad):
+    """EA/PC/PCS: la descripción decide si es unidad física o empaque."""
+    u = " ".join(str(unidad or "").upper().replace(".", "").split()).strip()
+    return bool(re.fullmatch(r"(?:EA|PC|PCS)", u))
 
 
 def _limpiar_nombre_producto_final(nombre):
@@ -5867,18 +5876,38 @@ def _inferir_empaque_universal(prod, proveedor=""):
         ("deposito", "depos.", "depos ", "retornable vacio", "envase vacio")
     )
 
-    # 1) UdM explícita.
-    # La UDM manda sobre cualquier número de empaque de la descripción.
-    # Ej.: PC + "BULL LT 24/250ML" => PC es pieza física => emp=1.
+    # 1) UdM explícita inequívoca.
+    # BOT/UND/PZA = unidad física. CAJA/CJ/... explícita = empaque.
+    # EA/PC/PCS son ambiguas y se resuelven con la descripción/presentación.
+    unidad_ambigua = _unidad_es_comercial_ambigua(unidad)
     emp_udm, fuente_udm, conf_udm = _extraer_empaque_udm_universal(unidad)
     if conf_udm >= 100:
         return int(emp_udm), fuente_udm, conf_udm, False
 
-    # BASE6-R28.3:
-    # Si NO hay UDM explícita, la línea demuestra cantidad × precio = total
-    # y tampoco hay una notación fuerte de caja/multipack, considerar que la
-    # cantidad ya son unidades físicas. Esto evita que Vision convierta
-    # números débiles como "12 1" en un empaque de 12.
+    # 2) Presentación exacta.
+    # Para PC/EA/PCS esta evidencia prevalece.
+    emp_pres = _extraer_empaque_desde_tamano(presentacion)
+    if emp_pres > 1 and not es_deposito:
+        return int(emp_pres), "presentacion_impresa", 97 if unidad_ambigua else 95, False
+
+    # 3) Descripción original.
+    emp_desc = _extraer_empaque_desde_tamano(nombre)
+    if emp_desc > 1 and not es_deposito:
+        return int(emp_desc), "descripcion_impresa", 96 if unidad_ambigua else 90, False
+
+    # 4) Catálogo confirmado.
+    # PRESIDENTE REG/LIGHT lata = 24 aunque el ticket sólo diga LATA 8OZ.
+    emp_catalogo, fuente_catalogo = _empaque_confirmado_por_nombre(nombre)
+    if emp_catalogo > 1 and not es_deposito:
+        return int(emp_catalogo), fuente_catalogo, 94 if unidad_ambigua else 75, False
+
+    # 5) EA/PC/PCS sin evidencia fuerte se quedan en 1.
+    # Protege tickets tipo PriceSmart donde EA realmente significa each.
+    if unidad_ambigua:
+        return 1, "udm_comercial_sin_empaque_confirmado", 92, False
+
+    # 6) Sin UDM: si cantidad × precio coincide con la línea y no existe
+    # empaque fuerte, considerar unidades físicas.
     unidad_vacia = not str(unidad or "").strip()
     if (
         unidad_vacia
@@ -5887,17 +5916,7 @@ def _inferir_empaque_universal(prod, proveedor=""):
     ):
         return 1, "aritmetica_linea_sin_udm", 98, False
 
-    # 2) Presentación exacta.
-    emp_pres = _extraer_empaque_desde_tamano(presentacion)
-    if emp_pres > 1 and not es_deposito:
-        return int(emp_pres), "presentacion_impresa", 95, False
-
-    # 3) Descripción original.
-    emp_desc = _extraer_empaque_desde_tamano(nombre)
-    if emp_desc > 1 and not es_deposito:
-        return int(emp_desc), "descripcion_impresa", 90, False
-
-    # 4) Valor de Vision.
+    # 7) Vision sólo como respaldo.
     try:
         emp_api = int(float(
             prod.get("units_per_package")
@@ -5907,14 +5926,8 @@ def _inferir_empaque_universal(prod, proveedor=""):
     except Exception:
         emp_api = 1
 
-    # Vision >1 es aceptable salvo que sea depósito.
     if emp_api > 1 and not es_deposito:
         return int(emp_api), "vision_units_per_package", 80, False
-
-    # 5) Catálogo confirmado: último recurso.
-    emp_catalogo, fuente_catalogo = _empaque_confirmado_por_nombre(nombre)
-    if emp_catalogo > 1 and not es_deposito:
-        return int(emp_catalogo), fuente_catalogo, 75, False
 
     # 6) Caja sin unidades: no permitir silencio.
     if _parece_empaque_caja(unidad, nombre):
@@ -7578,6 +7591,23 @@ def _resolver_costo_neto_linea_vision(item, cantidad, unidades_empaque):
 
     # A) Total de línea explícito y válido.
     if line_cost is not None and line_cost > 0:
+        # BASE6-R28.5:
+        # En tickets térmicos Vision puede desplazar columnas y copiar el
+        # ITBIS dentro de line_cost_net. Si ambos coinciden y existe precio
+        # por unidad facturada, reconstruir costo = cantidad × precio.
+        if tax_value is not None:
+            tol_tax = max(0.05, abs(tax_value) * 0.003)
+            if abs(line_cost - tax_value) <= tol_tax and q > 0:
+                precio_rescate = net_pkg or price_unit_package or unit_cost or list_price
+                if precio_rescate is not None and precio_rescate > 0:
+                    adv.append(
+                        "line_cost_net coincidía con ITBIS; costo reconstruido desde precio por unidad facturada"
+                    )
+                    return (
+                        round(precio_rescate * q, 6),
+                        "rescate_precio_x_cantidad_linecost_era_itbis",
+                        adv,
+                    )
         # Validación fuerte para formatos con Imp. Neto + ITBIS = Total.
         if gross_line is not None and tax_value is not None:
             esperado_total = line_cost + tax_value
@@ -8967,7 +8997,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R28_4"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R28_5"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -12034,7 +12064,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R28_4_CODIGOS_EXPORTACION_20260906"
+EXTRACTOR_CACHE_VERSION = "BASE6_R28_5_EMPAQUES_PC_EA_20260906"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
