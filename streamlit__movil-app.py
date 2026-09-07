@@ -3798,7 +3798,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R28_3":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R28_4":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3807,7 +3807,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R28_3":
         "fallback_574652_eventos",
     ):
         st.session_state.pop(_k, None)
-    st.session_state["_extractor_runtime_version"] = "BASE6_R28_3"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R28_4"
 
 
 # =========================================================
@@ -8967,7 +8967,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R28_3"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R28_4"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -10154,7 +10154,7 @@ def _normalizar_nombre_match_catalogo(valor):
 
     # Palabras genéricas que suelen aparecer en un archivo y no en el otro.
     t = re.sub(
-        r"\b(?:BEBIDA|ENERGIZANTE|REFRESCO|FLAVORED|FLAVOUR|WATER|DRINK)\b",
+        r"\b(?:BEBIDA|ENERGIZANTE|ENERGY|ENERGIA|REFRESCO|FLAVORED|FLAVOUR|WATER|DRINK)\b",
         " ",
         t,
     )
@@ -10210,6 +10210,7 @@ def _tokens_identidad_catalogo(valor):
 
     out = []
     for token in t.split():
+        token = token.strip(".")
         if re.fullmatch(r"\d+(?:\.\d+)?(?:ML|CC|CL|LT|LTR|LTS|L|OZ)", token):
             continue
         if token in stop:
@@ -10246,7 +10247,9 @@ def _cobertura_tokens_catalogo(tokens_a, tokens_b):
 
     # Cobertura sobre el nombre más corto: útil para casos como
     # "MONSTER MANGO LOCO" vs "BEBIDA ENERGIZANTE MONSTER MANGO LOCO 473ML".
-    base = max(1, min(len(tokens_a), len(tokens_b)))
+    # BASE6-R28.4: el maestro debe cubrir los términos distintivos
+    # del nombre leído en la factura.
+    base = max(1, len(tokens_a))
     return matches / base, matches
 
 
@@ -10278,6 +10281,11 @@ def _similitud_producto_catalogo(nombre_factura, nombre_catalogo):
     ta = _tokens_identidad_catalogo(a)
     tb = _tokens_identidad_catalogo(b)
     cobertura, nmatch = _cobertura_tokens_catalogo(ta, tb)
+
+    # Variantes específicas deben estar cubiertas por el maestro.
+    # Ej.: MONSTER PIPELINE PUNCH no puede recibir MONSTER genérico.
+    if len(ta) >= 2 and cobertura < 0.75:
+        return 0.0
 
     # Texto sin presentación para no castigar "473ML" ausente en uno de los lados.
     aa = re.sub(r"\b\d+(?:\.\d+)?(?:ML|CC|CL|LT|LTR|LTS|L|OZ)\b", " ", a)
@@ -10663,6 +10671,43 @@ def _asignar_codigo_desde_inventario_referencia(prod):
     return nuevo
 
 
+
+def _resolver_codigo_tmp_para_exportacion(nombre, codigo_actual):
+    """
+    Última barrera de códigos antes de crear el Excel.
+
+    Sólo reemplaza vacío/TMP usando el inventario maestro activo.
+    Un código real/no-TMP jamás se modifica.
+    """
+    actual = _codigo_producto_mostrar(codigo_actual)
+
+    if actual and not actual.upper().startswith("TMP"):
+        return actual, None
+
+    catalogo = st.session_state.get("inventario_referencia_catalogo", []) or []
+    if not catalogo:
+        return actual, None
+
+    pseudo = {
+        "nombre": str(nombre or ""),
+        "nombre_original_lectura": str(nombre or ""),
+        "description": str(nombre or ""),
+        "codigo": actual,
+        "barcode": actual,
+        "code_status": "not_printed",
+    }
+
+    match = _buscar_codigo_en_inventario_referencia(pseudo, catalogo=catalogo)
+    if not match:
+        return actual, None
+
+    nuevo = _codigo_producto_mostrar(match.get("codigo"))
+    if not nuevo or nuevo.upper().startswith("TMP"):
+        return actual, None
+
+    return nuevo, match
+
+
 # =========================================================
 # HELPERS DE CONSOLIDACIÓN / EXCEL
 # =========================================================
@@ -10832,9 +10877,41 @@ def construir_df_productos():
             precio_antes_itbis * (1.0 + tasa_itbis)
         )
 
+        codigo_exportar, match_export = _resolver_codigo_tmp_para_exportacion(
+            data["nombre"],
+            data["codigo_mostrar"],
+        )
+
+        if match_export:
+            registro_match = {
+                "Producto factura": data["nombre"],
+                "Código anterior": data["codigo_mostrar"],
+                "Código asignado": codigo_exportar,
+                "Producto maestro": match_export.get("nombre_catalogo", ""),
+                "Confianza": match_export.get("score", 0),
+                "Etapa": "exportación",
+            }
+            lista_matches = st.session_state.setdefault("matches_catalogo_lote", [])
+            llave = (
+                registro_match["Producto factura"],
+                registro_match["Código asignado"],
+                registro_match["Etapa"],
+            )
+            existentes = {
+                (
+                    x.get("Producto factura"),
+                    x.get("Código asignado"),
+                    x.get("Etapa"),
+                )
+                for x in lista_matches
+                if isinstance(x, dict)
+            }
+            if llave not in existentes:
+                lista_matches.append(registro_match)
+
         filas.append({
             "Nombre": data["nombre"],
-            "Código Barra": data["codigo_mostrar"],
+            "Código Barra": codigo_exportar,
             "Categoría": data["categoria"],
             "Tipo": "producto",
             "Precio Venta": precio_venta,
@@ -11957,7 +12034,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R28_3_COSTO_UDM_ARITMETICA_20260906"
+EXTRACTOR_CACHE_VERSION = "BASE6_R28_4_CODIGOS_EXPORTACION_20260906"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
