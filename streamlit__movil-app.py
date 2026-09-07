@@ -3802,7 +3802,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_1":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_2":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3819,7 +3819,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_1":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_6_1"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_6_2"
 
 
 # =========================================================
@@ -6454,13 +6454,15 @@ def _inferir_empaque_universal(prod, proveedor=""):
 
 def _reconciliar_cantidad_desde_costo_y_precio(prod):
     """
-    Reconcilia cantidad sólo cuando:
-      costo_neto_total / precio_neto_por_empaque ≈ entero
+    La cantidad de factura es un DATO VISUAL PRIMARIO.
 
-    Es deliberadamente conservador:
-    - prioriza net_price_per_package y unit_cost_net;
-    - evita corregir cantidad usando list_price bruto o campos dudosos;
-    - no modifica una cantidad >1 salvo evidencia matemática muy fuerte.
+    Esta función ya NO modifica una cantidad positiva leída de la factura.
+    La aritmética costo/precio se usa solamente como:
+      - rescate cuando cantidad <= 0;
+      - diagnóstico de inconsistencia.
+
+    Motivo: precio/subtotal/ITBIS pueden estar en bases distintas y no deben
+    alterar una cantidad visible correcta.
     """
     if not isinstance(prod, dict):
         return prod
@@ -6478,66 +6480,79 @@ def _reconciliar_cantidad_desde_costo_y_precio(prod):
         except Exception:
             return None
 
+    cant_actual = fnum(prod.get("cant"))
+    if cant_actual is None:
+        cant_actual = fnum(prod.get("quantity_packages"))
+    cant_actual = float(cant_actual or 0)
+
     costo_total = fnum(prod.get("costo_total"))
-    if costo_total is None or costo_total <= 0:
-        return prod
-
-    cant_actual = fnum(prod.get("cant")) or 0.0
-
     precios = []
-    for campo, prioridad in (
-        ("net_price_per_package", 100),
-        ("unit_cost_net", 95),
-        ("price_unit_per_package", 80),
+    for campo in (
+        "net_price_per_package",
+        "unit_cost_net",
+        "price_unit_per_package",
     ):
         valor = fnum(prod.get(campo))
         if valor is not None and valor > 0:
-            precios.append((campo, valor, prioridad))
+            precios.append((campo, valor))
+
+    # Si ya hay cantidad positiva, JAMÁS cambiarla por aritmética.
+    # Sólo registrar una discrepancia para revisión.
+    if cant_actual > 0:
+        if costo_total and costo_total > 0:
+            for campo, precio in precios:
+                ratio = costo_total / precio if precio > 0 else 0
+                entero = int(round(ratio))
+                if entero >= 1:
+                    error = abs((entero * precio) - costo_total)
+                    tolerancia = max(0.10, abs(costo_total) * 0.005)
+                    if error <= tolerancia and abs(entero - cant_actual) > 1e-9:
+                        nuevo = dict(prod)
+                        nuevo["cantidad_aritmetica_sugerida"] = float(entero)
+                        nuevo["cantidad_aritmetica_fuente"] = campo
+                        nuevo["cantidad_requiere_revision"] = True
+                        avisos = list(nuevo.get("advertencias_lectura") or [])
+                        avisos.append(
+                            f"aritmética sugiere cantidad {entero}, pero se conserva "
+                            f"la cantidad visual {cant_actual:g}; revisar si fuera necesario"
+                        )
+                        nuevo["advertencias_lectura"] = list(dict.fromkeys(avisos))
+                        return nuevo
+        return prod
+
+    # Sólo rescatar si la cantidad no fue legible.
+    if costo_total is None or costo_total <= 0:
+        return prod
 
     mejor = None
-
-    for campo, precio, prioridad in precios:
+    for campo, precio in precios:
         ratio = costo_total / precio
         entero = int(round(ratio))
         if entero < 1 or entero > 1000:
             continue
-
         reconstruido = entero * precio
-        tolerancia = max(0.10, abs(costo_total) * 0.005)
+        tolerancia = max(0.10, abs(costo_total) * 0.003)
         error = abs(reconstruido - costo_total)
         if error > tolerancia:
             continue
-
-        # score menor = mejor
-        candidato = (-prioridad, error, entero, campo, precio)
+        candidato = (error, entero, campo, precio)
         if mejor is None or candidato < mejor:
             mejor = candidato
 
     if mejor is None:
         return prod
 
-    _, error, cant_derivada, campo, precio = mejor
-
-    if cant_actual > 0 and abs(cant_actual - cant_derivada) < 0.01:
-        return prod
-
-    # Si ya se leyó una cantidad >1, sólo cambiar con evidencia muy fuerte.
-    if cant_actual > 1:
-        diferencia_relativa = abs(cant_actual - cant_derivada) / max(cant_derivada, 1)
-        if diferencia_relativa < 0.35:
-            return prod
-        if error > max(0.05, costo_total * 0.002):
-            return prod
-
+    _, cant_derivada, campo, precio = mejor
     nuevo = dict(prod)
     nuevo["cant_original_antes_reconciliacion"] = cant_actual
     nuevo["cant"] = float(cant_derivada)
     nuevo["cantidad_reconciliada_fuente"] = campo
+    nuevo["cantidad_rescatada_por_aritmetica"] = True
 
     advertencias = list(nuevo.get("advertencias_lectura") or [])
     advertencias.append(
-        f"cantidad corregida por aritmética validada: {cant_actual:g} → {cant_derivada} "
-        f"porque {costo_total:.2f} / {precio:.2f} ≈ {cant_derivada}"
+        f"cantidad no legible; rescatada por aritmética: "
+        f"{costo_total:.2f} / {precio:.2f} ≈ {cant_derivada}"
     )
     nuevo["advertencias_lectura"] = list(dict.fromkeys(advertencias))
     return nuevo
@@ -8988,7 +9003,13 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
             "codigo_temporal": codigo_temporal,
             "code_status": code_status,
             "code_columns_present": code_columns_present,
-            "advertencias_lectura": list(dict.fromkeys(advertencias)),
+            "cantidad_verificada_por_auditoria": bool(item.get("cantidad_verificada_por_auditoria")),
+            "cantidad_verificada_confianza": item.get("cantidad_verificada_confianza", ""),
+            "cantidad_requiere_revision": bool(item.get("cantidad_requiere_revision")),
+            "cantidad_auditoria_alternativa": item.get("cantidad_auditoria_alternativa"),
+            "advertencias_lectura": list(dict.fromkeys(
+                advertencias + list(item.get("advertencias_lectura") or [])
+            )),
         }
         p["estado_lectura"] = _clasificar_calidad_producto_vision(p)
         productos.append(p)
@@ -9347,6 +9368,7 @@ def _fusionar_auditoria_con_lectura(data, auditoria, nombre_archivo=""):
 
         if match is not None:
             p = productos[match]
+            confianza_audit = str(f.get("confidence") or "").strip().lower()
             antes = bool(str(p.get("barcode") or "").strip() or str(p.get("internal_code") or "").strip())
             if bc_raw and not str(p.get("barcode") or "").strip():
                 p["barcode"] = bc_raw
@@ -9354,6 +9376,40 @@ def _fusionar_auditoria_con_lectura(data, auditoria, nombre_archivo=""):
                 p["internal_code"] = ci_raw
             if bc_raw or ci_raw:
                 p["code_status"] = "read"
+
+            # BASE6-R29.1.6.2:
+            # La auditoría es una SEGUNDA lectura independiente de la imagen.
+            # Antes se usaba para códigos/empaque, pero NO corregía quantity_packages.
+            # Eso permitía que una cantidad OCR incorrecta sobreviviera hasta el Excel.
+            try:
+                cant_audit = float(f.get("quantity_packages") or 0)
+            except Exception:
+                cant_audit = 0.0
+            try:
+                cant_actual = float(p.get("quantity_packages") or 0)
+            except Exception:
+                cant_actual = 0.0
+
+            if cant_audit > 0:
+                if confianza_audit == "high":
+                    if cant_actual <= 0 or abs(cant_actual - cant_audit) > 1e-9:
+                        p["quantity_packages_original_primera_lectura"] = cant_actual
+                        p["quantity_packages"] = cant_audit
+                        p["cantidad_verificada_por_auditoria"] = True
+                        p["cantidad_verificada_confianza"] = "high"
+                        avisos_q = list(p.get("warnings") or p.get("advertencias_lectura") or [])
+                        avisos_q.append(
+                            f"cantidad corregida por segunda lectura visual independiente: "
+                            f"{cant_actual:g} → {cant_audit:g}"
+                        )
+                        p["advertencias_lectura"] = list(dict.fromkeys(avisos_q))
+                    else:
+                        p["cantidad_verificada_por_auditoria"] = True
+                        p["cantidad_verificada_confianza"] = "high"
+                elif confianza_audit == "medium" and cant_actual > 0 and abs(cant_actual - cant_audit) > 1e-9:
+                    p["cantidad_requiere_revision"] = True
+                    p["cantidad_auditoria_alternativa"] = cant_audit
+                    p["cantidad_verificada_confianza"] = "medium"
 
             # También completar presentación/empaque si la primera lectura lo perdió.
             for campo in (
@@ -9505,6 +9561,11 @@ REGLAS:
 - Si el impreso empieza en 0, devuelve ese 0. Si no empieza en 0, no lo inventes.
 - barcode e internal_code deben ser cadenas JSON entre comillas, nunca números.
 - No confundas cantidades, tamaños, precios, ITBIS, fechas o números de factura con códigos.
+- quantity_packages debe copiar EXACTAMENTE la CANTIDAD visible en ESA fila.
+- NO calcules quantity_packages desde precio, subtotal, total, empaque ni unidades físicas.
+- Si la cantidad impresa es 10, devuelve 10; si es 4, devuelve 4; si es 2, devuelve 2.
+- Sigue la fila horizontalmente para no tomar la cantidad de la fila superior o inferior.
+- Si la cantidad no se puede leer con seguridad, usa confidence="low"; NO inventes.
 - Si un código es legible, cópialo EXACTAMENTE.
 - Si no se lee, usa null. No inventes.
 - Copia EXACTAMENTE purchase_unit/UdM y package_text; no reduzcas CJ12BOT/CJ24BOT a CAJA.
@@ -9703,7 +9764,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_6_1"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_6_2"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -12276,6 +12337,10 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         "factura": str(num_fac),
                         "fecha": fecha_fac,
                         "cantidad": float(p["cant"]),
+                        "cantidad_verificada": bool(p.get("cantidad_verificada_por_auditoria")),
+                        "cantidad_confianza": p.get("cantidad_verificada_confianza", ""),
+                        "cantidad_requiere_revision": bool(p.get("cantidad_requiere_revision")),
+                        "cantidad_alternativa": p.get("cantidad_auditoria_alternativa"),
                         "udm": (
                             p.get("purchase_unit")
                             or p.get("unidad_original")
@@ -13146,7 +13211,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_6_1_FIX_IMPORT_MATH_20260907"
+EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_6_2_CANTIDAD_VERIFICADA_20260907"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -13373,6 +13438,10 @@ def _construir_df_auditoria_costos():
                 "Proveedor": item.get("proveedor", ""),
                 "Factura": item.get("factura", ""),
                 "Cantidad factura": cantidad_factura,
+                "Cantidad verificada": "Sí" if item.get("cantidad_verificada") else "No",
+                "Confianza cantidad": item.get("cantidad_confianza", ""),
+                "Cantidad alternativa": item.get("cantidad_alternativa", ""),
+                "Revisar cantidad": "Sí" if item.get("cantidad_requiere_revision") else "No",
                 "UDM": item.get("udm", ""),
                 "Cantidad por empaque": cantidad_por_empaque,
                 "Cantidad física esperada": cantidad_fisica_esperada,
@@ -13398,11 +13467,20 @@ def _render_auditoria_costo_fisico_ui():
     pendientes = int(
         (df_auditoria["Validación cantidad"] == "REVISAR").sum()
     )
+    pendientes_lectura = int(
+        (df_auditoria["Revisar cantidad"] == "Sí").sum()
+    ) if "Revisar cantidad" in df_auditoria.columns else 0
 
     if pendientes:
         st.warning(
             f"⚠️ {pendientes} línea(s) tienen diferencia entre "
             "Cantidad factura × Cantidad por empaque y la Cantidad física usada."
+        )
+    if pendientes_lectura:
+        st.warning(
+            f"🔎 {pendientes_lectura} línea(s) tienen discrepancia entre la primera "
+            "lectura y la auditoría independiente de cantidad. No se corrigieron "
+            "automáticamente salvo cuando la segunda lectura tuvo confianza alta."
         )
 
     with st.expander(
