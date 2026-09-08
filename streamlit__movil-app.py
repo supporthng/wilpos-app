@@ -3808,7 +3808,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_5":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_6":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3825,7 +3825,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_5":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R31_5"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R31_6"
 
 
 # =========================================================
@@ -11140,7 +11140,7 @@ Devuelve SOLO JSON:
     return data
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_5"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_6"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -13789,7 +13789,26 @@ def _resolver_linea_compra_universal(prod, proveedor=""):
     ).strip()
 
     # C) Empaque: resolver una sola vez con todas las evidencias.
+    # Esta validación puede corregir también la cantidad facturada mediante
+    # reconciliación contable (por ejemplo 1 -> 20 / 15).
     p = _validar_empaque_final_producto(p, proveedor=proveedor)
+
+    # R31.6: RELEER la cantidad DESPUÉS de validar.
+    # Antes el motor conservaba la variable local antigua y terminaba
+    # calculando 1 × 24 = 24 aunque p["cant"] ya fuera 20 o 15.
+    try:
+        cantidad_validada = float(
+            p.get("cant")
+            or p.get("quantity_packages")
+            or p.get("cantidad_factura")
+            or 0
+        )
+    except Exception:
+        cantidad_validada = 0.0
+
+    if cantidad_validada > 0:
+        cantidad = cantidad_validada
+
     try:
         emp = max(1, int(float(p.get("emp") or 1)))
     except Exception:
@@ -15112,7 +15131,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R31_5_RECONCILIACION_LINEA_20260908"
+EXTRACTOR_CACHE_VERSION = "BASE6_R31_6_STOCK_CANTIDAD_VALIDADA_20260908"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
