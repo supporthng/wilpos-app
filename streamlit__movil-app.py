@@ -149,7 +149,6 @@ def _inferir_empaque_universal(descripcion: str, uom: str = "") -> int:
     """Infiere el factor de empaque/caja a partir de patrones en la descripción."""
     desc_upper = f"{descripcion} {uom}".upper()
     
-    # Patrones comunes: 12X750ML, CAJA 24 UNID, CJA 12, PACK 6
     patron_caja = re.search(r'(\d+)\s*X\s*\d+|CJA\s*(\d+)|CAJA\s*(\d+)|PACK\s*(\d+)|(\d+)\s*UNID', desc_upper)
     if patron_caja:
         for g in patron_caja.groups():
@@ -170,7 +169,6 @@ def _normalizar_costos_sin_itbis(linea: Dict[str, Any], pct_itbis_defecto: float
     subtotal = float(linea.get("subtotal", cant * precio_u))
     itbis = float(linea.get("itbis_monto", 0.0))
     
-    # Si no viene ITBIS explícito pero la factura lo incluye en el precio
     if itbis == 0.0 and linea.get("incluye_itbis", False):
         costo_neto_total = subtotal / (1 + (pct_itbis_defecto / 100))
         itbis = subtotal - costo_neto_total
@@ -180,7 +178,6 @@ def _normalizar_costos_sin_itbis(linea: Dict[str, Any], pct_itbis_defecto: float
     empaque = _inferir_empaque_universal(linea.get("descripcion", ""), linea.get("uom", ""))
     costo_unitario_neto = (costo_neto_total / cant) / empaque
     
-    # Precio sugerido aplicando margen mínimo de la tienda (30%)
     precio_sugerido = costo_unitario_neto * 1.30
 
     return LineaFactura(
@@ -268,7 +265,6 @@ def procesar_archivo_factura(file_upload, metodo: str) -> Tuple[Optional[Dict[st
         bytes_data = file_upload.getvalue()
         
         if metodo == "OpenAI Vision (IA)":
-            # Si es PDF, convertir primera página a imagen
             if file_upload.name.lower().endswith(".pdf"):
                 if fitz:
                     doc = fitz.open(stream=bytes_data, filetype="pdf")
@@ -286,7 +282,7 @@ def procesar_archivo_factura(file_upload, metodo: str) -> Tuple[Optional[Dict[st
             texto = _ocr_multilectura(img)
             return {"texto_raw": texto, "proveedor": "Extraído por OCR", "lineas": []}, "OCR Completado"
 
-        else: # Extracción de Texto PDF Estándar
+        else: 
             texto_pdf = ""
             if pdfplumber and file_upload.name.lower().endswith(".pdf"):
                 with pdfplumber.open(io.BytesIO(bytes_data)) as pdf:
@@ -304,7 +300,6 @@ def procesar_archivo_factura(file_upload, metodo: str) -> Tuple[Optional[Dict[st
 
 aplicar_tema_visual(st.session_state["modo_oscuro"])
 
-# Sidebar
 with st.sidebar:
     st.title("⚙️ WilPOS Móvil")
     st.caption("v2.4 - Sistema Inteligente de Facturación")
@@ -322,7 +317,6 @@ with st.sidebar:
         st.session_state["firmas_facturas_procesadas"] = []
         st.rerun()
 
-# Pestañas Principales
 tab_cargar, tab_inventario, tab_metricas, tab_config = st.tabs([
     "📥 Cargar Factura", 
     "📦 Inventario & Partidas", 
@@ -355,7 +349,6 @@ with tab_cargar:
             if resultado:
                 st.success(msj)
                 
-                # Procesar líneas extraídas
                 lineas_raw = resultado.get("lineas", [])
                 lineas_procesadas = []
                 
@@ -373,7 +366,7 @@ with tab_cargar:
                     st.dataframe(pd.DataFrame(lineas_procesadas), use_container_width=True)
                 else:
                     st.info("No se estructuraron líneas explícitas. Texto crudo extraído:")
-                    st.text_area("Resultado Raw", resultado.get("texto_raw", JSON.dumps(resultado, indent=2)))
+                    st.text_area("Resultado Raw", resultado.get("texto_raw", json.dumps(resultado, indent=2)))
             else:
                 st.error(msj)
                 
@@ -386,7 +379,6 @@ with tab_inventario:
     if st.session_state["inventario_acumulado"]:
         df_inv = pd.DataFrame(st.session_state["inventario_acumulado"])
         
-        # Filtro de búsqueda
         busqueda = st.text_input("🔍 Buscar por descripción o código de barras")
         if busqueda:
             df_inv = df_inv[
@@ -396,7 +388,6 @@ with tab_inventario:
             
         st.dataframe(df_inv, use_container_width=True)
         
-        # Descarga
         csv = df_inv.to_csv(index=False).encode('utf-8')
         st.download_button(
             "💾 Exportar Inventario a CSV",
