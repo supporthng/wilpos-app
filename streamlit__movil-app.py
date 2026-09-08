@@ -15,6 +15,9 @@ from urllib.request import Request, urlopen
 from difflib import SequenceMatcher
 import math
 
+# BARCODE_ZERO_LEFT_FIX_BASE_TEXT9_20260908
+# TEXT9_HYBRID_READING_MODES_V1
+
 try:
     import fitz
     PYMUPDF_DISPONIBLE = True
@@ -7896,12 +7899,39 @@ def _dinero_ocr_tolerante(valor):
 
 
 def _normalizar_barcode_ocr(codigo):
-    """Corrige errores frecuentes de OCR sin inventar códigos arbitrarios."""
-    c = re.sub(r"\D", "", str(codigo or ""))
+    """
+    Normaliza un BARCODE leído por OCR sin eliminar ceros iniciales.
 
-    # OCR pierde con frecuencia el 8 inicial de EAN-13 españoles.
+    Reglas:
+    - Si el código ya empieza con 0, ese 0 se conserva.
+    - Si OCR devuelve exactamente 11 dígitos, se prueba anteponer UN 0.
+      Sólo se acepta si el resultado de 12 dígitos pasa el check digit GTIN.
+    - No se agrega 0 a códigos de 8, 12, 13 o 14 dígitos.
+    - Se conserva la reparación histórica del 8 inicial para el caso
+      específico de EAN-13 leído como 12 dígitos empezando por 4.
+    - Esta función es sólo para BARCODE, nunca para SKU/código interno.
+    """
+    c = re.sub(r"\D", "", str(codigo or ""))
+    if not c:
+        return ""
+
+    # IMPORTANTE: un cero ya visible nunca se elimina.
+    if c.startswith("0") and 8 <= len(c) <= 14:
+        return c
+
+    # OCR puede perder un cero inicial de un UPC-A.
+    # Reparación segura: 11 -> 12 únicamente si el GTIN resultante es válido.
+    if len(c) == 11:
+        candidato = "0" + c
+        if _gtin_check_digit_valido(candidato):
+            return candidato
+
+    # Regla histórica ya existente en esta base:
+    # OCR puede perder el 8 inicial de ciertos EAN-13.
     if len(c) == 12 and c.startswith("4"):
-        c = "8" + c
+        candidato_13 = "8" + c
+        if len(candidato_13) == 13:
+            c = candidato_13
 
     return c if 8 <= len(c) <= 14 else ""
 
@@ -8471,6 +8501,30 @@ def _diag_vision(nombre_archivo, etapa, estado, detalle=""):
         st.session_state["vision_debug"][nombre_archivo] = item[-20:]
     except Exception:
         pass
+
+
+
+def _modo_lectura_facturas():
+    """
+    Modo de procesamiento:
+      economico -> OCR/parsers locales primero; OpenAI sólo si lo local falla.
+      local     -> nunca usar OpenAI.
+      ia        -> OpenAI Vision primero; si falla, continuar localmente.
+    """
+    modo = str(st.session_state.get("modo_lectura_facturas", "economico") or "economico").strip().lower()
+    if modo not in ("economico", "local", "ia"):
+        modo = "economico"
+    return modo
+
+
+def _openai_permitido():
+    """Devuelve False en modo gratis/local, bloqueando cualquier llamada de pago."""
+    return _modo_lectura_facturas() != "local"
+
+
+def _openai_vision_first():
+    """Sólo IA completa usa Vision antes del OCR/parsers locales."""
+    return _modo_lectura_facturas() == "ia"
 
 
 def _estado_vision_api():
@@ -11140,11 +11194,19 @@ Devuelve SOLO JSON:
     return data
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_6"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_TEXT9_HYBRID_V1"):
     """
     Lector visual real. No depende de Tesseract.
-    Se usa para fotos que no coinciden con los fallbacks históricos.
+
+    IMPORTANTE:
+    - modo local/gratis: esta función queda bloqueada y NO llama OpenAI.
+    - modo económico: se usa únicamente como fallback.
+    - modo IA completa: puede usarse como lectura principal.
     """
+    if not _openai_permitido():
+        _diag_vision(nombre_archivo, "modo lectura", "LOCAL", "OpenAI bloqueado por Modo solo local / gratis.")
+        return None
+
     if not raw_bytes:
         return None
 
@@ -11689,10 +11751,15 @@ def extraer_datos_factura(uploaded_file):
             return resultado_visual
 
 
-    # V21: para cualquier foto NO conocida, intentar visión primero.
-    # Así las facturas nuevas no dependen de que Tesseract reconstruya bien la tabla.
-    if file_name.endswith((".png", ".jpg", ".jpeg", ".webp")) and raw is not None:
-        _diag_vision(uploaded_file.name, "flujo extractor", "OK", "Imagen nueva llegó al bloque Vision-first.")
+    # MODO IA COMPLETA: Vision-first.
+    # En modo ECONÓMICO se omite este bloque y se intenta primero OCR/parsers locales.
+    # En modo LOCAL/GRATIS OpenAI está totalmente bloqueado.
+    if (
+        _openai_vision_first()
+        and file_name.endswith((".png", ".jpg", ".jpeg", ".webp"))
+        and raw is not None
+    ):
+        _diag_vision(uploaded_file.name, "flujo extractor", "OK", "Modo IA completa: Vision-first.")
         vision_ok, vision_msg = _estado_vision_api()
         _diag_vision(uploaded_file.name, "estado Vision", "OK" if vision_ok else "ERROR", vision_msg)
         if vision_ok:
@@ -11703,7 +11770,7 @@ def extraer_datos_factura(uploaded_file):
             if resultado_vision_directo is not None:
                 _diag_vision(uploaded_file.name, "flujo extractor", "OK", "Vision devolvió resultado; se acepta.")
                 return resultado_vision_directo
-            _diag_vision(uploaded_file.name, "flujo extractor", "FALLO", "Vision no devolvió resultado; continúa a OCR local.")
+            _diag_vision(uploaded_file.name, "flujo extractor", "FALLO", "Vision falló; continúa a OCR local.")
 
     if file_name.endswith(".pdf"):
         # 1. Intenta obtener texto digital, igual que la versión original.
@@ -12080,7 +12147,11 @@ def extraer_datos_factura(uploaded_file):
     if not productos:
         # Último fallback: visión multimodal.
         # Solo se usa si OCR, parser genérico y reglas históricas fallaron.
-        if file_name.endswith((".png", ".jpg", ".jpeg", ".webp")) and raw is not None:
+        if (
+            _openai_permitido()
+            and file_name.endswith((".png", ".jpg", ".jpeg", ".webp"))
+            and raw is not None
+        ):
             resultado_vision = _extraer_factura_con_vision_api(
                 raw,
                 uploaded_file.name,
@@ -15566,22 +15637,53 @@ def _limpiar_cache_lectura_lote():
 
 
 def render_carga_facturas(titulo=True):
-    # Estado visible del fallback de visión.
+    # Selector de costo/lectura. Económico es el predeterminado.
+    opciones_modo = {
+        "💰 Económico (recomendado)": "economico",
+        "🆓 Solo local / gratis": "local",
+        "🤖 IA completa": "ia",
+    }
+    actual = _modo_lectura_facturas()
+    etiqueta_actual = next((k for k, v in opciones_modo.items() if v == actual), "💰 Económico (recomendado)")
+
+    seleccion = st.selectbox(
+        "Modo de lectura de facturas",
+        list(opciones_modo.keys()),
+        index=list(opciones_modo.keys()).index(etiqueta_actual),
+        key="selector_modo_lectura_facturas",
+        help=(
+            "Económico: intenta OCR y reglas locales primero y usa OpenAI sólo si no logra reconocer la factura. "
+            "Solo local/gratis: nunca llama OpenAI. IA completa: usa Vision primero."
+        ),
+    )
+    nuevo_modo = opciones_modo[seleccion]
+    if st.session_state.get("modo_lectura_facturas") != nuevo_modo:
+        st.session_state["modo_lectura_facturas"] = nuevo_modo
+
+    if nuevo_modo == "local":
+        st.success("🆓 Modo solo local / gratis: OpenAI está bloqueado. No se realizarán llamadas a la API.")
+    elif nuevo_modo == "economico":
+        st.info("💰 Modo económico: OCR/parsers locales primero. OpenAI se usa sólo si la lectura local falla.")
+    else:
+        st.info("🤖 Modo IA completa: OpenAI Vision intenta leer primero cada imagen.")
+
+    # Estado visible de OpenAI sólo cuando el modo permite usarlo.
     vision_ok, vision_msg = _estado_vision_api()
-    if vision_ok:
-        st.caption("🟢 Lectura avanzada por visión: activa · Modo económico R30")
+    if nuevo_modo == "local":
+        st.caption("OpenAI: desactivado por elección del usuario.")
+    elif vision_ok:
+        st.caption("🟢 OpenAI Vision disponible.")
         llamadas_principales = int(st.session_state.get("ia_llamadas_principales", 0))
         llamadas_rescate = int(st.session_state.get("ia_llamadas_rescate", 0))
         st.caption(
             f"💰 IA esta sesión: {llamadas_principales} lectura(s) principal(es) + "
-            f"{llamadas_rescate} rescate(s). Máximo por imagen/página: 1 lectura + "
-            "1 único rescate sólo si faltan filas, cantidad, costo o empaque."
+            f"{llamadas_rescate} rescate(s)."
         )
     else:
         st.warning(
-            "⚠️ Lectura avanzada por visión NO está activa. "
+            "⚠️ OpenAI Vision NO está disponible. "
             + vision_msg
-            + " Las facturas desconocidas dependerán solamente del OCR local."
+            + " El sistema continuará con OCR/procesamiento local."
         )
 
     # BASE6-R14: diagnóstico compacto; el detalle técnico queda plegado.
