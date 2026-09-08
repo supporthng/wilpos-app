@@ -3803,7 +3803,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_6":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_7":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3820,7 +3820,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_6":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_6_6"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_6_7"
 
 
 # =========================================================
@@ -6415,8 +6415,17 @@ def _inferir_empaque_universal(prod, proveedor=""):
     if emp_api > 1 and not es_deposito:
         return int(emp_api), "vision_units_per_package", 88, False
 
+    # EA = Each: si no apareció antes evidencia fuerte de caja/empaque,
+    # representa una unidad física. Esto cubre tickets donde cada fila EA es
+    # una pieza real (p. ej. qty 2 = 2 unidades), sin forzar confirmación manual.
+    unidad_norm = _normalizar_ocr(unidad).upper().strip()
+    if unidad_norm == "EA":
+        return 1, "udm_each_unidad_fisica", 100, False
+
+    # PC/PCS pueden ser pieza comercial, caja/display o SKU empacado.
+    # Sin evidencia fuerte, mantener revisión obligatoria.
     if unidad_ambigua:
-        return 1, "udm_comercial_ambigua_sin_empaque", 0, True
+        return 1, "udm_pc_pcs_ambigua_sin_empaque", 0, True
 
     if not str(unidad or "").strip():
         return 1, "sin_udm_empaque_no_confirmado", 0, True
@@ -9739,7 +9748,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_6_6"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_6_7"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -12123,6 +12132,11 @@ def _preparar_revision_empaques_modal(validas):
             if not isinstance(prod, dict):
                 continue
 
+            # Depósitos, huacales y envases retornables no son inventario vendible.
+            # Se excluyen antes de pedir cualquier confirmación de empaque.
+            if _es_envase_retorno_no_inventariable(prod):
+                continue
+
             validado = _validar_empaque_final_producto(dict(prod), proveedor=proveedor)
             if not validado.get("requiere_revision_empaque"):
                 continue
@@ -13327,7 +13341,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_6_6_EMPAQUE_CONFIRMACION_OBLIGATORIA_20260907"
+EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_6_7_EA_FISICA_EXCLUIR_DEPOSITOS_20260907"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
