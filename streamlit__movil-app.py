@@ -3806,7 +3806,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R30":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R30_1":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3823,7 +3823,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R30":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R30"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R30_1"
 
 
 # =========================================================
@@ -10046,7 +10046,7 @@ def _registrar_llamada_ia(tipo="principal"):
         pass
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R30"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R30_1"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -12482,8 +12482,6 @@ def _preparar_revision_empaques_modal(validas):
     return filas, refs
 
 
-@st.dialog("Confirmar procesamiento")
-
 def _resolver_linea_compra_universal(prod, proveedor=""):
     """
     Convierte cualquier línea de factura a una estructura canónica.
@@ -12651,6 +12649,7 @@ def _aplicar_motor_universal_compra(proveedor, productos):
     return salida
 
 
+@st.dialog("Confirmar procesamiento")
 def modal_confirmacion(validas, duplicadas_count, margen):
     st.markdown("### 🚀 Consolidar facturas para WilPOS")
     st.caption("Esta acción consolidará productos repetidos por código y preparará los datos para el Excel de WilPOS.")
@@ -13751,7 +13750,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R30_MOTOR_UNIVERSAL_MODO_ECONOMICO_20260907"
+EXTRACTOR_CACHE_VERSION = "BASE6_R30_1_FIX_DIALOG_20260907"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
