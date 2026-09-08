@@ -3795,6 +3795,10 @@ DEFAULTS = {
     "formatos_adaptativos": {},
     "formatos_revision_lote": {},
     "envases_retornables_lote": [],
+    "ia_llamadas_principales": 0,
+    "ia_llamadas_rescate": 0,
+    "ia_cache_hits": 0,
+    "ia_cache_misses": 0,
 }
 
 for key, value in DEFAULTS.items():
@@ -3802,7 +3806,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_6":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R30":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3819,7 +3823,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_6":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_6_6"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R30"
 
 
 # =========================================================
@@ -9963,7 +9967,86 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_6_6"):
+
+def _vision_necesita_rescate_economico(data):
+    """
+    Decide si una segunda llamada IA es realmente necesaria.
+
+    Modo económico:
+    - 1 llamada principal por imagen/página.
+    - 0 llamadas extra si la lectura ya contiene datos suficientes.
+    - máximo 1 rescate si faltan filas o datos esenciales.
+    """
+    if not isinstance(data, dict):
+        return True, "respuesta no estructurada"
+
+    productos = [p for p in (data.get("products") or []) if isinstance(p, dict)]
+    omitidos = [p for p in (data.get("omitted_rows") or []) if isinstance(p, dict)]
+
+    try:
+        visibles = int(data.get("visible_product_rows") or 0)
+    except Exception:
+        visibles = 0
+
+    if not productos:
+        return True, "sin productos"
+
+    if omitidos:
+        return True, f"{len(omitidos)} fila(s) omitida(s)"
+
+    if visibles and len(productos) < visibles:
+        return True, f"{len(productos)}/{visibles} filas recuperadas"
+
+    problemas = 0
+    for p in productos:
+        desc = " ".join(str(p.get("description") or "").split()).strip()
+        try:
+            q = float(p.get("quantity_packages") or 0)
+        except Exception:
+            q = 0.0
+
+        # Debe existir alguna evidencia monetaria.
+        monetarios = (
+            p.get("line_cost_net"),
+            p.get("subtotal_net"),
+            p.get("net_price_per_package"),
+            p.get("unit_cost_net"),
+            p.get("price_unit_per_package"),
+            p.get("gross_line_total"),
+        )
+        tiene_monto = False
+        for v in monetarios:
+            try:
+                if float(v or 0) > 0:
+                    tiene_monto = True
+                    break
+            except Exception:
+                pass
+
+        if not desc or q <= 0 or not tiene_monto:
+            problemas += 1
+
+    if problemas:
+        return True, f"{problemas} fila(s) sin cantidad/descripción/costo suficiente"
+
+    return False, "lectura suficiente"
+
+
+def _registrar_llamada_ia(tipo="principal"):
+    try:
+        if tipo == "rescate":
+            st.session_state["ia_llamadas_rescate"] = int(
+                st.session_state.get("ia_llamadas_rescate", 0)
+            ) + 1
+        else:
+            st.session_state["ia_llamadas_principales"] = int(
+                st.session_state.get("ia_llamadas_principales", 0)
+            ) + 1
+    except Exception:
+        pass
+
+
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R30"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -10194,6 +10277,11 @@ REGLAS:
 - EJEMPLO tipo Álvarez:
   Cantidad=1 CAJA, Precio=43,500, descuento=10%, ITBIS=7,047, Importe=46,197.
   Entonces net_price_per_package=39,150 y line_cost_net=39,150.
+- IMPORTANTE R30: tu trabajo principal es TRANSCRIBIR EVIDENCIA visible.
+  No inventes el significado comercial de una cifra si no está demostrado por la fila.
+- Copia quantity_packages, purchase_unit, package_text, units_per_package, precios,
+  descuentos, ITBIS y totales tal como aparecen.
+- Python hará después toda la matemática de stock/costo.
 - El costo físico que exportará WilPOS se obtiene como:
   line_cost_net / (quantity_packages * units_per_package).
 - Si la factura muestra PRECIO, DESCUENTO, VALOR ITBIS e IMPORTE, calcula o usa
@@ -10214,6 +10302,7 @@ REGLAS:
             _diag_vision(nombre_archivo, "envío API", "INTENTO", f"Modelo: {modelo}")
             client = OpenAI(api_key=api_key, timeout=_timeout_vision_segundos(), max_retries=1)
             _diag_vision(nombre_archivo, "cliente OpenAI", "OK", f"Cliente creado; modelo={modelo}")
+            _registrar_llamada_ia("principal")
             response = client.responses.create(
                 model=modelo,
                 store=False,
@@ -10253,36 +10342,33 @@ REGLAS:
 
             data = json.loads(raw_json)
 
-            # BASE6-R7: auditoría independiente antes de aceptar la lectura.
-            data = _auditar_todas_las_filas_y_codigos(
-                client,
-                modelo,
-                data_url,
-                data,
-                nombre_archivo,
-            )
-            data = _rescatar_filas_factura_vision(
-                client,
-                modelo,
-                data_url,
-                data,
-                nombre_archivo,
-                instrucciones,
-            )
-            data = _recuperar_codigos_faltantes_vision(
-                client,
-                modelo,
-                data_url,
-                data,
-                nombre_archivo,
-            )
-            data = _rescatar_empaques_faltantes_vision(
-                client,
-                modelo,
-                data_url,
-                data,
-                nombre_archivo,
-            )
+            # BASE6-R30 — MODO ECONÓMICO:
+            # La lectura principal debe ser suficiente en la mayoría de facturas.
+            # Sólo se permite UNA segunda llamada si faltan filas o datos esenciales.
+            necesita_rescate, motivo_rescate = _vision_necesita_rescate_economico(data)
+            if necesita_rescate:
+                _diag_vision(
+                    nombre_archivo,
+                    "modo económico",
+                    "INTENTO",
+                    f"Se autoriza 1 rescate: {motivo_rescate}",
+                )
+                _registrar_llamada_ia("rescate")
+                data = _rescatar_filas_factura_vision(
+                    client,
+                    modelo,
+                    data_url,
+                    data,
+                    nombre_archivo,
+                    instrucciones,
+                )
+            else:
+                _diag_vision(
+                    nombre_archivo,
+                    "modo económico",
+                    "OK",
+                    "Lectura principal suficiente; 0 llamadas IA adicionales.",
+                )
 
             resultado = _normalizar_resultado_vision_factura(data, nombre_archivo)
             if resultado is None:
@@ -12397,6 +12483,174 @@ def _preparar_revision_empaques_modal(validas):
 
 
 @st.dialog("Confirmar procesamiento")
+
+def _resolver_linea_compra_universal(prod, proveedor=""):
+    """
+    Convierte cualquier línea de factura a una estructura canónica.
+
+    La IA transcribe evidencia. Python decide la matemática.
+
+    Salida canónica:
+      cantidad_compra
+      udm_compra
+      unidades_empaque
+      unidades_fisicas
+      costo_neto_linea
+      costo_por_empaque
+      costo_fisico
+      evidencia_empaque
+      evidencia_costo
+      confianza
+      valido
+      motivos
+    """
+    if not isinstance(prod, dict):
+        return {
+            "valido": False,
+            "motivos": ["línea inválida"],
+        }
+
+    p = dict(prod)
+    motivos = []
+
+    # A) Cantidad visual: no se inventa.
+    try:
+        cantidad = float(p.get("cant") or p.get("quantity_packages") or 0)
+    except Exception:
+        cantidad = 0.0
+
+    if cantidad <= 0:
+        motivos.append("cantidad de factura inválida")
+
+    # B) UDM exacta.
+    udm = str(
+        p.get("purchase_unit")
+        or p.get("unidad_original")
+        or p.get("uom")
+        or p.get("udm")
+        or ""
+    ).strip()
+
+    # C) Empaque: resolver una sola vez con todas las evidencias.
+    p = _validar_empaque_final_producto(p, proveedor=proveedor)
+    try:
+        emp = max(1, int(float(p.get("emp") or 1)))
+    except Exception:
+        emp = 1
+
+    if p.get("requiere_revision_empaque"):
+        motivos.append("empaque no demostrado")
+
+    # D) Costo neto total de línea.
+    try:
+        costo_linea = float(p.get("costo_total") or 0)
+    except Exception:
+        costo_linea = 0.0
+
+    if costo_linea <= 0:
+        motivos.append("costo neto de línea inválido")
+
+    # E) Invariantes matemáticos.
+    unidades_fisicas = cantidad * emp if cantidad > 0 else 0.0
+    costo_por_empaque = (
+        costo_linea / cantidad
+        if cantidad > 0 and costo_linea > 0 else 0.0
+    )
+    costo_fisico = (
+        costo_linea / unidades_fisicas
+        if unidades_fisicas > 0 and costo_linea > 0 else 0.0
+    )
+
+    if unidades_fisicas <= 0:
+        motivos.append("unidades físicas inválidas")
+    if costo_fisico <= 0:
+        motivos.append("costo físico inválido")
+
+    # F) Validar cantidad × precio neto, cuando existe.
+    def _fnum(v):
+        try:
+            if v in (None, ""):
+                return None
+            return float(v)
+        except Exception:
+            return None
+
+    precios = [
+        _fnum(p.get("net_price_per_package")),
+        _fnum(p.get("unit_cost_net")),
+        _fnum(p.get("price_unit_per_package")),
+    ]
+    precios = [x for x in precios if x is not None and x > 0]
+
+    if cantidad > 0 and costo_linea > 0 and precios:
+        errores = []
+        for precio in precios:
+            esperado = cantidad * precio
+            err = abs(esperado - costo_linea)
+            tol = max(0.15, abs(costo_linea) * 0.015)
+            errores.append((err, tol, esperado))
+        mejor_error, mejor_tol, mejor_esperado = min(errores, key=lambda x: x[0])
+        if mejor_error > mejor_tol:
+            motivos.append(
+                f"costo no cuadra con cantidad×precio ({mejor_esperado:.2f} esperado)"
+            )
+
+    # G) Validar neto + ITBIS = total cuando existe.
+    tax = _fnum(p.get("tax_value"))
+    gross = _fnum(p.get("gross_line_total"))
+    if costo_linea > 0 and tax is not None and gross is not None and gross > 0:
+        tol = max(0.20, abs(gross) * 0.015)
+        if abs((costo_linea + tax) - gross) > tol:
+            motivos.append("neto + ITBIS no cuadra con total de línea")
+
+    conf_emp = int(p.get("empaque_confianza") or 0)
+    confianza = 100
+    if motivos:
+        confianza = max(0, 100 - 20 * len(motivos))
+    confianza = min(confianza, max(conf_emp, 30) if emp > 1 else 100)
+
+    valido = (
+        cantidad > 0
+        and emp >= 1
+        and unidades_fisicas > 0
+        and costo_linea > 0
+        and costo_fisico > 0
+        and not p.get("requiere_revision_empaque")
+    )
+
+    canon = {
+        "cantidad_compra": float(cantidad),
+        "udm_compra": udm,
+        "unidades_empaque": int(emp),
+        "unidades_fisicas": float(unidades_fisicas),
+        "costo_neto_linea": float(costo_linea),
+        "costo_por_empaque": float(costo_por_empaque),
+        "costo_fisico": float(costo_fisico),
+        "evidencia_empaque": p.get("empaque_fuente", ""),
+        "evidencia_costo": p.get("fuente_costo", ""),
+        "confianza": int(confianza),
+        "valido": bool(valido),
+        "motivos": list(dict.fromkeys(motivos)),
+    }
+
+    p["linea_compra_canonica"] = canon
+    p["cant"] = canon["cantidad_compra"]
+    p["emp"] = canon["unidades_empaque"]
+    p["unidades_fisicas_calculadas"] = canon["unidades_fisicas"]
+    p["stock_fisico_calculado"] = canon["unidades_fisicas"]
+    p["costo_unitario_fisico"] = canon["costo_fisico"]
+    return p
+
+
+def _aplicar_motor_universal_compra(proveedor, productos):
+    salida = []
+    for prod in productos or []:
+        if not isinstance(prod, dict):
+            continue
+        salida.append(_resolver_linea_compra_universal(prod, proveedor=proveedor))
+    return salida
+
+
 def modal_confirmacion(validas, duplicadas_count, margen):
     st.markdown("### 🚀 Consolidar facturas para WilPOS")
     st.caption("Esta acción consolidará productos repetidos por código y preparará los datos para el Excel de WilPOS.")
@@ -12573,23 +12827,27 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         codigo = _preservar_barcode_original(p.get("barcode"))
                     else:
                         codigo = _codigo_producto_mostrar(p["codigo"])
-                    # BASE6-R29.1.3: barrera física final justo antes de acumular.
-                    # 1) reconciliar cantidad;
-                    # 2) inferir/validar empaque;
-                    # 3) calcular unidades físicas;
-                    # 4) calcular costo neto por unidad física.
-                    p = _validar_empaque_final_producto(p, proveedor=proveedor)
-                    cantidad_comprada_unidades, costo_unitario_preview = _calcular_costo_unitario_seguro(p)
+                    # BASE6-R30: usar exclusivamente la línea canónica.
+                    p = _resolver_linea_compra_universal(p, proveedor=proveedor)
+                    canon = p.get("linea_compra_canonica") or {}
 
-                    # El stock siempre son unidades físicas calculadas.
-                    # Si no puede calcularse, la línea queda en 0 y debe revisarse;
-                    # nunca sustituir silenciosamente por cantidad facturada.
-                    if cantidad_comprada_unidades <= 0:
-                        p["cantidad_requiere_revision"] = True
-                        cantidad_comprada_unidades = 0.0
+                    if not canon.get("valido"):
+                        st.session_state.setdefault("empaques_pendientes_revision", []).append({
+                            "Producto": p.get("nombre", ""),
+                            "Código": p.get("codigo", ""),
+                            "Proveedor": proveedor,
+                            "Unidad leída": canon.get("udm_compra", ""),
+                            "Presentación": p.get("package_text") or "",
+                            "Empaque actual": canon.get("unidades_empaque", 1),
+                            "Motivo": "; ".join(canon.get("motivos") or ["línea no validada"]),
+                        })
+                        continue
+
+                    cantidad_comprada_unidades = float(canon["unidades_fisicas"])
+                    costo_unitario_preview = float(canon["costo_fisico"])
 
                     moneda_original = str(p.get("moneda", "DOP")).upper()
-                    costo_original = float(p["costo_total"])
+                    costo_original = float(canon["costo_neto_linea"])
                     costo_total_dop = convertir_costo_a_dop(
                         costo_original,
                         moneda_original,
@@ -12638,8 +12896,8 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         "unidades": float(cantidad_comprada_unidades),
                         "costo_total": float(costo_total_dop),
                         "costo_por_empaque": (
-                            float(costo_total_dop) / float(p.get("cant") or 0)
-                            if float(p.get("cant") or 0) > 0 else 0.0
+                            float(costo_total_dop) / float(canon.get("cantidad_compra") or 0)
+                            if float(canon.get("cantidad_compra") or 0) > 0 else 0.0
                         ),
                         "costo_unitario": float(costo_unitario_dop),
                         "fuente_costo": p.get("fuente_costo", ""),
@@ -13493,10 +13751,10 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_6_6_UNITIZACION_ESTRICTA_20260907"
+EXTRACTOR_CACHE_VERSION = "BASE6_R30_MOTOR_UNIVERSAL_MODO_ECONOMICO_20260907"
 
 
-@st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
+@st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
 def _extraer_factura_cacheada(nombre_archivo, raw_bytes, cache_version):
     """
     Evita repetir extracción/OCR en reruns.
@@ -13903,7 +14161,14 @@ def render_carga_facturas(titulo=True):
     # Estado visible del fallback de visión.
     vision_ok, vision_msg = _estado_vision_api()
     if vision_ok:
-        st.caption("🟢 Lectura avanzada por visión: activa")
+        st.caption("🟢 Lectura avanzada por visión: activa · Modo económico R30")
+        llamadas_principales = int(st.session_state.get("ia_llamadas_principales", 0))
+        llamadas_rescate = int(st.session_state.get("ia_llamadas_rescate", 0))
+        st.caption(
+            f"💰 IA esta sesión: {llamadas_principales} lectura(s) principal(es) + "
+            f"{llamadas_rescate} rescate(s). Máximo normal: 1 llamada por imagen; "
+            "segunda llamada sólo si faltan datos esenciales."
+        )
     else:
         st.warning(
             "⚠️ Lectura avanzada por visión NO está activa. "
@@ -14240,9 +14505,10 @@ def render_carga_facturas(titulo=True):
             # Los solapamientos entre fotos/páginas se deduplican más abajo sin sumar.
             productos, repetidos_internos = _sumar_lineas_repetidas_misma_pagina(productos)
 
-            # BASE6-R29: cualquier formato, incluso uno nunca visto, pasa por
-            # las mismas barreras universales de cantidad/empaque/costo.
-            productos = _aplicar_motor_adaptativo_productos(
+            # BASE6-R30:
+            # Toda línea pasa primero por el Motor Universal de Compra.
+            # La IA sólo aporta evidencia; Python resuelve stock/costo.
+            productos = _aplicar_motor_universal_compra(
                 proveedor,
                 productos,
             )
