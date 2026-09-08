@@ -3808,7 +3808,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_6_1":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_6_2":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3825,7 +3825,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_6_1":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R31_6_1"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R31_6_2"
 
 
 # =========================================================
@@ -8793,6 +8793,27 @@ def _reconciliar_linea_contable_vision(item, cantidad_leida):
             rate = discount_rate / 100.0 if discount_rate > 1 else discount_rate
             prices.append(("lista_menos_descuento_pct", list_price * (1-rate), 120))
 
+    # R31.6.2: rescatar importes monetarios visibles en raw_row_text.
+    raw_row = str(item.get("raw_row_text") or "")
+    raw_montos = []
+    for _match in re.finditer(
+        r"(?<!\d)(\d{1,3}(?:,\d{3})*\.\d{2}|\d+\.\d{2})(?!\d)",
+        raw_row,
+    ):
+        try:
+            _valor = float(_match.group(1).replace(",", ""))
+        except Exception:
+            continue
+        if _valor <= 0:
+            continue
+        if not any(abs(_valor - _exist) <= max(0.01, _valor * 1e-8) for _exist in raw_montos):
+            raw_montos.append(_valor)
+
+    _precios_num = [p[1] for p in prices if p[1] and p[1] > 0]
+    for _i, _valor in enumerate(raw_montos, start=1):
+        if any(_valor >= _precio * 1.75 for _precio in _precios_num):
+            totals.append((f"raw_row_monto_{_i}", _valor, 108))
+
     if not totals or not prices:
         return q_ocr, {"estado": "sin_evidencia_suficiente"}
 
@@ -8828,7 +8849,42 @@ def _reconciliar_linea_contable_vision(item, cantidad_leida):
         return q_ocr, {"estado": "sin_candidato_entero"}
 
     orden = sorted(cand.items(), key=lambda kv: (kv[1]["score"], len(kv[1]["pruebas"])), reverse=True)
-    q_best, meta = orden[0]
+
+    _alternativas_raw = []
+    if q_ocr <= 1:
+        for _q, _meta in cand.items():
+            if _q < 2:
+                continue
+            _pruebas_fuertes = []
+            for p in _meta.get("pruebas", []):
+                _err = p.get("error_rel")
+                try:
+                    _err = float(_err)
+                except Exception:
+                    _err = 1.0
+                if (
+                    str(p.get("total_fuente") or "").startswith("raw_row_monto_")
+                    and p.get("precio_fuente") in (
+                        "net_price_per_package","price_unit_per_package","precio_unit",
+                        "unit_price_package","unit_cost_net","list_price_per_package",
+                        "price_list","list_price",
+                    )
+                    and _err <= 0.0045
+                ):
+                    _pruebas_fuertes.append(p)
+
+            if _pruebas_fuertes:
+                _min_err = min(float(p.get("error_rel", 1.0)) for p in _pruebas_fuertes)
+                _alternativas_raw.append((_q, _meta, _min_err))
+
+    if _alternativas_raw:
+        _alternativas_raw.sort(
+            key=lambda x: (x[2], -len(x[1].get("pruebas", [])), -x[1].get("score", 0))
+        )
+        q_best, meta = _alternativas_raw[0][0], _alternativas_raw[0][1]
+    else:
+        q_best, meta = orden[0]
+
     second_score = orden[1][1]["score"] if len(orden) > 1 else 0.0
     meta = dict(meta)
     meta["estado"] = "candidato"
@@ -8862,11 +8918,9 @@ def _reconciliar_linea_contable_vision(item, cantidad_leida):
     )
     strong_total = any(
         p["total_fuente"] in (
-            "line_cost_net",
-            "subtotal_net",
-            "net_subtotal_line",
-            "total_menos_itbis",
+            "line_cost_net","subtotal_net","net_subtotal_line","total_menos_itbis"
         )
+        or str(p["total_fuente"]).startswith("raw_row_monto_")
         for p in meta["pruebas"]
     )
 
@@ -11177,7 +11231,7 @@ Devuelve SOLO JSON:
     return data
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_6_1"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_6_2"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -14738,6 +14792,29 @@ def _mostrar_estado_cuadre_factura_ui(resumen):
         st.caption("Sin subtotal impreso para validar." + extra)
 
 
+
+def _firma_visual_imagen_bytes(datos):
+    if not datos:
+        return None
+    try:
+        from PIL import Image, ImageOps
+        im = Image.open(io.BytesIO(datos))
+        if str(getattr(im, "format", "")).upper() not in ("JPEG","JPG","PNG","WEBP"):
+            return None
+        im = ImageOps.autocontrast(im.convert("L")).resize((64, 64))
+        return tuple(im.getdata())
+    except Exception:
+        return None
+
+def _firmas_visuales_casi_identicas(firma_a, firma_b, umbral_medio=1.50):
+    if not firma_a or not firma_b or len(firma_a) != len(firma_b):
+        return False
+    try:
+        dif = sum(abs(int(a)-int(b)) for a,b in zip(firma_a,firma_b)) / len(firma_a)
+        return dif <= float(umbral_medio)
+    except Exception:
+        return False
+
 def _resumen_duplicados_archivos_ui(archivos):
     """Devuelve (total, unicos, duplicados, detalle) usando SHA256 del contenido."""
     import hashlib
@@ -15168,7 +15245,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R31_6_1_SOLO_DASANI_20260908"
+EXTRACTOR_CACHE_VERSION = "BASE6_R31_6_2_NOTA_CREDITO_CANTIDADES_20260908"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
@@ -15893,6 +15970,7 @@ def render_carga_facturas(titulo=True):
         # Sólo se omite un archivo cuando sus BYTES son exactamente iguales.
         archivos_unicos = []
         huellas_binarias = {}
+        firmas_visuales = []
         for f in uploaded_files:
             try:
                 raw_f = f.getvalue()
@@ -15904,18 +15982,35 @@ def render_carga_facturas(titulo=True):
             huella = hashlib.sha256(raw_f).hexdigest()
             if huella in huellas_binarias:
                 original = huellas_binarias[huella]
-                archivos_duplicados.append(
-                    (f.name, "Contenido idéntico", getattr(original, "name", ""))
-                )
+                archivos_duplicados.append((f.name, "Contenido idéntico", getattr(original, "name", "")))
                 _guardar_resultado_archivo_lote(
-                    f.name,
-                    "duplicado_contenido",
+                    f.name, "duplicado_contenido",
                     motivo=f"Archivo binariamente idéntico a {getattr(original, 'name', 'otro archivo')}.",
                     accion="Se omite sólo esta copia exacta; fotos distintas sí se procesan.",
                 )
-            else:
-                huellas_binarias[huella] = f
-                archivos_unicos.append(f)
+                continue
+
+            firma_visual = _firma_visual_imagen_bytes(raw_f)
+            duplicado_visual = None
+            if firma_visual:
+                for firma_prev, archivo_prev in firmas_visuales:
+                    if _firmas_visuales_casi_identicas(firma_visual, firma_prev):
+                        duplicado_visual = archivo_prev
+                        break
+
+            if duplicado_visual is not None:
+                archivos_duplicados.append((f.name, "Misma foto recomprimida", getattr(duplicado_visual, "name", "")))
+                _guardar_resultado_archivo_lote(
+                    f.name, "duplicado_contenido",
+                    motivo=f"Misma foto visual que {getattr(duplicado_visual, 'name', 'otro archivo')}, aunque los bytes sean distintos.",
+                    accion="Se omite esta copia visual; páginas/fotos distintas sí se procesan.",
+                )
+                continue
+
+            huellas_binarias[huella] = f
+            archivos_unicos.append(f)
+            if firma_visual:
+                firmas_visuales.append((firma_visual, f))
 
         # Mismo número/NCF puede venir en muchas fotos/páginas.
         # TODAS las fotos distintas se leen. La deduplicación ocurre a nivel
