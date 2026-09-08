@@ -3803,7 +3803,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_5":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_6":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3820,7 +3820,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_5":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_6_5"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_6_6"
 
 
 # =========================================================
@@ -6356,22 +6356,12 @@ def _linea_demuestra_precio_por_unidad_facturada(prod):
 
 def _inferir_empaque_universal(prod, proveedor=""):
     """
-    Devuelve (empaque, fuente, confianza, necesita_revision).
-
-    Prioridad segura:
-    1) Override manual confirmado.
-    2) UdM explícita.
-    3) Presentación impresa.
-    4) Descripción con notación fuerte.
-    5) Catálogo comercial confirmado.
-    6) units_per_package leído/inferido por Vision (>1).
-    7) EA/PC/PCS sin evidencia fuerte => 1.
-    8) Sin UDM y sin evidencia suficiente => REVISAR, nunca asumir 1.
+    Protege Stock/Costo por unidad física.
+    EA/PC/PCS o UDM vacía sin empaque confirmado => revisión obligatoria.
     """
     if not isinstance(prod, dict):
         return 1, "default", 0, True
 
-    # 1) Corrección manual explícita del usuario.
     try:
         emp_manual = int(float(prod.get("emp_override_manual") or 0))
     except Exception:
@@ -6400,60 +6390,41 @@ def _inferir_empaque_universal(prod, proveedor=""):
         ("deposito", "depos.", "depos ", "retornable vacio", "envase vacio")
     )
 
-    # 2) UdM explícita inequívoca.
     unidad_ambigua = _unidad_es_comercial_ambigua(unidad)
     emp_udm, fuente_udm, conf_udm = _extraer_empaque_udm_universal(unidad)
     if conf_udm >= 100:
         return int(emp_udm), fuente_udm, conf_udm, False
 
-    # 3) Presentación exacta.
     emp_pres = _extraer_empaque_desde_tamano(presentacion)
     if emp_pres > 1 and not es_deposito:
-        return int(emp_pres), "presentacion_impresa", 97 if unidad_ambigua else 95, False
+        return int(emp_pres), "presentacion_impresa", 97, False
 
-    # 4) Descripción original.
     emp_desc = _extraer_empaque_desde_tamano(nombre)
     if emp_desc > 1 and not es_deposito:
-        return int(emp_desc), "descripcion_impresa", 96 if unidad_ambigua else 90, False
+        return int(emp_desc), "descripcion_impresa", 94, False
 
-    # 5) Catálogo confirmado.
     emp_catalogo, fuente_catalogo = _empaque_confirmado_por_nombre(nombre)
     if emp_catalogo > 1 and not es_deposito:
-        return int(emp_catalogo), fuente_catalogo, 94 if unidad_ambigua else 82, False
+        return int(emp_catalogo), fuente_catalogo, 92, False
 
-    # 6) IMPORTANTE R29.1.6.3:
-    # Antes este respaldo estaba DESPUÉS de "sin UDM => 1", por lo que un
-    # units_per_package=12/24 leído por Vision podía perderse.
     try:
-        emp_api = int(float(
-            prod.get("units_per_package")
-            or prod.get("emp")
-            or 1
-        ))
+        emp_api = int(float(prod.get("units_per_package") or prod.get("emp") or 1))
     except Exception:
         emp_api = 1
 
     if emp_api > 1 and not es_deposito:
         return int(emp_api), "vision_units_per_package", 88, False
 
-    # 7) EA/PC/PCS son unidades comerciales explícitas. Sin evidencia fuerte,
-    # conservar 1 para tickets tipo PriceSmart.
     if unidad_ambigua:
-        return 1, "udm_comercial_sin_empaque_confirmado", 92, False
+        return 1, "udm_comercial_ambigua_sin_empaque", 0, True
 
-    # 8) Si la factura realmente declara BOT/UND/PZA, la función de UdM
-    # ya debió resolverlo arriba. Si no hay UdM, NO podemos afirmar que
-    # "cantidad × precio = total" significa unidad física; también puede ser caja.
-    unidad_vacia = not str(unidad or "").strip()
-    if unidad_vacia:
+    if not str(unidad or "").strip():
         return 1, "sin_udm_empaque_no_confirmado", 0, True
 
-    # Caja sin contenido legible => revisión.
     if _parece_empaque_caja(unidad, nombre):
         return 1, "caja_sin_cantidad", 0, True
 
-    # UDM desconocida/no concluyente: revisión conservadora.
-    return 1, "udm_no_concluyente", 25, True
+    return 1, "udm_no_concluyente", 0, True
 
 
 def _reconciliar_cantidad_desde_costo_y_precio(prod):
@@ -9768,7 +9739,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_6_5"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_6_6"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -12142,8 +12113,7 @@ def _render_envases_retornables_ui():
 
 def _preparar_revision_empaques_modal(validas):
     """
-    Devuelve filas que requieren confirmar Cantidad por empaque.
-    Cada fila mantiene una referencia estable a factura/producto.
+    0 = pendiente. El usuario debe confirmar 1 o N unidades por empaque.
     """
     filas = []
     refs = {}
@@ -12164,10 +12134,15 @@ def _preparar_revision_empaques_modal(validas):
                 cant = float(validado.get("cant") or 0)
             except Exception:
                 cant = 0.0
+
             try:
-                emp = max(1, int(float(validado.get("emp") or 1)))
+                sugerido = max(1, int(float(
+                    validado.get("units_per_package")
+                    or validado.get("emp")
+                    or 1
+                )))
             except Exception:
-                emp = 1
+                sugerido = 1
 
             filas.append({
                 "_id": rid,
@@ -12181,14 +12156,16 @@ def _preparar_revision_empaques_modal(validas):
                     or validado.get("udm")
                     or ""
                 ),
-                "Presentación": (
+                "Presentación / texto": (
                     validado.get("package_text")
                     or validado.get("presentation")
                     or validado.get("size_text")
+                    or validado.get("nombre_original_lectura")
                     or ""
                 ),
-                "Cantidad por empaque": emp,
-                "Motivo": validado.get("empaque_validacion_final") or validado.get("empaque_fuente") or "",
+                "Sugerido": sugerido,
+                "Cantidad por empaque": 0,
+                "Motivo": validado.get("empaque_fuente") or "Empaque no confirmado",
             })
 
     return filas, refs
@@ -12261,12 +12238,13 @@ def modal_confirmacion(validas, duplicadas_count, margen):
 
     if filas_revision_emp:
         st.warning(
-            "📦 Hay productos cuya factura no permite confirmar automáticamente cuántas "
-            "unidades físicas contiene cada cantidad comprada. Revísalos antes de consolidar."
+            "📦 EMPAQUE SIN CONFIRMAR. Para evitar Stock en cajas/paquetes y costo de caja, "
+            "debes confirmar la cantidad por empaque."
         )
         st.caption(
-            "Ejemplo: si la factura dice 4 cajas y cada caja trae 12 unidades, escribe 12. "
-            "Si realmente son 4 unidades sueltas, deja 1."
+            "Escribe 1 SOLO si la cantidad de factura ya son unidades sueltas. "
+            "Si representa caja/paquete, escribe 6, 12, 24, etc. "
+            "No podrás consolidar mientras quede algún 0."
         )
 
         df_rev_emp = pd.DataFrame(filas_revision_emp)
@@ -12276,41 +12254,64 @@ def modal_confirmacion(validas, duplicadas_count, margen):
             use_container_width=True,
             disabled=[
                 "_id", "Factura", "Producto", "Cantidad factura",
-                "UDM", "Presentación", "Motivo",
+                "UDM", "Presentación / texto", "Sugerido", "Motivo",
             ],
             column_config={
                 "_id": None,
-                "Cantidad por empaque": st.column_config.NumberColumn(
-                    "Cantidad por empaque",
+                "Sugerido": st.column_config.NumberColumn(
+                    "Sugerido",
                     min_value=1,
                     step=1,
+                ),
+                "Cantidad por empaque": st.column_config.NumberColumn(
+                    "Cantidad por empaque (CONFIRMAR)",
+                    min_value=0,
+                    step=1,
                     required=True,
+                    help="0 = pendiente. 1 = unidad suelta. N = unidades por caja/paquete.",
                 ),
             },
-            key="revision_empaque_antes_consolidar_r29163",
+            key="revision_empaque_antes_consolidar_r29166",
         )
 
-        # Aplicar override directamente a los diccionarios de `validas`.
         for _, fila_editada in df_editado_emp.iterrows():
             rid = str(fila_editada.get("_id") or "")
             prod_ref = refs_revision_emp.get(rid)
             if prod_ref is None:
                 continue
+
             try:
                 emp_manual = int(float(fila_editada.get("Cantidad por empaque") or 0))
             except Exception:
                 emp_manual = 0
+
             if emp_manual >= 1:
                 prod_ref["emp_override_manual"] = emp_manual
                 prod_ref["emp"] = emp_manual
+                prod_ref["empaque_confirmado_usuario"] = True
+            else:
+                prod_ref.pop("emp_override_manual", None)
+                prod_ref["empaque_confirmado_usuario"] = False
+                revisiones_pendientes += 1
 
-        # Todos tienen un valor >=1 por el editor. La confirmación de este modal
-        # convierte ese valor en decisión explícita del usuario.
-        revisiones_pendientes = 0
+        if revisiones_pendientes:
+            st.error(
+                f"⛔ Faltan {revisiones_pendientes} producto(s) por confirmar."
+            )
+        else:
+            st.success(
+                "✅ Todos los empaques ambiguos fueron confirmados. "
+                "Stock y costo se calcularán por unidad física."
+            )
 
     b1, b2 = st.columns(2)
     with b1:
-        if st.button("✅ Confirmar y consolidar", type="primary", use_container_width=True):
+        if st.button(
+            "✅ Confirmar y consolidar",
+            type="primary",
+            use_container_width=True,
+            disabled=(revisiones_pendientes > 0),
+        ):
             st.session_state.margen_usado = margen
 
             # =====================================================
@@ -12464,6 +12465,7 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         "empaque": int(p["emp"]),
                         "empaque_fuente": p.get("empaque_fuente", ""),
                         "empaque_confirmado_manual": bool(p.get("emp_override_manual")),
+                        "empaque_confirmado_usuario": bool(p.get("empaque_confirmado_usuario")),
                         "empaque_confianza": p.get("empaque_confianza", 0),
                         "requiere_revision_empaque": bool(p.get("requiere_revision_empaque")),
                         "unidades_esperadas": float(p.get("cant") or 0) * int(p["emp"]),
@@ -13325,7 +13327,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_6_5_PRODUCTOS_POR_IMAGEN_20260907"
+EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_6_6_EMPAQUE_CONFIRMACION_OBLIGATORIA_20260907"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -13644,6 +13646,7 @@ def _construir_df_auditoria_costos():
                 "Costo por unidad": round(costo_por_unidad, 4),
                 "Fuente costo": item.get("fuente_costo", ""),
                 "Fuente empaque": item.get("empaque_fuente", ""),
+                "Confirmado usuario": "Sí" if item.get("empaque_confirmado_usuario") else "No",
                 "Confianza empaque": item.get("empaque_confianza", ""),
                 "Validación cantidad": "OK" if valida else "REVISAR",
                 "Revisar empaque": "Sí" if item.get("requiere_revision_empaque") else "No",
