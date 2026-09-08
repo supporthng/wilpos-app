@@ -3799,6 +3799,7 @@ DEFAULTS = {
     "ia_llamadas_rescate": 0,
     "ia_cache_hits": 0,
     "ia_cache_misses": 0,
+    "productos_revision_lote": [],
 }
 
 for key, value in DEFAULTS.items():
@@ -3806,7 +3807,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R30_3":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R30_4":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3823,7 +3824,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R30_3":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R30_3"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R30_4"
 
 
 # =========================================================
@@ -10465,7 +10466,7 @@ Devuelve SOLO JSON:
     return data
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R30_3"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R30_4"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -12435,6 +12436,13 @@ def construir_df_productos():
                 actual.get("codigo_mostrar", ""),
                 codigo_original,
             )
+            if data.get("requiere_revision"):
+                actual["requiere_revision"] = True
+                motivos_prev = str(actual.get("motivos_revision") or "").strip()
+                motivos_new = str(data.get("motivos_revision") or "").strip()
+                actual["motivos_revision"] = "; ".join(
+                    x for x in (motivos_prev, motivos_new) if x
+                )
 
         else:
             consolidados[clave] = {
@@ -12456,6 +12464,8 @@ def construir_df_productos():
                 "unidades_fisicas": float(data.get("unidades_fisicas", data.get("stock", 0))),
                 "udm_factura": data.get("udm_factura", ""),
                 "itbis": data.get("itbis", 0.18),
+                "requiere_revision": bool(data.get("requiere_revision")),
+                "motivos_revision": data.get("motivos_revision", ""),
             }
             if nombre_key:
                 clave_nombre_a_codigo[nombre_key] = clave
@@ -12613,6 +12623,16 @@ def generar_excel_wilpos(df_prod):
             df_prod["Código Barra"] = df_prod["Código Barra"].map(_codigo_producto_mostrar).astype(str)
 
         df_prod.to_excel(writer, index=False, sheet_name="Productos")
+
+        # R30.4: productos nunca desaparecen por una regla de revisión.
+        # Los casos dudosos quedan también en una hoja separada.
+        filas_revision = st.session_state.get("productos_revision_lote", []) or []
+        if filas_revision:
+            pd.DataFrame(filas_revision).drop_duplicates().to_excel(
+                writer,
+                index=False,
+                sheet_name="Revisión",
+            )
 
         # Auditoría por línea/factura. La hoja Productos conserva
         # exactamente el esquema de importación WilPOS.
@@ -13237,6 +13257,7 @@ def modal_confirmacion(validas, duplicadas_count, margen):
             st.session_state.productos_excluidos = set()
             st.session_state.articulos_repetidos_notif = []
             st.session_state.envases_retornables_lote = []
+            st.session_state.productos_revision_lote = []
 
             # Solo se recorren facturas válidas y únicas del lote actual.
             for archivo, firma, proveedor, num_fac, fecha_fac, productos_en_archivo in validas:
@@ -13303,20 +13324,25 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         })
 
                     if p.get("requiere_revision_empaque"):
-                        st.session_state.setdefault("empaques_pendientes_revision", []).append({
+                        registro_rev_emp = {
                             "Producto": p.get("nombre", ""),
                             "Código": p.get("codigo", ""),
                             "Proveedor": proveedor,
                             "Unidad leída": p.get("purchase_unit") or p.get("unidad_original") or "",
                             "Presentación": p.get("package_text") or "",
                             "Empaque actual": p.get("emp", 1),
-                        })
-
-                        # R29.1.6.6: evitar un dato falso.
-                        # Si no sabemos si EA/PC/UDM vacía es 1, 12, 24, etc.,
-                        # NO convertir cantidad facturada directamente en stock físico.
-                        # La fila queda visible en auditoría para nueva lectura/revisión.
-                        continue
+                            "Motivo": "Empaque no demostrado con alta confianza",
+                            "Estado": "REVISAR",
+                        }
+                        st.session_state.setdefault("empaques_pendientes_revision", []).append(
+                            registro_rev_emp
+                        )
+                        st.session_state.setdefault("productos_revision_lote", []).append(
+                            registro_rev_emp
+                        )
+                        # R30.4: NO se omite el producto.
+                        # Se conserva con la mejor interpretación disponible y
+                        # se marca claramente para revisión.
 
                     # Barcode primero: conservar exactamente el código leído.
                     # Sólo el campo BARCODE puede recibir la reparación segura de
@@ -13330,7 +13356,7 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                     canon = p.get("linea_compra_canonica") or {}
 
                     if not canon.get("valido"):
-                        st.session_state.setdefault("empaques_pendientes_revision", []).append({
+                        registro_rev_canon = {
                             "Producto": p.get("nombre", ""),
                             "Código": p.get("codigo", ""),
                             "Proveedor": proveedor,
@@ -13338,14 +13364,29 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                             "Presentación": p.get("package_text") or "",
                             "Empaque actual": canon.get("unidades_empaque", 1),
                             "Motivo": "; ".join(canon.get("motivos") or ["línea no validada"]),
-                        })
-                        continue
+                            "Estado": "REVISAR",
+                        }
+                        st.session_state.setdefault("productos_revision_lote", []).append(
+                            registro_rev_canon
+                        )
 
-                    cantidad_comprada_unidades = float(canon["unidades_fisicas"])
-                    costo_unitario_preview = float(canon["costo_fisico"])
+                    # R30.4: preservar el artículo aunque tenga revisión.
+                    # Si existe una interpretación matemática utilizable, se usa;
+                    # si no, se preserva la fila con stock/costo 0 para que no desaparezca.
+                    try:
+                        cantidad_comprada_unidades = float(canon.get("unidades_fisicas") or 0)
+                    except Exception:
+                        cantidad_comprada_unidades = 0.0
+                    try:
+                        costo_unitario_preview = float(canon.get("costo_fisico") or 0)
+                    except Exception:
+                        costo_unitario_preview = 0.0
 
                     moneda_original = str(p.get("moneda", "DOP")).upper()
-                    costo_original = float(canon["costo_neto_linea"])
+                    try:
+                        costo_original = float(canon.get("costo_neto_linea") or 0)
+                    except Exception:
+                        costo_original = 0.0
                     costo_total_dop = convertir_costo_a_dop(
                         costo_original,
                         moneda_original,
@@ -13399,6 +13440,11 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         ),
                         "costo_unitario": float(costo_unitario_dop),
                         "fuente_costo": p.get("fuente_costo", ""),
+                        "requiere_revision": bool(
+                            p.get("requiere_revision_empaque")
+                            or not canon.get("valido")
+                        ),
+                        "motivos_revision": "; ".join(canon.get("motivos") or []),
                         "moneda_original": moneda_original,
                         "costo_original": costo_original,
                         "tasa_usd_dop": float(tasa_usd_dop) if moneda_original == "USD" else None,
@@ -13445,6 +13491,15 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         st.session_state.inventario_acumulado[codigo]["unidades_fisicas"] = float(
                             st.session_state.inventario_acumulado[codigo].get("stock", 0)
                         )
+                        if p.get("requiere_revision_empaque") or not canon.get("valido"):
+                            st.session_state.inventario_acumulado[codigo]["requiere_revision"] = True
+                            motivos_prev = str(
+                                st.session_state.inventario_acumulado[codigo].get("motivos_revision") or ""
+                            ).strip()
+                            motivos_nuevos = "; ".join(canon.get("motivos") or [])
+                            st.session_state.inventario_acumulado[codigo]["motivos_revision"] = "; ".join(
+                                x for x in (motivos_prev, motivos_nuevos) if x
+                            )
 
                         # BASE6-R29.1.5:
                         # NO aplicar el empaque de esta factura a las demás.
@@ -13510,6 +13565,11 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                             "empaque_fuente": p.get("empaque_fuente", ""),
                             "cantidad_reconciliada_fuente": p.get("cantidad_reconciliada_fuente", ""),
                             "itbis": p["itbis"],
+                            "requiere_revision": bool(
+                                p.get("requiere_revision_empaque")
+                                or not canon.get("valido")
+                            ),
+                            "motivos_revision": "; ".join(canon.get("motivos") or []),
                         }
             st.session_state.confirmacion_procesamiento_activa = False
             st.rerun()
@@ -14249,7 +14309,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R30_3_COSTO_CONTABLE_CONSENSO_20260907"
+EXTRACTOR_CACHE_VERSION = "BASE6_R30_4_NO_OMITIR_PRODUCTOS_20260907"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
@@ -14495,6 +14555,22 @@ def _construir_df_auditoria_costos():
             })
 
     return pd.DataFrame(filas)
+
+
+def _render_productos_revision_ui():
+    filas = st.session_state.get("productos_revision_lote", []) or []
+    if not filas:
+        return
+    st.warning(
+        f"⚠️ {len(filas)} producto(s) fueron conservados pero requieren revisión. "
+        "No se omitieron del lote."
+    )
+    with st.expander("Ver productos conservados en revisión", expanded=False):
+        st.dataframe(
+            pd.DataFrame(filas).drop_duplicates(),
+            use_container_width=True,
+            hide_index=True,
+        )
 
 
 def _render_auditoria_costo_fisico_ui():
@@ -15117,6 +15193,7 @@ def render_carga_facturas(titulo=True):
         _mostrar_correcciones_empaque_ui()
         _mostrar_empaques_pendientes_revision_ui()
         _render_auditoria_costo_fisico_ui()
+        _render_productos_revision_ui()
         _render_envases_retornables_ui()
 
         _sumas_misma_pagina = [
