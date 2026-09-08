@@ -3808,7 +3808,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_6_2":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_6_3":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3825,7 +3825,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_6_2":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R31_6_2"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R31_6_3"
 
 
 # =========================================================
@@ -10789,6 +10789,7 @@ def _vision_necesita_rescate_economico(data):
 
     problemas_fila = []
     problemas_empaque = []
+    problemas_cantidad = []
 
     if not productos:
         return True, "sin productos", "filas"
@@ -10892,6 +10893,72 @@ def _vision_necesita_rescate_economico(data):
                     "purchase_unit": unidad,
                     "package_text": package_text,
                 })
+
+        # R31.6.3 — cantidad sospechosa:
+        # una fila puede tener descripción, q=1 y un costo positivo y aun así
+        # estar MAL leída. Antes se consideraba "completa" y nunca se hacía
+        # la segunda lectura visual.
+        #
+        # Disparar UNA sola revisión adicional cuando:
+        # A) q<=1 y total/precio ya demuestran q>=2; o
+        # B) q<=1, el artículo es multipack y el importe de línea es grande,
+        #    lo que amerita releer específicamente la columna Cant.
+        try:
+            _linea = float(p.get("line_cost_net") or p.get("subtotal_net") or 0)
+        except Exception:
+            _linea = 0.0
+
+        _precios_q = []
+        for _campo_q in (
+            "net_price_per_package",
+            "price_unit_per_package",
+            "unit_cost_net",
+            "list_price_per_package",
+        ):
+            try:
+                _v = float(p.get(_campo_q) or 0)
+            except Exception:
+                _v = 0.0
+            if _v > 0:
+                _precios_q.append(_v)
+
+        _aritmetica_sospechosa = False
+        if q <= 1 and _linea > 0:
+            for _precio_q in _precios_q:
+                _ratio = _linea / _precio_q
+                _q_calc = int(round(_ratio))
+                if _q_calc >= 2 and abs((_q_calc * _precio_q) - _linea) <= max(0.15, _linea * 0.0045):
+                    _aritmetica_sospechosa = True
+                    break
+
+        _multipack_visible = emp > 1 or _extraer_empaque_desde_tamano(
+            " ".join(x for x in (package_text, desc) if x)
+        ) > 1
+
+        _pc_ea = bool(re.fullmatch(r"(?:PC|PCS|EA)", unidad or "", flags=re.I))
+
+        if q <= 1 and (
+            _aritmetica_sospechosa
+            or (_multipack_visible and _linea >= 1900 and (_pc_ea or not unidad))
+        ):
+            problemas_cantidad.append({
+                "row_index": idx,
+                "description": desc,
+                "quantity_read": q,
+                "purchase_unit": unidad,
+                "line_cost_read": _linea,
+            })
+
+    if problemas_cantidad:
+        ejemplos = ", ".join(
+            f'fila {x["row_index"]} {x["description"][:35]}'
+            for x in problemas_cantidad[:4]
+        )
+        return (
+            True,
+            f"{len(problemas_cantidad)} fila(s) con cantidad posiblemente mal leída: {ejemplos}",
+            "cantidad",
+        )
 
     if problemas_fila and problemas_empaque:
         return (
@@ -11003,7 +11070,83 @@ def _rescate_unico_calidad_vision(
                 "package_text": package_text,
             })
 
-    if tipo_rescate == "empaque" and ambiguas:
+    # R31.6.3: cuando la fila parece completa pero q=1 es sospechoso,
+    # dedicar la ÚNICA segunda llamada a releer Cantidad/P.Unit/Imp.Neto.
+    if tipo_rescate == "cantidad":
+        filas_sospechosas = []
+        for idx, p in enumerate(productos, start=1):
+            try:
+                q = float(p.get("quantity_packages") or 0)
+                linea = float(p.get("line_cost_net") or p.get("subtotal_net") or 0)
+            except Exception:
+                q, linea = 0.0, 0.0
+            desc = " ".join(str(p.get("description") or "").split()).strip()
+            unidad = " ".join(str(p.get("purchase_unit") or "").split()).strip()
+            try:
+                emp = int(float(p.get("units_per_package") or 1))
+            except Exception:
+                emp = 1
+            if q <= 1 and desc and (emp > 1 or linea >= 1900):
+                filas_sospechosas.append(
+                    f"{idx}. {desc} | q_leída={q:g} | UdM={unidad or '(vacía)'} | "
+                    f"importe_leído={linea:g}"
+                )
+
+        sospechosas_txt = "\n".join(filas_sospechosas[:100])
+        prompt = f"""
+SEGUNDA Y ÚLTIMA REVISIÓN DE ESTA IMAGEN.
+La primera lectura probablemente confundió la columna CANTIDAD.
+
+FILAS A REVISAR CON MÁXIMA ATENCIÓN:
+{sospechosas_txt}
+
+INSTRUCCIONES:
+- Haz zoom mental/visual en la zona izquierda de cada fila.
+- Lee el número de la columna "Cant." / "Cantidad" EXACTAMENTE como está impreso.
+- NO uses units_per_package como cantidad.
+- NO conviertas "24/250ML", "24/12OZ", "8OZ", etc. en cantidad.
+- Distingue:
+    código | UDM | descripción | Cant. | P.Unit | Imp.Neto | ITBIS | Desc.
+- En tickets donde los valores continúan en la siguiente línea, asocia los
+  números con el producto inmediatamente anterior.
+- Verifica matemáticamente:
+    Cantidad × P.Unit ≈ Imp.Neto
+  cuando el descuento de línea es 0.
+- Si hay descuento, devuelve también discount_value y conserva P.Unit.
+- confidence="high" SOLO si la cantidad puede leerse visualmente o si
+  Cantidad × P.Unit = Imp.Neto con evidencia inequívoca de la misma fila.
+- No inventes datos.
+
+Devuelve TODAS las filas del documento para mantener los row_index estables.
+
+SOLO JSON:
+{{
+  "visible_product_rows": 0,
+  "rows": [
+    {{
+      "row_index": 1,
+      "barcode": null,
+      "internal_code": null,
+      "description": "",
+      "quantity_packages": 1,
+      "purchase_unit": "",
+      "package_text": "",
+      "units_per_package": null,
+      "net_price_per_package": null,
+      "price_unit_per_package": null,
+      "line_cost_net": null,
+      "subtotal_net": null,
+      "tax_value": null,
+      "gross_line_total": null,
+      "itbis_rate": 0.18,
+      "confidence": "high|medium|low"
+    }}
+  ]
+}}
+"""
+        modo = "completo"
+
+    elif tipo_rescate == "empaque" and ambiguas:
         filas_txt = "\n".join(
             f'{x["row_index"]}. {x["description"]} | '
             f'UdM={x["purchase_unit"] or "(vacía)"} | '
@@ -11195,6 +11338,7 @@ Devuelve SOLO JSON:
 
         # Sólo una segunda lectura HIGH puede corregir campos críticos.
         if conf == "high":
+            _q_antes_rescate = p.get("quantity_packages")
             for campo in (
                 "description",
                 "quantity_packages",
@@ -11212,6 +11356,18 @@ Devuelve SOLO JSON:
                 valor = r.get(campo)
                 if valor not in (None, ""):
                     p[campo] = valor
+
+            if tipo_rescate == "cantidad":
+                try:
+                    _q_despues_rescate = float(p.get("quantity_packages") or 0)
+                    _q_antes_num = float(_q_antes_rescate or 0)
+                except Exception:
+                    _q_despues_rescate, _q_antes_num = 0.0, 0.0
+                if _q_despues_rescate > 0 and abs(_q_despues_rescate - _q_antes_num) > 1e-9:
+                    p["cantidad_verificada_por_auditoria"] = True
+                    p["cantidad_verificada_confianza"] = "high"
+                    p["quantity_packages_original_primera_lectura"] = _q_antes_num
+                    p["cantidad_rescate_fuente"] = "segunda_lectura_cantidad_r31_6_3"
 
         # Códigos: completar si faltan, no reemplazar uno ya leído.
         if not p.get("barcode") and r.get("barcode"):
@@ -11231,7 +11387,7 @@ Devuelve SOLO JSON:
     return data
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_6_2"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_6_3"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -15245,7 +15401,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R31_6_2_NOTA_CREDITO_CANTIDADES_20260908"
+EXTRACTOR_CACHE_VERSION = "BASE6_R31_6_3_RESCATE_CANTIDAD_VISUAL_20260908"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
