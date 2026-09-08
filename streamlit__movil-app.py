@@ -3802,7 +3802,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_5":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_6":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3819,7 +3819,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_5":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_6_5"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_6_6"
 
 
 # =========================================================
@@ -5566,6 +5566,24 @@ def _extraer_empaque_desde_tamano(texto):
         if 2 <= n <= 1000:
             return n
 
+
+    # Cola logística OCR frecuente:
+    # "JUGO MANZ. 32 OZ 12 1"  -> 12 unidades por empaque
+    # "COCA COLA 400ML 12 1"   -> 12
+    # "COCA COLA ZERO 500ML 12"-> 12
+    # Sólo se activa si antes aparece una medida física; así evitamos
+    # interpretar cualquier número final como empaque.
+    m = re.search(
+        r"\b\d+(?:\.\d+)?\s*(?:ML|CL|L|LT|LTR|OZ|CC)\b"
+        r".*?\b(\d{1,3})(?:\s+1)?\s*$",
+        t,
+        flags=re.I,
+    )
+    if m:
+        n = int(m.group(1))
+        if 2 <= n <= 144:
+            return n
+
     return 1
 
 
@@ -6436,9 +6454,19 @@ def _inferir_empaque_universal(prod, proveedor=""):
     if emp_api > 1 and not es_deposito:
         return int(emp_api), "vision_units_per_package", 90, False
 
-    # 6) EA/PC/PCS sin otra evidencia: tratar como unidad física.
+    # 6) EA/PC/PCS sin otra evidencia:
+    # si la descripción no trae ni siquiera una presentación física clara,
+    # NO afirmar que es una unidad física. Puede ser un multipack vendido como EA.
     if unidad_ambigua:
-        return 1, "udm_comercial_sin_empaque_confirmado", 90, False
+        texto_fisico = " ".join([nombre, presentacion]).upper()
+        tiene_medida_fisica = bool(re.search(
+            r"\b\d+(?:\.\d+)?\s*(?:ML|CL|L|LT|LTR|OZ|CC)\b",
+            texto_fisico,
+            flags=re.I,
+        ))
+        if tiene_medida_fisica:
+            return 1, "udm_comercial_unidad_fisica_probable", 78, False
+        return 1, "udm_comercial_empaque_no_resuelto", 15, True
 
     # 7) Si la UdM es caja pero no se conoce el contenido, no bloquear:
     # usar 1 como estimación temporal y marcar revisión.
@@ -8540,6 +8568,20 @@ def _inferir_unidades_empaque_vision(item, nombre=""):
                 inferred = candidato
                 break
 
+        # Cola logística OCR: medida + pack al final.
+        # Ej.: "32 OZ 12 1", "400ML 12 1", "500ML 12".
+        m_tail = re.search(
+            r"\b\d+(?:\.\d+)?\s*(?:ML|CL|L|LT|LTR|OZ|CC)\b"
+            r".*?\b(\d{1,3})(?:\s+1)?\s*$",
+            t,
+            flags=re.I,
+        )
+        if m_tail:
+            candidato = int(m_tail.group(1))
+            if 2 <= candidato <= 144:
+                inferred = candidato
+                break
+
         patrones = [
             r"(?<!\d)(\d{1,3})\s*/\s*(?:\d+(?:[.,]\d+)?)\s*(?:ML|CL|L|LT|LTR|OZ|CC)\b",
             r"(?<!\d)(\d{1,3})\s*[Xx]\s*(?:\d+(?:[.,]\d+)?)\s*(?:ML|CL|L|LT|LTR|OZ|CC)\b",
@@ -8977,8 +9019,14 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
             "barcode": barcode,
             "codigo_interno": codigo_interno,
             "nombre": nombre,
+            "nombre_original_lectura": nombre,
             "cant": cant,
             "emp": emp,
+            "units_per_package": (
+                item.get("units_per_package")
+                if item.get("units_per_package") not in (None, "")
+                else emp
+            ),
             "package_text": package_text,
             "purchase_unit": purchase_unit,
             "fuente_empaque": fuente_empaque,
@@ -9125,6 +9173,157 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
         productos,
     )
 
+
+
+
+def _rescatar_empaques_faltantes_vision(client, modelo, data_url, data, nombre_archivo):
+    """
+    Segunda lectura especializada de EMPAQUE para filas ambiguas.
+
+    Se usa cuando la primera lectura devuelve EA/PC/PCS o UdM vacía y
+    units_per_package <= 1. Sólo acepta un empaque >1 con evidencia visual
+    explícita en la fila, continuación de descripción o presentación.
+    """
+    if not isinstance(data, dict):
+        return data
+
+    productos = [p for p in (data.get("products") or []) if isinstance(p, dict)]
+    pendientes = []
+
+    for idx, p in enumerate(productos, start=1):
+        unidad = str(
+            p.get("purchase_unit")
+            or p.get("unit")
+            or p.get("uom")
+            or ""
+        ).upper().strip()
+        try:
+            emp = int(float(p.get("units_per_package") or 1))
+        except Exception:
+            emp = 1
+
+        desc = " ".join(str(p.get("description") or "").split()).strip()
+        if emp > 1 or not desc:
+            continue
+
+        ambigua = (
+            unidad in ("", "EA", "PC", "PCS")
+            or re.fullmatch(r"(?:EA|PC|PCS)", unidad or "")
+        )
+        if not ambigua:
+            continue
+
+        # Si la descripción ya codifica pack, el parser local lo resolverá.
+        emp_local = _extraer_empaque_desde_tamano(desc)
+        if emp_local > 1:
+            p["units_per_package"] = emp_local
+            p["package_rescue_source"] = "parser_descripcion"
+            continue
+
+        pendientes.append({
+            "row_index": idx,
+            "description": desc,
+            "purchase_unit": unidad,
+        })
+
+    if not pendientes:
+        return data
+
+    filas_txt = "\n".join(
+        f'{x["row_index"]}. {x["description"]} | UdM={x["purchase_unit"] or "(vacía)"}'
+        for x in pendientes[:80]
+    )
+
+    prompt = f"""
+REVISION ESPECIALIZADA DE CANTIDAD POR EMPAQUE.
+
+Revisa nuevamente estas filas de la MISMA factura:
+
+{filas_txt}
+
+Objetivo: determinar cuántas UNIDADES FÍSICAS contiene cada empaque comprado.
+
+Busca evidencia VISUAL explícita en:
+- la misma descripción;
+- una línea de continuación inmediatamente arriba/abajo;
+- presentación/tamaño;
+- texto como 12, 24, 30, 35, 40, 48 seguido de UND/BOT/LATAS;
+- 12X..., 24X..., 12/..., Caja-12, Pack 24, 12 1, 24 1;
+- texto de multipack que pertenezca claramente a ESA fila.
+
+IMPORTANTE:
+- EA/PC/PCS NO significa automáticamente una botella/unidad física.
+  En clubes/almacenes puede significar "un paquete vendido como un artículo".
+- NO inventes un empaque por precio, marca o conocimiento externo.
+- Si no hay evidencia explícita suficiente, devuelve units_per_package=null.
+- Una medida como 500ML, 32 OZ, 330ML es tamaño físico, NO empaque.
+- "500ML 12" o "32 OZ 12 1" sí puede indicar pack 12 si visualmente pertenece a la fila.
+
+Devuelve SOLO JSON válido:
+{{
+  "rows": [
+    {{
+      "row_index": 1,
+      "units_per_package": 12,
+      "package_text": "texto exacto que demuestra el empaque",
+      "confidence": "high|medium|low"
+    }}
+  ]
+}}
+"""
+
+    try:
+        resp = client.responses.create(
+            model=modelo,
+            store=False,
+            reasoning={"effort": "low"},
+            input=[{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": prompt},
+                    {"type": "input_image", "image_url": data_url, "detail": "high"},
+                ],
+            }],
+            text={"verbosity": "low"},
+            max_output_tokens=5000,
+        )
+        txt = str(getattr(resp, "output_text", "") or "").strip()
+        txt = re.sub(r"^```(?:json)?\s*", "", txt, flags=re.I)
+        txt = re.sub(r"\s*```$", "", txt).strip()
+        if not txt:
+            return data
+        rescate = json.loads(txt)
+    except Exception as exc:
+        _diag_vision(
+            nombre_archivo,
+            "rescate empaque",
+            "ERROR",
+            f"{type(exc).__name__}: {str(exc)[:500]}",
+        )
+        return data
+
+    for r in rescate.get("rows") or []:
+        if not isinstance(r, dict):
+            continue
+        if str(r.get("confidence") or "").lower() != "high":
+            continue
+        try:
+            idx = int(r.get("row_index") or 0) - 1
+            emp = int(float(r.get("units_per_package") or 0))
+        except Exception:
+            continue
+        if idx < 0 or idx >= len(productos) or not (2 <= emp <= 144):
+            continue
+
+        productos[idx]["units_per_package"] = emp
+        txt_emp = " ".join(str(r.get("package_text") or "").split()).strip()
+        if txt_emp:
+            productos[idx]["package_text"] = txt_emp
+        productos[idx]["package_rescue_source"] = "vision_segunda_lectura"
+        productos[idx]["package_rescue_confidence"] = "high"
+
+    data["products"] = productos
+    return data
 
 
 def _recuperar_codigos_faltantes_vision(client, modelo, data_url, data, nombre_archivo):
@@ -9764,7 +9963,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_6_5"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_6_6"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -10071,6 +10270,13 @@ REGLAS:
                 instrucciones,
             )
             data = _recuperar_codigos_faltantes_vision(
+                client,
+                modelo,
+                data_url,
+                data,
+                nombre_archivo,
+            )
+            data = _rescatar_empaques_faltantes_vision(
                 client,
                 modelo,
                 data_url,
@@ -12354,6 +12560,12 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                             "Empaque actual": p.get("emp", 1),
                         })
 
+                        # R29.1.6.6: evitar un dato falso.
+                        # Si no sabemos si EA/PC/UDM vacía es 1, 12, 24, etc.,
+                        # NO convertir cantidad facturada directamente en stock físico.
+                        # La fila queda visible en auditoría para nueva lectura/revisión.
+                        continue
+
                     # Barcode primero: conservar exactamente el código leído.
                     # Sólo el campo BARCODE puede recibir la reparación segura de
                     # un cero inicial perdido (11 -> 12 dígitos con check válido).
@@ -13281,7 +13493,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_6_5_STOCK_AUTOMATICO_20260907"
+EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_6_6_UNITIZACION_ESTRICTA_20260907"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
