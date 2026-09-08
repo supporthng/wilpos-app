@@ -3808,7 +3808,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_4":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_5":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3825,7 +3825,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_4":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R31_4"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R31_5"
 
 
 # =========================================================
@@ -8657,6 +8657,189 @@ def _clasificar_calidad_producto_vision(prod):
 
 
 
+
+def _reconciliar_linea_contable_vision(item, cantidad_leida):
+    """
+    Reconciliación matemática TEMPRANA de una línea de factura.
+
+    La cantidad visual sigue teniendo prioridad. Sólo se corrige cuando la
+    cantidad leída NO explica los importes y otra cantidad entera sí los explica
+    con evidencia contable fuerte.
+
+    Relaciones aceptadas:
+      cantidad × precio unitario/neto ≈ total neto de línea
+      total con impuesto - ITBIS ≈ total neto de línea
+
+    Esto recupera, por ejemplo:
+      PRESIDENTE REG: 33,180.60 / 1,659.03 = 20
+      PRESIDENTE LIGHT: 24,881.85 / 1,658.79 = 15
+
+    No usa unidades por empaque. Primero se determina CUÁNTAS unidades
+    facturadas hay; después se resuelve cuántas unidades físicas trae cada una.
+    """
+    if not isinstance(item, dict):
+        return float(cantidad_leida or 0), {}
+
+    def fnum(v):
+        try:
+            if v in (None, ""):
+                return None
+            if isinstance(v, str):
+                s = str(v).strip()
+                # formatos RD/US usuales
+                s = re.sub(r"[^0-9,.\-]", "", s)
+                if not s or s in ("-", ".", ","):
+                    return None
+                if "," in s and "." in s:
+                    # 33,180.60
+                    s = s.replace(",", "")
+                elif "," in s and "." not in s:
+                    # 33180,60
+                    s = s.replace(",", ".")
+                return float(s)
+            return float(v)
+        except Exception:
+            return None
+
+    q_ocr = fnum(cantidad_leida)
+    q_ocr = float(q_ocr or 0)
+
+    # Totales de línea netos/pre-ITBIS disponibles directamente.
+    totals = []
+    for campo, peso in (
+        ("line_cost_net", 120),
+        ("subtotal_net", 115),
+        ("net_subtotal_line", 112),
+        ("subtotal_line", 105),
+    ):
+        v = fnum(item.get(campo))
+        if v is not None and v > 0:
+            totals.append((campo, v, peso))
+
+    gross = (
+        fnum(item.get("gross_line_total"))
+        or fnum(item.get("importe_total"))
+        or fnum(item.get("line_total_with_tax"))
+    )
+    tax = fnum(item.get("tax_value")) or fnum(item.get("itbis_value"))
+    if gross is not None and gross > 0 and tax is not None and tax >= 0 and gross > tax:
+        totals.append(("total_menos_itbis", gross - tax, 125))
+
+    # Precios unitarios de la unidad FACTURADA.
+    prices = []
+    for campo, peso in (
+        ("net_price_per_package", 125),
+        ("price_unit_per_package", 118),
+        ("precio_unit", 115),
+        ("unit_price_package", 112),
+        ("unit_cost_net", 105),
+        ("list_price_per_package", 95),
+        ("price_list", 92),
+        ("list_price", 90),
+    ):
+        v = fnum(item.get(campo))
+        if v is not None and v > 0:
+            prices.append((campo, v, peso))
+
+    # Precio lista - descuento unitario cuando el descuento realmente parece unitario.
+    list_price = (
+        fnum(item.get("list_price_per_package"))
+        or fnum(item.get("price_list"))
+        or fnum(item.get("list_price"))
+    )
+    discount_value = fnum(item.get("discount_value"))
+    discount_rate = fnum(item.get("discount_rate"))
+    if list_price is not None and list_price > 0:
+        if discount_value is not None and 0 <= discount_value < list_price:
+            prices.append(("lista_menos_descuento_unitario", list_price - discount_value, 122))
+        elif discount_rate is not None and 0 <= discount_rate <= 100:
+            rate = discount_rate / 100.0 if discount_rate > 1 else discount_rate
+            prices.append(("lista_menos_descuento_pct", list_price * (1-rate), 120))
+
+    if not totals or not prices:
+        return q_ocr, {"estado": "sin_evidencia_suficiente"}
+
+    # Generar candidatos enteros por total/precio.
+    cand = {}
+    for tf, total, tw in totals:
+        for pf, precio, pw in prices:
+            if precio <= 0:
+                continue
+            ratio = total / precio
+            q = int(round(ratio))
+            if q < 1 or q > 10000:
+                continue
+            reconstruido = q * precio
+            relerr = abs(reconstruido-total) / max(total, 1.0)
+            # Muy estricto: 0.45%, más RD$0.15 mínimo.
+            tol_abs = max(0.15, total * 0.0045)
+            if abs(reconstruido-total) > tol_abs:
+                continue
+            score = tw + pw - relerr * 10000
+            entry = cand.setdefault(q, {"score":0.0, "pruebas":[]})
+            entry["score"] += score
+            entry["pruebas"].append({
+                "total_fuente": tf,
+                "total": round(total, 6),
+                "precio_fuente": pf,
+                "precio": round(precio, 6),
+                "reconstruido": round(reconstruido, 6),
+                "error_rel": round(relerr, 8),
+            })
+
+    if not cand:
+        return q_ocr, {"estado": "sin_candidato_entero"}
+
+    orden = sorted(cand.items(), key=lambda kv: (kv[1]["score"], len(kv[1]["pruebas"])), reverse=True)
+    q_best, meta = orden[0]
+    second_score = orden[1][1]["score"] if len(orden) > 1 else 0.0
+    meta = dict(meta)
+    meta["estado"] = "candidato"
+    meta["q_ocr"] = q_ocr
+    meta["q_reconciliada"] = q_best
+    meta["margen_score"] = meta["score"] - second_score
+
+    # Si OCR ya coincide, sólo certificar.
+    if q_ocr > 0 and abs(q_ocr-q_best) < 1e-9:
+        meta["estado"] = "cantidad_visual_confirmada"
+        return q_ocr, meta
+
+    # Si OCR >1, no corregir automáticamente: una cantidad positiva visible
+    # se preserva salvo evidencia excepcional. La marcamos para revisión.
+    if q_ocr > 1:
+        meta["estado"] = "conflicto_cantidad_visual"
+        return q_ocr, meta
+
+    # q=0/1 puede corregirse si hay evidencia fuerte.
+    # Exigir al menos una prueba de precio neto/unitario y total de línea.
+    strong_price = any(
+        p["precio_fuente"] in (
+            "net_price_per_package",
+            "price_unit_per_package",
+            "precio_unit",
+            "unit_price_package",
+            "lista_menos_descuento_unitario",
+            "lista_menos_descuento_pct",
+        )
+        for p in meta["pruebas"]
+    )
+    strong_total = any(
+        p["total_fuente"] in (
+            "line_cost_net",
+            "subtotal_net",
+            "net_subtotal_line",
+            "total_menos_itbis",
+        )
+        for p in meta["pruebas"]
+    )
+
+    if q_best >= 2 and strong_price and strong_total:
+        meta["estado"] = "cantidad_corregida_por_contabilidad"
+        return float(q_best), meta
+
+    return q_ocr, meta
+
+
 def _resolver_costo_neto_linea_vision(item, cantidad, unidades_empaque):
     """
     Resuelve el COSTO NETO TOTAL DE LA LÍNEA sin ITBIS mediante consenso.
@@ -9415,6 +9598,35 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
             cant = 0
             razones.append("cantidad no numérica")
 
+        # R31.5: reconciliar la CANTIDAD FACTURADA antes de resolver
+        # empaque y costo. Si OCR leyó 1 pero precio×20 explica la línea,
+        # la línea se corrige aquí, no al final.
+        cant_original_vision = cant
+        cant_reconciliada, auditoria_linea = _reconciliar_linea_contable_vision(item, cant)
+        if auditoria_linea.get("estado") == "cantidad_corregida_por_contabilidad":
+            cant = float(cant_reconciliada)
+            item["quantity_packages"] = cant
+            item["cantidad_verificada_por_auditoria"] = True
+            item["cantidad_verificada_confianza"] = "alta"
+            item["cantidad_requiere_revision"] = False
+            item["cantidad_auditoria_alternativa"] = cant
+            item["_reconciliacion_linea_contable"] = auditoria_linea
+        elif auditoria_linea.get("estado") == "conflicto_cantidad_visual":
+            item["cantidad_requiere_revision"] = True
+            item["cantidad_auditoria_alternativa"] = auditoria_linea.get("q_reconciliada")
+            item["_reconciliacion_linea_contable"] = auditoria_linea
+
+        if auditoria_linea.get("estado") == "cantidad_corregida_por_contabilidad":
+            advertencias.append(
+                "cantidad corregida por reconciliación contable: "
+                f"{cant_original_vision:g} → {cant:g}; precio×cantidad cuadra con neto de línea"
+            )
+        elif auditoria_linea.get("estado") == "conflicto_cantidad_visual":
+            advertencias.append(
+                "REVISAR CANTIDAD: lectura visual y contabilidad difieren; "
+                f"alternativa={auditoria_linea.get('q_reconciliada')}"
+            )
+
         emp, fuente_empaque = _inferir_unidades_empaque_vision(item, nombre)
         package_text = " ".join(str(
             item.get("package_text")
@@ -9545,6 +9757,7 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
             "cantidad_verificada_confianza": item.get("cantidad_verificada_confianza", ""),
             "cantidad_requiere_revision": bool(item.get("cantidad_requiere_revision")),
             "cantidad_auditoria_alternativa": item.get("cantidad_auditoria_alternativa"),
+            "reconciliacion_linea_contable": item.get("_reconciliacion_linea_contable"),
             "advertencias_lectura": list(dict.fromkeys(
                 advertencias + list(item.get("advertencias_lectura") or [])
             )),
@@ -10927,7 +11140,7 @@ Devuelve SOLO JSON:
     return data
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_4"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_5"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -11074,6 +11287,10 @@ REGLAS:
 - internal_code = CODIGO/MATERIAL/ITEM del proveedor.
 - quantity_packages = columna CANTIDAD.
 - raw_row_text debe copiar TODA la fila visible de izquierda a derecha, incluso columnas numéricas
+- En notas de crédito/devoluciones, NO confundas Cant. con P.Unit ni Imp. Neto.
+- Si una fila muestra PRESIDENTE y P.Unit≈1659 con Imp.Neto≈33180, la cantidad debe leerse de su columna (20), no asumir 1.
+- Verifica internamente que Cantidad × Precio unitario ≈ Importe/Neto de línea cuando no hay descuento por línea.
+- Para RED BULL LT 24/250ML ST, 24/250ML es PRESENTACIÓN/EMPAQUE; la cantidad facturada es la cifra de la columna Cant.
   que no sepas nombrar. Ejemplo: "JUGO MANZ. 32 OZ 12 1".
 - package_evidence_text debe copiar únicamente la evidencia que demuestra el contenido del empaque.
   Si no existe evidencia, devuelve null; NO inventes.
@@ -14895,7 +15112,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R31_4_PACK_UND_REDBULL_20260908"
+EXTRACTOR_CACHE_VERSION = "BASE6_R31_5_RECONCILIACION_LINEA_20260908"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
