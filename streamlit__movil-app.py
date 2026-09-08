@@ -3800,6 +3800,7 @@ DEFAULTS = {
     "ia_cache_hits": 0,
     "ia_cache_misses": 0,
     "productos_revision_lote": [],
+    "empaques_confirmados_usuario": {},
 }
 
 for key, value in DEFAULTS.items():
@@ -3807,7 +3808,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R30_4":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R31":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3824,7 +3825,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R30_4":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R30_4"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R31"
 
 
 # =========================================================
@@ -6376,32 +6377,194 @@ def _linea_demuestra_precio_por_unidad_facturada(prod):
     return False
 
 
+
+EMPAQUES_CONFIRMADOS_PATH = os.environ.get(
+    "WILPOS_EMPAQUES_PATH",
+    os.path.join(
+        os.path.dirname(os.path.abspath(globals().get("__file__", "streamlit_app.py"))),
+        "empaques_confirmados_wilpos.json",
+    ),
+)
+
+
+def _clave_empaque_producto(prod):
+    if not isinstance(prod, dict):
+        return ""
+    for campo in ("barcode", "codigo", "codigo_interno", "internal_code"):
+        val = _codigo_producto_mostrar(prod.get(campo) or "")
+        if val and not val.startswith("TMP"):
+            return "CODE:" + val
+    nombre = (
+        prod.get("nombre_original_lectura")
+        or prod.get("nombre")
+        or prod.get("description")
+        or ""
+    )
+    n = _nombre_producto_canonico(nombre)
+    return "NAME:" + n if n else ""
+
+
+def _cargar_empaques_confirmados_local():
+    datos = {}
+    try:
+        if os.path.exists(EMPAQUES_CONFIRMADOS_PATH):
+            with open(EMPAQUES_CONFIRMADOS_PATH, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+                if isinstance(raw, dict):
+                    datos.update(raw)
+    except Exception:
+        pass
+    try:
+        datos.update(st.session_state.get("empaques_confirmados_usuario", {}) or {})
+    except Exception:
+        pass
+    return datos
+
+
+def _guardar_empaque_confirmado(prod, emp, fuente="usuario"):
+    try:
+        emp = int(float(emp))
+    except Exception:
+        return
+    if emp < 1 or emp > 1000:
+        return
+    clave = _clave_empaque_producto(prod)
+    if not clave:
+        return
+
+    registro = {
+        "empaque": emp,
+        "fuente": fuente,
+        "nombre": str(
+            prod.get("nombre_original_lectura")
+            or prod.get("nombre")
+            or ""
+        ),
+    }
+
+    try:
+        st.session_state.setdefault("empaques_confirmados_usuario", {})[clave] = registro
+    except Exception:
+        pass
+
+    try:
+        datos = {}
+        if os.path.exists(EMPAQUES_CONFIRMADOS_PATH):
+            with open(EMPAQUES_CONFIRMADOS_PATH, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+                if isinstance(raw, dict):
+                    datos.update(raw)
+        datos[clave] = registro
+        with open(EMPAQUES_CONFIRMADOS_PATH, "w", encoding="utf-8") as fh:
+            json.dump(datos, fh, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _buscar_empaque_confirmado(prod):
+    clave = _clave_empaque_producto(prod)
+    if not clave:
+        return None
+    reg = _cargar_empaques_confirmados_local().get(clave)
+    if not isinstance(reg, dict):
+        return None
+    try:
+        emp = int(float(reg.get("empaque") or 0))
+    except Exception:
+        return None
+    if emp >= 1:
+        return emp, str(reg.get("fuente") or "registro_local")
+    return None
+
+
+@st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
+def _consultar_empaque_pricesmart_item(item_code):
+    """
+    Consulta GRATIS la página pública de PriceSmart por item.
+    No usa OpenAI/API de pago.
+    Devuelve (empaque, titulo) o (None, "").
+    """
+    item = re.sub(r"\D", "", str(item_code or ""))
+    if len(item) < 5 or len(item) > 8:
+        return None, ""
+
+    url = f"https://www.pricesmart.com/site/do/es/pagina-producto/{item}"
+    try:
+        req = Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 WilPOS/1.0",
+                "Accept-Language": "es-DO,es;q=0.9,en;q=0.7",
+            },
+        )
+        with urlopen(req, timeout=5) as resp:
+            html_txt = resp.read(750000).decode("utf-8", errors="ignore")
+    except Exception:
+        return None, ""
+
+    limpio = re.sub(r"<[^>]+>", " ", html_txt)
+    limpio = html_lib.unescape(limpio)
+    limpio = " ".join(limpio.split())
+
+    patrones = [
+        r"\b(\d{1,3})\s+Unidades\b",
+        r"\b(\d{1,3})\s+Units\b",
+        r"\b(\d{1,3})\s*(?:PK|PACK)\b",
+    ]
+    for pat in patrones:
+        m = re.search(pat, limpio, flags=re.I)
+        if m:
+            n = int(m.group(1))
+            if 2 <= n <= 144:
+                return n, limpio[:350]
+    return None, limpio[:350]
+
+
+def _resolver_empaque_catalogo_publico(prod, proveedor=""):
+    """
+    Catálogo gratuito como fallback para clubes tipo PriceSmart.
+    Se basa en item/SKU del proveedor, no en nombres hardcodeados.
+    """
+    prov = _normalizar_ocr(proveedor)
+    if "pricesmart" not in prov and "price smart" not in prov:
+        return None
+
+    candidatos = []
+    for campo in ("internal_code", "codigo_interno", "codigo", "barcode"):
+        val = _codigo_producto_mostrar(prod.get(campo) or "")
+        if val and not val.startswith("TMP"):
+            candidatos.append(val)
+
+    for codigo in candidatos:
+        emp, titulo = _consultar_empaque_pricesmart_item(codigo)
+        if emp and emp > 1:
+            prod["catalogo_publico_evidencia"] = titulo
+            return emp, "catalogo_publico_pricesmart", 96
+    return None
+
+
 def _inferir_empaque_universal(prod, proveedor=""):
     """
-    Devuelve (empaque, fuente, confianza, necesita_revision).
+    R31 - resolución universal de empaque.
 
-    El STOCK SIEMPRE se calcula automáticamente:
-        stock_fisico = cantidad_factura × empaque
-
-    Prioridad:
-    1) override manual previo, si existe;
-    2) UdM explícita;
-    3) presentación impresa;
-    4) descripción con notación fuerte;
-    5) catálogo comercial confirmado;
-    6) units_per_package leído por Vision;
-    7) EA/PC/PCS sin evidencia fuerte => 1;
-    8) UDM vacía/desconocida => mejor estimación disponible, nunca bloquear.
+    Orden:
+    1) UDM física inequívoca;
+    2) UDM/empaque explícito;
+    3) evidencia literal package/raw row/description;
+    4) Vision units_per_package de alta confianza;
+    5) registro previamente confirmado;
+    6) catálogo público gratuito del proveedor cuando existe;
+    7) si sigue ambiguo: REVISIÓN, nunca afirmar empaque 1 como cierto.
     """
     if not isinstance(prod, dict):
-        return 1, "default_auto", 20, True
+        return 1, "default", 0, True
 
     try:
         emp_manual = int(float(prod.get("emp_override_manual") or 0))
     except Exception:
         emp_manual = 0
     if emp_manual >= 1:
-        return emp_manual, "confirmado_manual", 100, False
+        return emp_manual, "confirmado_usuario", 100, False
 
     nombre = str(prod.get("nombre_original_lectura") or prod.get("nombre") or "")
     unidad = (
@@ -6411,12 +6574,14 @@ def _inferir_empaque_universal(prod, proveedor=""):
         or prod.get("udm")
         or ""
     )
-    presentacion = (
-        prod.get("package_text")
-        or prod.get("presentation")
-        or prod.get("size_text")
-        or ""
-    )
+    evidencia = " ".join(str(x or "") for x in (
+        prod.get("package_evidence_text"),
+        prod.get("package_text"),
+        prod.get("raw_row_text"),
+        prod.get("presentation"),
+        prod.get("size_text"),
+        nombre,
+    ))
 
     n_norm = _normalizar_ocr(nombre)
     es_deposito = any(
@@ -6424,66 +6589,57 @@ def _inferir_empaque_universal(prod, proveedor=""):
         ("deposito", "depos.", "depos ", "retornable vacio", "envase vacio")
     )
 
-    unidad_ambigua = _unidad_es_comercial_ambigua(unidad)
-
-    # 1) UdM explícita.
+    # UDM explícita primero: BOT/UND/PZA jamás se divide.
     emp_udm, fuente_udm, conf_udm = _extraer_empaque_udm_universal(unidad)
     if conf_udm >= 100:
         return int(emp_udm), fuente_udm, conf_udm, False
 
-    # 2) Presentación impresa.
-    emp_pres = _extraer_empaque_desde_tamano(presentacion)
-    if emp_pres > 1 and not es_deposito:
-        return int(emp_pres), "presentacion_impresa", 98 if unidad_ambigua else 96, False
+    # Evidencia literal.
+    emp_evidencia = _extraer_empaque_desde_tamano(evidencia)
+    if emp_evidencia > 1 and not es_deposito:
+        return int(emp_evidencia), "evidencia_literal_fila", 99, False
 
-    # 3) Descripción original.
-    emp_desc = _extraer_empaque_desde_tamano(nombre)
-    if emp_desc > 1 and not es_deposito:
-        return int(emp_desc), "descripcion_impresa", 97 if unidad_ambigua else 92, False
-
-    # 4) Catálogo comercial confirmado.
+    # Catálogo comercial estructural existente.
     emp_catalogo, fuente_catalogo = _empaque_confirmado_por_nombre(nombre)
     if emp_catalogo > 1 and not es_deposito:
-        return int(emp_catalogo), fuente_catalogo, 95 if unidad_ambigua else 85, False
+        return int(emp_catalogo), fuente_catalogo, 94, False
 
-    # 5) Vision: debe respetarse antes de cualquier fallback a 1.
+    # Vision sólo si afirmó >1.
     try:
-        emp_api = int(float(
-            prod.get("units_per_package")
-            or prod.get("emp")
-            or 1
-        ))
+        emp_api = int(float(prod.get("units_per_package") or prod.get("emp") or 1))
     except Exception:
         emp_api = 1
-
+    conf_api = str(prod.get("units_per_package_confidence") or "").lower()
     if emp_api > 1 and not es_deposito:
-        return int(emp_api), "vision_units_per_package", 90, False
+        return int(emp_api), "vision_units_per_package", 95 if conf_api == "high" else 88, False
 
-    # 6) EA/PC/PCS sin otra evidencia:
-    # si la descripción no trae ni siquiera una presentación física clara,
-    # NO afirmar que es una unidad física. Puede ser un multipack vendido como EA.
-    if unidad_ambigua:
-        texto_fisico = " ".join([nombre, presentacion]).upper()
-        tiene_medida_fisica = bool(re.search(
-            r"\b\d+(?:\.\d+)?\s*(?:ML|CL|L|LT|LTR|OZ|CC)\b",
-            texto_fisico,
-            flags=re.I,
-        ))
-        if tiene_medida_fisica:
-            return 1, "udm_comercial_unidad_fisica_probable", 78, False
-        return 1, "udm_comercial_empaque_no_resuelto", 15, True
+    # Registro aprendido/confirmado.
+    reg = _buscar_empaque_confirmado(prod)
+    if reg:
+        emp_reg, fuente_reg = reg
+        return int(emp_reg), f"registro:{fuente_reg}", 100, False
 
-    # 7) Si la UdM es caja pero no se conoce el contenido, no bloquear:
-    # usar 1 como estimación temporal y marcar revisión.
-    if _parece_empaque_caja(unidad, nombre):
-        return 1, "caja_sin_cantidad_auto", 15, True
+    # Catálogo público gratuito del proveedor.
+    cat = _resolver_empaque_catalogo_publico(prod, proveedor=proveedor)
+    if cat:
+        emp_cat, fuente_cat, conf_cat = cat
+        _guardar_empaque_confirmado(prod, emp_cat, fuente=fuente_cat)
+        return int(emp_cat), fuente_cat, conf_cat, False
 
-    # 8) Sin UdM / UDM no concluyente: el stock se calcula automáticamente
-    # con empaque 1, pero queda claramente marcado como baja confianza.
-    if not str(unidad or "").strip():
-        return 1, "sin_udm_auto", 20, True
+    unidad_txt = " ".join(str(unidad or "").upper().replace(".", "").split()).strip()
+    unidad_ambigua = bool(re.fullmatch(r"(?:EA|PC|PCS)", unidad_txt or "", flags=re.I))
+    caja_generica = bool(re.fullmatch(
+        r"(?:CA|CJ|CAJ|CAJA|CASE|PACK|PCK)",
+        unidad_txt or "",
+        flags=re.I,
+    ))
+    sin_udm = not unidad_txt
 
-    return 1, "udm_no_concluyente_auto", 25, True
+    # EA/PC/PCS sin evidencia NO es igual a unidad física.
+    if unidad_ambigua or caja_generica or sin_udm:
+        return 1, "empaque_ambiguo_sin_evidencia", 0, True
+
+    return 1, "unidad_no_concluyente", 20, True
 
 
 def _reconciliar_cantidad_desde_costo_y_precio(prod):
@@ -8559,7 +8715,9 @@ def _inferir_unidades_empaque_vision(item, nombre=""):
         emp_api = 0
 
     textos = [
+        str(item.get("package_evidence_text") or ""),
         str(item.get("package_text") or ""),
+        str(item.get("raw_row_text") or ""),
         str(item.get("presentation") or ""),
         str(item.get("size_text") or ""),
         str(nombre or ""),
@@ -9054,6 +9212,9 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
                 else emp
             ),
             "package_text": package_text,
+            "raw_row_text": " ".join(str(item.get("raw_row_text") or "").split()).strip(),
+            "package_evidence_text": " ".join(str(item.get("package_evidence_text") or "").split()).strip(),
+            "units_per_package_confidence": str(item.get("units_per_package_confidence") or "").strip().lower(),
             "purchase_unit": purchase_unit,
             "fuente_empaque": fuente_empaque,
             "costo_total": costo_total,
@@ -10466,7 +10627,7 @@ Devuelve SOLO JSON:
     return data
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R30_4"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -10526,6 +10687,9 @@ Formato exacto:
       "internal_code": "codigo/material/item o null",
       "code_status": "read|not_printed|unreadable|unknown",
       "description": "descripcion completa",
+      "raw_row_text": "transcripcion literal de TODA la fila de izquierda a derecha, incluyendo numeros auxiliares",
+      "package_evidence_text": "texto literal que demuestra cuantas unidades trae el empaque, o null",
+      "units_per_package_confidence": "high|medium|low",
       "quantity_packages": 1,
       "purchase_unit": "CAJA|BOT|UND|otra unidad impresa",
       "package_text": "texto exacto de TAMAÑO/PRESENTACION, por ejemplo 6/1.75 L",
@@ -10609,7 +10773,12 @@ REGLAS:
 - Distingue código de producto de medidas como 75 CL, 750 ML, 12X750ML, 1.5L.
 - internal_code = CODIGO/MATERIAL/ITEM del proveedor.
 - quantity_packages = columna CANTIDAD.
-- Para determinar units_per_package usa, en este orden: UdM/UMV, TAMAÑO/PRESENTACIÓN, descripción.
+- raw_row_text debe copiar TODA la fila visible de izquierda a derecha, incluso columnas numéricas
+  que no sepas nombrar. Ejemplo: "JUGO MANZ. 32 OZ 12 1".
+- package_evidence_text debe copiar únicamente la evidencia que demuestra el contenido del empaque.
+  Si no existe evidencia, devuelve null; NO inventes.
+- Para determinar units_per_package usa, en este orden: UdM/UMV, TAMAÑO/PRESENTACIÓN,
+  package_evidence_text, raw_row_text, descripción.
 - Patrones reales que debes interpretar:
   * "CAJA" + "12/75 CL" => 12.
   * "CA" + "06x50 CL" => 6.
@@ -13227,17 +13396,48 @@ def modal_confirmacion(validas, duplicadas_count, margen):
             "Las fotos/páginas distintas con el mismo número de factura sí se procesan."
         )
 
-    # BASE6-R29.1.6.5:
-    # El stock se calcula automáticamente. No se detiene el flujo para pedir
-    # confirmación manual de empaque. Las filas de baja confianza se marcan
-    # para auditoría, pero el cálculo usa el mejor empaque inferido disponible.
-    filas_revision_emp, _ = _preparar_revision_empaques_modal(validas)
+    # R31: automático primero; confirmación sólo si ninguna fuente pudo
+    # demostrar el empaque. Nunca se exporta cantidad de cajas como stock unitario.
+    filas_revision_emp, refs_revision_emp = _preparar_revision_empaques_modal(validas)
+    empaques_sin_confirmar = 0
+
     if filas_revision_emp:
-        st.info(
-            f"📦 {len(filas_revision_emp)} línea(s) tienen empaque de baja confianza. "
-            "El sistema calculará el stock automáticamente con la mejor evidencia disponible "
-            "y las dejará marcadas en la auditoría."
+        st.warning(
+            f"📦 {len(filas_revision_emp)} producto(s) no tienen evidencia suficiente "
+            "para calcular unidades físicas automáticamente. Confirma sólo estos casos; "
+            "el valor quedará recordado para próximas facturas."
         )
+        df_rev = pd.DataFrame(filas_revision_emp)
+        df_edit = st.data_editor(
+            df_rev,
+            hide_index=True,
+            use_container_width=True,
+            disabled=["_id", "Factura", "Producto", "Cantidad factura", "UDM", "Presentación", "Motivo"],
+            column_config={
+                "_id": None,
+                "Cantidad por empaque": st.column_config.NumberColumn(
+                    "Cantidad por empaque",
+                    min_value=1,
+                    step=1,
+                    required=True,
+                ),
+            },
+            key="revision_empaque_final_r31",
+        )
+
+        for _, fila in df_edit.iterrows():
+            rid = str(fila.get("_id") or "")
+            ref = refs_revision_emp.get(rid)
+            if ref is None:
+                continue
+            try:
+                emp_usuario = int(float(fila.get("Cantidad por empaque") or 0))
+            except Exception:
+                emp_usuario = 0
+            if emp_usuario >= 1:
+                ref["emp_override_manual"] = emp_usuario
+                ref["emp"] = emp_usuario
+                _guardar_empaque_confirmado(ref, emp_usuario, fuente="confirmado_usuario")
 
     b1, b2 = st.columns(2)
     with b1:
@@ -13370,17 +13570,21 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                             registro_rev_canon
                         )
 
-                    # R30.4: preservar el artículo aunque tenga revisión.
-                    # Si existe una interpretación matemática utilizable, se usa;
-                    # si no, se preserva la fila con stock/costo 0 para que no desaparezca.
-                    try:
-                        cantidad_comprada_unidades = float(canon.get("unidades_fisicas") or 0)
-                    except Exception:
+                    # R31: un empaque ambiguo nunca se transforma silenciosamente
+                    # en stock físico. Si llegara hasta aquí sin resolver, se conserva
+                    # en Revisión con stock/costo 0 en vez de inventar unidades.
+                    if p.get("requiere_revision_empaque"):
                         cantidad_comprada_unidades = 0.0
-                    try:
-                        costo_unitario_preview = float(canon.get("costo_fisico") or 0)
-                    except Exception:
                         costo_unitario_preview = 0.0
+                    else:
+                        try:
+                            cantidad_comprada_unidades = float(canon.get("unidades_fisicas") or 0)
+                        except Exception:
+                            cantidad_comprada_unidades = 0.0
+                        try:
+                            costo_unitario_preview = float(canon.get("costo_fisico") or 0)
+                        except Exception:
+                            costo_unitario_preview = 0.0
 
                     moneda_original = str(p.get("moneda", "DOP")).upper()
                     try:
@@ -14309,7 +14513,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R30_4_NO_OMITIR_PRODUCTOS_20260907"
+EXTRACTOR_CACHE_VERSION = "BASE6_R31_UNITIZACION_MULTIFUENTE_20260908"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
