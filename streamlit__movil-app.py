@@ -3808,7 +3808,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R31":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_1":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3825,7 +3825,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R31":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R31"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R31_1"
 
 
 # =========================================================
@@ -6472,8 +6472,13 @@ def _buscar_empaque_confirmado(prod):
         emp = int(float(reg.get("empaque") or 0))
     except Exception:
         return None
+    fuente = str(reg.get("fuente") or "registro_local")
+    # R31.1: R31 guardó valores 1 por defecto como "confirmado_usuario"
+    # aunque el usuario no hubiera editado/confirmado. No confiar en esos registros.
+    if emp == 1 and fuente == "confirmado_usuario":
+        return None
     if emp >= 1:
-        return emp, str(reg.get("fuente") or "registro_local")
+        return emp, fuente
     return None
 
 
@@ -6543,6 +6548,89 @@ def _resolver_empaque_catalogo_publico(prod, proveedor=""):
     return None
 
 
+
+def _udm_placeholder_no_real(unidad):
+    """
+    OCR suele devolver 'x', '-', '/' o símbolos de separador como si fueran UDM.
+    Esos valores NO son una unidad comercial real.
+    """
+    u = " ".join(str(unidad or "").strip().upper().split())
+    return u in ("", "X", "×", "-", "--", "/", "|", "N/A", "NA", "NULL", "NONE")
+
+
+def _linea_recibo_demuestra_unidad_fisica(prod):
+    """
+    Evidencia estructural de recibo con cantidades YA FÍSICAS.
+
+    Se activa sólo cuando:
+    - UDM está ausente/placeholder (no EA/PC/CAJA);
+    - no existe evidencia de multipack >1;
+    - cantidad >= 6;
+    - cantidad × precio leído cuadra con costo neto de línea.
+
+    Esta regla recupera recibos donde la factura imprime directamente
+    60 × 75, 120 × 55, 24 × 105, etc.
+    """
+    if not isinstance(prod, dict):
+        return False
+
+    unidad = (
+        prod.get("purchase_unit")
+        or prod.get("unidad_original")
+        or prod.get("uom")
+        or prod.get("udm")
+        or ""
+    )
+    if not _udm_placeholder_no_real(unidad):
+        return False
+
+    try:
+        q = float(prod.get("cant") or 0)
+    except Exception:
+        q = 0.0
+    if q < 6:
+        return False
+
+    evidencia = " ".join(str(x or "") for x in (
+        prod.get("package_evidence_text"),
+        prod.get("package_text"),
+        prod.get("raw_row_text"),
+        prod.get("presentation"),
+        prod.get("size_text"),
+        prod.get("nombre_original_lectura"),
+        prod.get("nombre"),
+    ))
+    if _extraer_empaque_desde_tamano(evidencia) > 1:
+        return False
+
+    def fnum(v):
+        try:
+            if v in (None, ""):
+                return None
+            return float(v)
+        except Exception:
+            return None
+
+    costo = fnum(prod.get("costo_total"))
+    if costo is None or costo <= 0:
+        return False
+
+    for campo in (
+        "net_price_per_package",
+        "unit_cost_net",
+        "price_unit_per_package",
+    ):
+        precio = fnum(prod.get(campo))
+        if precio is None or precio <= 0:
+            continue
+        esperado = q * precio
+        tol = max(0.15, abs(costo) * 0.012)
+        if abs(esperado - costo) <= tol:
+            return True
+
+    return False
+
+
 def _inferir_empaque_universal(prod, proveedor=""):
     """
     R31 - resolución universal de empaque.
@@ -6574,6 +6662,8 @@ def _inferir_empaque_universal(prod, proveedor=""):
         or prod.get("udm")
         or ""
     )
+    if _udm_placeholder_no_real(unidad):
+        unidad = ""
     evidencia = " ".join(str(x or "") for x in (
         prod.get("package_evidence_text"),
         prod.get("package_text"),
@@ -6613,18 +6703,24 @@ def _inferir_empaque_universal(prod, proveedor=""):
     if emp_api > 1 and not es_deposito:
         return int(emp_api), "vision_units_per_package", 95 if conf_api == "high" else 88, False
 
-    # Registro aprendido/confirmado.
-    reg = _buscar_empaque_confirmado(prod)
-    if reg:
-        emp_reg, fuente_reg = reg
-        return int(emp_reg), f"registro:{fuente_reg}", 100, False
+    # Recibo sin UDM real, con cantidad×precio=linea y cantidad alta:
+    # la cantidad ya representa unidades físicas.
+    if _linea_recibo_demuestra_unidad_fisica(prod):
+        return 1, "aritmetica_recibo_unidad_fisica", 96, False
 
-    # Catálogo público gratuito del proveedor.
+    # Catálogo público gratuito del proveedor ANTES de registros manuales.
+    # Así una confirmación manual vieja/accidental no tapa evidencia pública.
     cat = _resolver_empaque_catalogo_publico(prod, proveedor=proveedor)
     if cat:
         emp_cat, fuente_cat, conf_cat = cat
         _guardar_empaque_confirmado(prod, emp_cat, fuente=fuente_cat)
         return int(emp_cat), fuente_cat, conf_cat, False
+
+    # Registro aprendido/confirmado.
+    reg = _buscar_empaque_confirmado(prod)
+    if reg:
+        emp_reg, fuente_reg = reg
+        return int(emp_reg), f"registro:{fuente_reg}", 100, False
 
     unidad_txt = " ".join(str(unidad or "").upper().replace(".", "").split()).strip()
     unidad_ambigua = bool(re.fullmatch(r"(?:EA|PC|PCS)", unidad_txt or "", flags=re.I))
@@ -6644,15 +6740,18 @@ def _inferir_empaque_universal(prod, proveedor=""):
 
 def _reconciliar_cantidad_desde_costo_y_precio(prod):
     """
-    La cantidad de factura es un DATO VISUAL PRIMARIO.
+    Cantidad es visual y no se modifica normalmente.
 
-    Esta función ya NO modifica una cantidad positiva leída de la factura.
-    La aritmética costo/precio se usa solamente como:
-      - rescate cuando cantidad <= 0;
-      - diagnóstico de inconsistencia.
+    ÚNICA excepción automática:
+    si Vision/OCR devuelve cantidad=1 pero:
+      - costo neto TOTAL de línea es confiable;
+      - existe precio por unidad facturada/empaque;
+      - costo_total / precio ≈ entero >=2;
+      - el error es muy pequeño;
+    entonces se corrige cantidad.
 
-    Motivo: precio/subtotal/ITBIS pueden estar en bases distintas y no deben
-    alterar una cantidad visible correcta.
+    Esto recupera líneas donde OCR perdió 15/20 y dejó 1, sin alterar
+    tickets donde 1 realmente significa una unidad/paquete.
     """
     if not isinstance(prod, dict):
         return prod
@@ -6670,82 +6769,88 @@ def _reconciliar_cantidad_desde_costo_y_precio(prod):
         except Exception:
             return None
 
-    cant_actual = fnum(prod.get("cant"))
-    if cant_actual is None:
-        cant_actual = fnum(prod.get("quantity_packages"))
-    cant_actual = float(cant_actual or 0)
+    cant = fnum(prod.get("cant"))
+    if cant is None:
+        cant = fnum(prod.get("quantity_packages"))
+    cant = float(cant or 0)
 
     costo_total = fnum(prod.get("costo_total"))
+    fuente_costo = str(prod.get("fuente_costo") or "").lower()
+
     precios = []
-    for campo in (
-        "net_price_per_package",
-        "unit_cost_net",
-        "price_unit_per_package",
+    for campo, prioridad in (
+        ("net_price_per_package", 100),
+        ("unit_cost_net", 95),
+        ("price_unit_per_package", 85),
     ):
-        valor = fnum(prod.get(campo))
-        if valor is not None and valor > 0:
-            precios.append((campo, valor))
+        v = fnum(prod.get(campo))
+        if v is not None and v > 0:
+            precios.append((campo, v, prioridad))
 
-    # Si ya hay cantidad positiva, JAMÁS cambiarla por aritmética.
-    # Sólo registrar una discrepancia para revisión.
-    if cant_actual > 0:
-        if costo_total and costo_total > 0:
-            for campo, precio in precios:
-                ratio = costo_total / precio if precio > 0 else 0
+    # Cantidad >1 se conserva siempre.
+    if cant > 1:
+        return prod
+
+    # Cantidad exactamente 1: sólo corregir con evidencia fuerte.
+    if abs(cant - 1.0) < 1e-9 and costo_total and costo_total > 0 and precios:
+        fuente_total_fuerte = any(
+            x in fuente_costo
+            for x in (
+                "total_menos_itbis",
+                "line_cost_net",
+                "subtotal_neto_linea",
+                "lista_descuento_x_cantidad",
+            )
+        )
+        if fuente_total_fuerte:
+            candidatos = []
+            for campo, precio, prioridad in precios:
+                ratio = costo_total / precio
                 entero = int(round(ratio))
-                if entero >= 1:
-                    error = abs((entero * precio) - costo_total)
-                    tolerancia = max(0.10, abs(costo_total) * 0.005)
-                    if error <= tolerancia and abs(entero - cant_actual) > 1e-9:
-                        nuevo = dict(prod)
-                        nuevo["cantidad_aritmetica_sugerida"] = float(entero)
-                        nuevo["cantidad_aritmetica_fuente"] = campo
-                        nuevo["cantidad_requiere_revision"] = True
-                        avisos = list(nuevo.get("advertencias_lectura") or [])
-                        avisos.append(
-                            f"aritmética sugiere cantidad {entero}, pero se conserva "
-                            f"la cantidad visual {cant_actual:g}; revisar si fuera necesario"
-                        )
-                        nuevo["advertencias_lectura"] = list(dict.fromkeys(avisos))
-                        return nuevo
-        return prod
+                if entero < 2 or entero > 1000:
+                    continue
+                reconstruido = entero * precio
+                error = abs(reconstruido - costo_total)
+                tol = max(0.10, abs(costo_total) * 0.004)
+                if error <= tol:
+                    candidatos.append((-prioridad, error, entero, campo, precio))
 
-    # Sólo rescatar si la cantidad no fue legible.
-    if costo_total is None or costo_total <= 0:
-        return prod
+            if candidatos:
+                _, error, entero, campo, precio = min(candidatos)
+                nuevo = dict(prod)
+                nuevo["cant_original_antes_reconciliacion"] = cant
+                nuevo["cant"] = float(entero)
+                nuevo["cantidad_reconciliada_fuente"] = campo
+                nuevo["cantidad_verificada_por_aritmetica"] = True
+                avisos = list(nuevo.get("advertencias_lectura") or [])
+                avisos.append(
+                    f"cantidad 1 corregida por aritmética fuerte: "
+                    f"{costo_total:.2f} / {precio:.2f} ≈ {entero}"
+                )
+                nuevo["advertencias_lectura"] = list(dict.fromkeys(avisos))
+                return nuevo
 
-    mejor = None
-    for campo, precio in precios:
-        ratio = costo_total / precio
-        entero = int(round(ratio))
-        if entero < 1 or entero > 1000:
-            continue
-        reconstruido = entero * precio
-        tolerancia = max(0.10, abs(costo_total) * 0.003)
-        error = abs(reconstruido - costo_total)
-        if error > tolerancia:
-            continue
-        candidato = (error, entero, campo, precio)
-        if mejor is None or candidato < mejor:
-            mejor = candidato
+    # Cantidad ausente/0: rescate conservador.
+    if cant <= 0 and costo_total and costo_total > 0 and precios:
+        candidatos = []
+        for campo, precio, prioridad in precios:
+            ratio = costo_total / precio
+            entero = int(round(ratio))
+            if entero < 1 or entero > 1000:
+                continue
+            error = abs(entero * precio - costo_total)
+            tol = max(0.10, abs(costo_total) * 0.003)
+            if error <= tol:
+                candidatos.append((-prioridad, error, entero, campo, precio))
+        if candidatos:
+            _, error, entero, campo, precio = min(candidatos)
+            nuevo = dict(prod)
+            nuevo["cant"] = float(entero)
+            nuevo["cantidad_reconciliada_fuente"] = campo
+            nuevo["cantidad_rescatada_por_aritmetica"] = True
+            return nuevo
 
-    if mejor is None:
-        return prod
-
-    _, cant_derivada, campo, precio = mejor
-    nuevo = dict(prod)
-    nuevo["cant_original_antes_reconciliacion"] = cant_actual
-    nuevo["cant"] = float(cant_derivada)
-    nuevo["cantidad_reconciliada_fuente"] = campo
-    nuevo["cantidad_rescatada_por_aritmetica"] = True
-
-    advertencias = list(nuevo.get("advertencias_lectura") or [])
-    advertencias.append(
-        f"cantidad no legible; rescatada por aritmética: "
-        f"{costo_total:.2f} / {precio:.2f} ≈ {cant_derivada}"
-    )
-    nuevo["advertencias_lectura"] = list(dict.fromkeys(advertencias))
-    return nuevo
+    return prod
 
 
 def _validar_empaque_final_producto(prod, proveedor=""):
@@ -10627,7 +10732,7 @@ Devuelve SOLO JSON:
     return data
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_1"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -12709,6 +12814,21 @@ def construir_df_productos():
             if llave not in existentes:
                 lista_matches.append(registro_match)
 
+        # R31.1: una fila sin unidades físicas/costo resuelto no debe entrar
+        # a la hoja importable Productos con Stock=0/Costo=0. Se conserva en Revisión.
+        if stock <= 0 or costo_unitario <= 0:
+            st.session_state.setdefault("productos_revision_lote", []).append({
+                "Producto": data.get("nombre", ""),
+                "Código": data.get("codigo_mostrar", ""),
+                "Proveedor": "",
+                "Unidad leída": data.get("udm_factura", ""),
+                "Presentación": "",
+                "Empaque actual": empaque_exportar,
+                "Motivo": data.get("motivos_revision", "stock/costo físico no resuelto"),
+                "Estado": "REVISAR - NO EXPORTADO",
+            })
+            continue
+
         filas.append({
             "Nombre": data["nombre"],
             "Código Barra": codigo_exportar,
@@ -13408,6 +13528,8 @@ def modal_confirmacion(validas, duplicadas_count, margen):
             "el valor quedará recordado para próximas facturas."
         )
         df_rev = pd.DataFrame(filas_revision_emp)
+        if "Confirmar" not in df_rev.columns:
+            df_rev["Confirmar"] = False
         df_edit = st.data_editor(
             df_rev,
             hide_index=True,
@@ -13415,6 +13537,11 @@ def modal_confirmacion(validas, duplicadas_count, margen):
             disabled=["_id", "Factura", "Producto", "Cantidad factura", "UDM", "Presentación", "Motivo"],
             column_config={
                 "_id": None,
+                "Confirmar": st.column_config.CheckboxColumn(
+                    "Confirmar",
+                    help="Márcalo sólo si verificaste la cantidad por empaque.",
+                    default=False,
+                ),
                 "Cantidad por empaque": st.column_config.NumberColumn(
                     "Cantidad por empaque",
                     min_value=1,
@@ -13434,10 +13561,15 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                 emp_usuario = int(float(fila.get("Cantidad por empaque") or 0))
             except Exception:
                 emp_usuario = 0
-            if emp_usuario >= 1:
+            confirmado = bool(fila.get("Confirmar"))
+            if confirmado and emp_usuario >= 1:
                 ref["emp_override_manual"] = emp_usuario
                 ref["emp"] = emp_usuario
-                _guardar_empaque_confirmado(ref, emp_usuario, fuente="confirmado_usuario")
+                _guardar_empaque_confirmado(
+                    ref,
+                    emp_usuario,
+                    fuente="confirmado_usuario_explicito",
+                )
 
     b1, b2 = st.columns(2)
     with b1:
@@ -14513,7 +14645,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R31_UNITIZACION_MULTIFUENTE_20260908"
+EXTRACTOR_CACHE_VERSION = "BASE6_R31_1_FIX_STOCK_CERO_CANTIDAD_20260908"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
