@@ -3808,7 +3808,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_1":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_2":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3825,7 +3825,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_1":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R31_1"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R31_2"
 
 
 # =========================================================
@@ -6631,6 +6631,161 @@ def _linea_recibo_demuestra_unidad_fisica(prod):
     return False
 
 
+
+def _pack_comun_final_nombre(texto):
+    """
+    Devuelve un pack común sólo si aparece como último token del nombre.
+    Ej.: "AGUA DASANI TORONJA 12" -> 12.
+    No interpreta números raros como 3/31 como pack.
+    """
+    t = " ".join(str(texto or "").upper().split())
+    m = re.search(
+        r"\b(6|8|10|12|18|20|24|30|32|36|40|48|60|72|96|100|120)\s*$",
+        t,
+    )
+    return int(m.group(1)) if m else None
+
+
+def _inferir_empaque_desde_maestro_y_costo(prod):
+    """
+    Fallback conservador para empaques ambiguos.
+
+    Usa el maestro SOLO como referencia:
+    - match de nombre alto;
+    - costo histórico unitario;
+    - precio actual por empaque de la factura;
+    - opcionalmente un pack común visible al final del nombre.
+
+    NO reemplaza el costo de factura.
+    """
+    if not isinstance(prod, dict):
+        return None
+
+    catalogo = st.session_state.get("inventario_referencia_catalogo", []) or []
+    if not catalogo:
+        return None
+
+    nombres = _nombres_candidatos_producto(prod)
+    if not nombres:
+        return None
+
+    resultados = []
+    for item in catalogo:
+        score = max(
+            (_similitud_producto_catalogo(n, item.get("nombre", "")) for n in nombres),
+            default=0.0,
+        )
+        if score > 0:
+            resultados.append((score, item))
+
+    if not resultados:
+        return None
+    resultados.sort(key=lambda x: x[0], reverse=True)
+    score, mejor = resultados[0]
+    segundo = resultados[1][0] if len(resultados) > 1 else 0.0
+
+    if score < 0.78:
+        return None
+    if segundo >= 0.76 and (score - segundo) < 0.06:
+        return None
+
+    # Si maestro trae un empaque >1 explícito, úsalo.
+    try:
+        emp_maestro = int(float(mejor.get("empaque_maestro") or 0))
+    except Exception:
+        emp_maestro = 0
+    if emp_maestro > 1:
+        return emp_maestro, "maestro_empaque_explicito", 96
+
+    # Precio actual por unidad facturada (caja/pack).
+    try:
+        q = float(prod.get("cant") or 0)
+        costo_linea = float(prod.get("costo_total") or 0)
+    except Exception:
+        q, costo_linea = 0.0, 0.0
+    if q <= 0 or costo_linea <= 0:
+        return None
+
+    precio_compra = costo_linea / q
+
+    try:
+        costo_maestro = float(mejor.get("costo_maestro") or 0)
+    except Exception:
+        costo_maestro = 0.0
+    if costo_maestro <= 0:
+        return None
+
+    # Candidato visible al final del nombre (ej. TORONJA 12).
+    nombre = (
+        prod.get("nombre_original_lectura")
+        or prod.get("nombre")
+        or ""
+    )
+    candidato_nombre = _pack_comun_final_nombre(nombre)
+
+    # Ratio entre precio actual del empaque y costo histórico unitario.
+    ratio = precio_compra / costo_maestro
+    packs_comunes = [6, 8, 10, 12, 18, 20, 24, 30, 32, 36, 40, 48, 60, 72, 96, 100, 120]
+    candidato_ratio = min(packs_comunes, key=lambda n: abs(ratio - n))
+    error_ratio = abs(ratio - candidato_ratio) / max(candidato_ratio, 1)
+
+    # Si el nombre dice 12 y el costo histórico también apunta cerca de 12,
+    # es evidencia fuerte.
+    if candidato_nombre and candidato_nombre == candidato_ratio and error_ratio <= 0.20:
+        return candidato_nombre, "maestro_costo_mas_pack_nombre", 97
+
+    # Sin número en el nombre: permitir sólo evidencia de costo muy cercana.
+    if error_ratio <= 0.10 and candidato_ratio > 1:
+        return candidato_ratio, "maestro_costo_historico", 90
+
+    return None
+
+
+def _vision_pack_sospechoso_igual_cantidad(prod, emp_api):
+    """
+    Detecta cuando Vision probablemente copió la columna CANTIDAD como pack.
+
+    Ejemplo:
+      cantidad=24, precio=105, línea=2520, UDM vacía,
+      Vision units_per_package=24.
+    Si no hay evidencia textual de pack, ese 24 es sospechoso.
+    """
+    try:
+        q = float(prod.get("cant") or 0)
+        emp_api = int(float(emp_api or 1))
+    except Exception:
+        return False
+
+    if q < 6 or emp_api <= 1 or abs(q - emp_api) > 1e-9:
+        return False
+
+    unidad = (
+        prod.get("purchase_unit")
+        or prod.get("unidad_original")
+        or prod.get("uom")
+        or prod.get("udm")
+        or ""
+    )
+    if not _udm_placeholder_no_real(unidad):
+        return False
+
+    evidencia = " ".join(str(x or "") for x in (
+        prod.get("package_evidence_text"),
+        prod.get("package_text"),
+        prod.get("raw_row_text"),
+        prod.get("presentation"),
+        prod.get("size_text"),
+        prod.get("nombre_original_lectura"),
+        prod.get("nombre"),
+    ))
+
+    # Si el texto demuestra el pack, no es sospechoso.
+    if _extraer_empaque_desde_tamano(evidencia) > 1:
+        return False
+
+    return _linea_recibo_demuestra_unidad_fisica(prod)
+
+
 def _inferir_empaque_universal(prod, proveedor=""):
     """
     R31 - resolución universal de empaque.
@@ -6694,14 +6849,23 @@ def _inferir_empaque_universal(prod, proveedor=""):
     if emp_catalogo > 1 and not es_deposito:
         return int(emp_catalogo), fuente_catalogo, 94, False
 
-    # Vision sólo si afirmó >1.
+    # Vision sólo si afirmó >1 y no parece haber copiado la CANTIDAD.
     try:
         emp_api = int(float(prod.get("units_per_package") or prod.get("emp") or 1))
     except Exception:
         emp_api = 1
     conf_api = str(prod.get("units_per_package_confidence") or "").lower()
+
     if emp_api > 1 and not es_deposito:
-        return int(emp_api), "vision_units_per_package", 95 if conf_api == "high" else 88, False
+        if not _vision_pack_sospechoso_igual_cantidad(prod, emp_api):
+            return int(emp_api), "vision_units_per_package", 95 if conf_api == "high" else 88, False
+
+    # Maestro + costo histórico como fallback para packs ocultos.
+    # Ej.: "AGUA DASANI TORONJA 12", precio actual de pack ~12x costo histórico.
+    emp_maestro_cost = _inferir_empaque_desde_maestro_y_costo(prod)
+    if emp_maestro_cost:
+        emp_mc, fuente_mc, conf_mc = emp_maestro_cost
+        return int(emp_mc), fuente_mc, int(conf_mc), False
 
     # Recibo sin UDM real, con cantidad×precio=linea y cantidad alta:
     # la cantidad ya representa unidades físicas.
@@ -10732,7 +10896,7 @@ Devuelve SOLO JSON:
     return data
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_1"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_2"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -11954,7 +12118,7 @@ def _normalizar_nombre_match_catalogo(valor):
 
     # Palabras genéricas que suelen aparecer en un archivo y no en el otro.
     t = re.sub(
-        r"\b(?:BEBIDA|ENERGIZANTE|ENERGY|ENERGIA|REFRESCO|FLAVORED|FLAVOUR|WATER|DRINK)\b",
+        r"\b(?:BEBIDA|ENERGIZANTE|ENERGY|ENERGIA|REFRESCO|FLAVORED|FLAVOUR|WATER|DRINK|AGUA)\b",
         " ",
         t,
     )
@@ -11964,6 +12128,15 @@ def _normalizar_nombre_match_catalogo(valor):
 
     t = re.sub(r"[^A-Z0-9.%]+", " ", t)
     t = re.sub(r"\s+", " ", t).strip()
+
+    # Ruido logístico frecuente al final del nombre:
+    # "DASANI TORONJA 12", "COCA COLA 400ML 12".
+    # Se elimina sólo para comparar contra el maestro.
+    t = re.sub(
+        r"\s+(?:6|8|10|12|18|20|24|30|32|36|40|48|60|72|96|100|120)\s*$",
+        "",
+        t,
+    ).strip()
     return t
 
 
@@ -12173,6 +12346,19 @@ def _cargar_inventario_referencia_bytes(raw_bytes, nombre_archivo="inventario.xl
         if not col_nombre or not col_codigo:
             continue
 
+        # Campos auxiliares opcionales. Se usan sólo como evidencia para
+        # inferir presentación/empaque; nunca sustituyen costo/stock de factura.
+        col_costo = None
+        col_empaque = None
+        for _col in df.columns:
+            _k = _normalizar_ocr(_col)
+            if col_costo is None and _k in ("costo", "cost", "precio costo", "precio de costo"):
+                col_costo = _col
+            if col_empaque is None and _k in (
+                "cantidad empaque", "cant empaque", "empaque", "unidades empaque"
+            ):
+                col_empaque = _col
+
         for _, row in df.iterrows():
             nombre = " ".join(str(row.get(col_nombre) or "").split()).strip()
             codigo_raw = str(row.get(col_codigo) or "").strip()
@@ -12186,12 +12372,23 @@ def _cargar_inventario_referencia_bytes(raw_bytes, nombre_archivo="inventario.xl
             if not codigo or codigo.startswith("TMP"):
                 continue
 
+            try:
+                _costo_maestro = float(str(row.get(col_costo) or "").replace(",", "")) if col_costo else None
+            except Exception:
+                _costo_maestro = None
+            try:
+                _emp_maestro = int(float(str(row.get(col_empaque) or "").replace(",", ""))) if col_empaque else None
+            except Exception:
+                _emp_maestro = None
+
             candidatos.append({
                 "nombre": nombre,
                 "codigo": codigo,
                 "hoja": str(hoja),
                 "nombre_match": _normalizar_nombre_match_catalogo(nombre),
                 "presentacion_ml": _presentacion_fisica_ml(nombre),
+                "costo_maestro": _costo_maestro,
+                "empaque_maestro": _emp_maestro,
             })
 
         if candidatos:
@@ -12323,11 +12520,11 @@ def _buscar_codigo_en_inventario_referencia(prod, catalogo=None):
 
     # Umbral alto pero no tan rígido como R28/R28.1.
     # Los nombres reales de factura suelen incluir abreviaturas, pack y OCR.
-    if mejor_score < 0.82:
+    if mejor_score < 0.80:
         return None
 
     # Si el segundo candidato también es fuerte, no arriesgar.
-    if segundo_score >= 0.78 and (mejor_score - segundo_score) < 0.07:
+    if segundo_score >= 0.76 and (mejor_score - segundo_score) < 0.07:
         return None
 
     return {
@@ -14645,7 +14842,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R31_1_FIX_STOCK_CERO_CANTIDAD_20260908"
+EXTRACTOR_CACHE_VERSION = "BASE6_R31_2_DASANI_PACK_MAESTRO_20260908"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
