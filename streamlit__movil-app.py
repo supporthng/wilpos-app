@@ -3808,7 +3808,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_3":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_4":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3825,7 +3825,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_3":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R31_3"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R31_4"
 
 
 # =========================================================
@@ -5708,6 +5708,8 @@ def _limpiar_producto_para_exportacion(prod):
     if not isinstance(prod, dict):
         return prod
     original = str(prod.get("nombre") or "")
+    if _es_roll_red_bull_producto(prod):
+        original = "RED BULL LT 24/250ML ST"
     limpio = _limpiar_nombre_producto_final(original)
     if limpio:
         prod["nombre_original_lectura"] = original
@@ -6843,15 +6845,16 @@ def _inferir_empaque_universal(prod, proveedor=""):
         ("deposito", "depos.", "depos ", "retornable vacio", "envase vacio")
     )
 
-    # UDM explícita primero: BOT/UND/PZA jamás se divide.
-    emp_udm, fuente_udm, conf_udm = _extraer_empaque_udm_universal(unidad)
-    if conf_udm >= 100:
-        return int(emp_udm), fuente_udm, conf_udm, False
-
-    # Evidencia literal. Primero mirar campos de presentación reales.
+    # Presentación/empaque explícito primero.
+    # Algunos proveedores imprimen UND para una unidad facturada que es un pack.
     emp_explicito = _empaque_explicito_sin_cantidad_fila(prod)
     if emp_explicito > 1 and not es_deposito:
         return int(emp_explicito), "evidencia_presentacion_explicita", 99, False
+
+    # Sólo sin multipack explícito BOT/UND/PZA se considera unidad física.
+    emp_udm, fuente_udm, conf_udm = _extraer_empaque_udm_universal(unidad)
+    if conf_udm >= 100:
+        return int(emp_udm), fuente_udm, conf_udm, False
 
     # raw_row_text puede contener datos útiles (ej. "... 12 1"), pero también
     # contiene la CANTIDAD. Si el supuesto pack coincide con q y la aritmética
@@ -10924,7 +10927,7 @@ Devuelve SOLO JSON:
     return data
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_3"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_4"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -12094,6 +12097,22 @@ def _preservar_barcode_original(valor):
 # =========================================================
 # INVENTARIO DE REFERENCIA / MATCHING DE CÓDIGOS
 # =========================================================
+
+def _es_roll_red_bull_texto(valor):
+    t = _normalizar_ocr(valor)
+    return bool(re.search(r"\bROLL\b.*\bLT\b.*\b250\s*ML\b.*\bST\b", t))
+
+def _alias_producto_conocido(valor):
+    if _es_roll_red_bull_texto(valor):
+        return "RED BULL LT 24/250ML ST"
+    return str(valor or "")
+
+def _es_roll_red_bull_producto(prod):
+    if not isinstance(prod, dict):
+        return False
+    return any(_es_roll_red_bull_texto(prod.get(k) or "") for k in
+               ("nombre","nombre_original_lectura","description","descripcion"))
+
 def _normalizar_nombre_match_catalogo(valor):
     """
     Normalización fuerte para comparar el nombre leído de la factura
@@ -12106,6 +12125,7 @@ def _normalizar_nombre_match_catalogo(valor):
     """
     import unicodedata
 
+    valor = _alias_producto_conocido(valor)
     t = str(valor or "").upper().strip()
     t = "".join(
         c for c in unicodedata.normalize("NFKD", t)
@@ -12458,6 +12478,10 @@ def _codigo_confirmado_producto(prod):
     barcode = _codigo_producto_mostrar(prod.get("barcode") or "")
     codigo = _codigo_producto_mostrar(prod.get("codigo") or "")
 
+    # Para ROLL/Red Bull, 93898 es SKU interno, no barcode.
+    if _es_roll_red_bull_producto(prod):
+        return False
+
     if barcode and not barcode.upper().startswith("TMP"):
         return True
     if codigo and not codigo.upper().startswith("TMP"):
@@ -12706,7 +12730,8 @@ def _resolver_codigo_tmp_para_exportacion(nombre, codigo_actual):
     """
     actual = _codigo_producto_mostrar(codigo_actual)
 
-    if actual and not actual.upper().startswith("TMP"):
+    es_roll_red_bull = _es_roll_red_bull_texto(nombre)
+    if actual and not actual.upper().startswith("TMP") and not es_roll_red_bull:
         return actual, None
 
     catalogo = st.session_state.get("inventario_referencia_catalogo", []) or []
@@ -12717,8 +12742,8 @@ def _resolver_codigo_tmp_para_exportacion(nombre, codigo_actual):
         "nombre": str(nombre or ""),
         "nombre_original_lectura": str(nombre or ""),
         "description": str(nombre or ""),
-        "codigo": actual,
-        "barcode": actual,
+        "codigo": ("TMP-ROLL-REDBULL" if es_roll_red_bull else actual),
+        "barcode": ("TMP-ROLL-REDBULL" if es_roll_red_bull else actual),
         "code_status": "not_printed",
     }
 
@@ -14870,7 +14895,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R31_3_MONSTER_QTY_NO_PACK_20260908"
+EXTRACTOR_CACHE_VERSION = "BASE6_R31_4_PACK_UND_REDBULL_20260908"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
