@@ -3802,7 +3802,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_3":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_4":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3819,7 +3819,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_3":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_6_3"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_6_4"
 
 
 # =========================================================
@@ -9767,7 +9767,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_6_3"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_6_4"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -12139,7 +12139,6 @@ def _render_envases_retornables_ui():
         )
 
 
-@st.dialog("Confirmar procesamiento")
 def _preparar_revision_empaques_modal(validas):
     """
     Devuelve filas que requieren confirmar Cantidad por empaque.
@@ -12194,6 +12193,7 @@ def _preparar_revision_empaques_modal(validas):
     return filas, refs
 
 
+@st.dialog("Confirmar procesamiento")
 def modal_confirmacion(validas, duplicadas_count, margen):
     st.markdown("### 🚀 Consolidar facturas para WilPOS")
     st.caption("Esta acción consolidará productos repetidos por código y preparará los datos para el Excel de WilPOS.")
@@ -13324,7 +13324,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_6_3_EMPAQUE_ESTRICTO_20260907"
+EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_6_4_FIX_DIALOG_EMPAQUE_20260907"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
