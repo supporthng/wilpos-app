@@ -3806,7 +3806,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R30_1":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R30_2":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3823,7 +3823,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R30_1":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R30_1"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R30_2"
 
 
 # =========================================================
@@ -9970,15 +9970,24 @@ REGLAS ADICIONALES:
 
 def _vision_necesita_rescate_economico(data):
     """
-    Decide si una segunda llamada IA es realmente necesaria.
+    Control de calidad previo a aceptar una factura.
 
-    Modo económico:
-    - 1 llamada principal por imagen/página.
-    - 0 llamadas extra si la lectura ya contiene datos suficientes.
-    - máximo 1 rescate si faltan filas o datos esenciales.
+    R30.2:
+    una fila NO está completa sólo porque tenga descripción + cantidad + costo.
+    También debe quedar resuelta la semántica de empaque cuando la UDM es
+    ambigua (EA/PC/PCS), genérica (CAJA/CJ sin número) o está vacía.
+
+    Devuelve:
+        (necesita_rescate, motivo, tipo)
+
+    tipo:
+        "ninguno"
+        "filas"
+        "empaque"
+        "mixto"
     """
     if not isinstance(data, dict):
-        return True, "respuesta no estructurada"
+        return True, "respuesta no estructurada", "mixto"
 
     productos = [p for p in (data.get("products") or []) if isinstance(p, dict)]
     omitidos = [p for p in (data.get("omitted_rows") or []) if isinstance(p, dict)]
@@ -9988,24 +9997,26 @@ def _vision_necesita_rescate_economico(data):
     except Exception:
         visibles = 0
 
+    problemas_fila = []
+    problemas_empaque = []
+
     if not productos:
-        return True, "sin productos"
+        return True, "sin productos", "filas"
 
     if omitidos:
-        return True, f"{len(omitidos)} fila(s) omitida(s)"
+        problemas_fila.append(f"{len(omitidos)} fila(s) omitida(s)")
 
     if visibles and len(productos) < visibles:
-        return True, f"{len(productos)}/{visibles} filas recuperadas"
+        problemas_fila.append(f"{len(productos)}/{visibles} filas recuperadas")
 
-    problemas = 0
-    for p in productos:
+    for idx, p in enumerate(productos, start=1):
         desc = " ".join(str(p.get("description") or "").split()).strip()
+
         try:
             q = float(p.get("quantity_packages") or 0)
         except Exception:
             q = 0.0
 
-        # Debe existir alguna evidencia monetaria.
         monetarios = (
             p.get("line_cost_net"),
             p.get("subtotal_net"),
@@ -10024,12 +10035,93 @@ def _vision_necesita_rescate_economico(data):
                 pass
 
         if not desc or q <= 0 or not tiene_monto:
-            problemas += 1
+            problemas_fila.append(f"fila {idx} incompleta")
+            continue
 
-    if problemas:
-        return True, f"{problemas} fila(s) sin cantidad/descripción/costo suficiente"
+        unidad = " ".join(str(
+            p.get("purchase_unit")
+            or p.get("unit")
+            or p.get("uom")
+            or p.get("udm")
+            or ""
+        ).upper().replace(".", "").split()).strip()
 
-    return False, "lectura suficiente"
+        try:
+            emp = int(float(p.get("units_per_package") or 1))
+        except Exception:
+            emp = 1
+
+        package_text = " ".join(str(
+            p.get("package_text")
+            or p.get("presentation")
+            or p.get("size_text")
+            or ""
+        ).split()).strip()
+
+        # Resolver localmente toda evidencia fuerte antes de pedir otra llamada.
+        emp_local = _extraer_empaque_desde_tamano(
+            " ".join(x for x in (package_text, desc) if x)
+        )
+        if emp_local > emp:
+            emp = emp_local
+            p["units_per_package"] = emp_local
+            p["package_rescue_source"] = "parser_local_pre_rescate"
+
+        # UDM física inequívoca => empaque 1 es válido.
+        udm_fisica = bool(re.fullmatch(
+            r"(?:BOT|BOTELLA|BOTELLAS|UND|UNIDAD|UNIDADES|PZA|PZAS|PIEZA|PIEZAS)",
+            unidad,
+            flags=re.I,
+        ))
+
+        # UDM con pack explícito => no es ambigua.
+        udm_pack_explicito = bool(re.search(
+            r"(?:CJ|CAJ|CAJA|CASE|PACK|PCK)\s*[- /]?\s*\d{1,3}",
+            unidad,
+            flags=re.I,
+        ))
+
+        # EA/PC/PCS son comerciales, no necesariamente unidad física.
+        udm_ambigua = bool(re.fullmatch(r"(?:EA|PC|PCS)", unidad or "", flags=re.I))
+
+        # Caja genérica sin contenido.
+        caja_generica = bool(re.fullmatch(
+            r"(?:CA|CJ|CAJ|CAJA|CASE|PACK|PCK)",
+            unidad or "",
+            flags=re.I,
+        ))
+
+        # Sin UDM también puede ocultar que la cantidad representa cajas.
+        sin_udm = not unidad
+
+        if emp <= 1 and not udm_fisica and not udm_pack_explicito:
+            if udm_ambigua or caja_generica or sin_udm:
+                problemas_empaque.append({
+                    "row_index": idx,
+                    "description": desc,
+                    "purchase_unit": unidad,
+                    "package_text": package_text,
+                })
+
+    if problemas_fila and problemas_empaque:
+        return (
+            True,
+            f"{'; '.join(problemas_fila[:4])}; "
+            f"{len(problemas_empaque)} fila(s) con empaque ambiguo",
+            "mixto",
+        )
+
+    if problemas_fila:
+        return True, "; ".join(problemas_fila[:6]), "filas"
+
+    if problemas_empaque:
+        return (
+            True,
+            f"{len(problemas_empaque)} fila(s) con empaque ambiguo",
+            "empaque",
+        )
+
+    return False, "lectura suficiente y empaque resuelto", "ninguno"
 
 
 def _registrar_llamada_ia(tipo="principal"):
@@ -10046,7 +10138,310 @@ def _registrar_llamada_ia(tipo="principal"):
         pass
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R30_1"):
+def _rescate_unico_calidad_vision(
+    client,
+    modelo,
+    data_url,
+    data,
+    nombre_archivo,
+    tipo_rescate="mixto",
+):
+    """
+    ÚNICA segunda llamada permitida por página en R30.2.
+
+    Si sólo falta empaque, devuelve únicamente las filas ambiguas.
+    Si faltan filas/datos esenciales, vuelve a leer la tabla completa.
+
+    Nunca se ejecutan después rescates separados de códigos/empaque/cantidad.
+    """
+    if not isinstance(data, dict):
+        return data
+
+    productos = [p for p in (data.get("products") or []) if isinstance(p, dict)]
+
+    ambiguas = []
+    for idx, p in enumerate(productos, start=1):
+        unidad = " ".join(str(
+            p.get("purchase_unit")
+            or p.get("unit")
+            or p.get("uom")
+            or p.get("udm")
+            or ""
+        ).upper().replace(".", "").split()).strip()
+
+        try:
+            emp = int(float(p.get("units_per_package") or 1))
+        except Exception:
+            emp = 1
+
+        desc = " ".join(str(p.get("description") or "").split()).strip()
+        package_text = " ".join(str(
+            p.get("package_text")
+            or p.get("presentation")
+            or p.get("size_text")
+            or ""
+        ).split()).strip()
+
+        emp_local = _extraer_empaque_desde_tamano(
+            " ".join(x for x in (package_text, desc) if x)
+        )
+        if emp_local > 1:
+            p["units_per_package"] = emp_local
+            continue
+
+        udm_fisica = bool(re.fullmatch(
+            r"(?:BOT|BOTELLA|BOTELLAS|UND|UNIDAD|UNIDADES|PZA|PZAS|PIEZA|PIEZAS)",
+            unidad,
+            flags=re.I,
+        ))
+        udm_pack = bool(re.search(
+            r"(?:CJ|CAJ|CAJA|CASE|PACK|PCK)\s*[- /]?\s*\d{1,3}",
+            unidad,
+            flags=re.I,
+        ))
+        ambigua = (
+            not unidad
+            or bool(re.fullmatch(r"(?:EA|PC|PCS)", unidad or "", flags=re.I))
+            or bool(re.fullmatch(r"(?:CA|CJ|CAJ|CAJA|CASE|PACK|PCK)", unidad or "", flags=re.I))
+        )
+
+        if emp <= 1 and ambigua and not udm_fisica and not udm_pack and desc:
+            ambiguas.append({
+                "row_index": idx,
+                "description": desc,
+                "purchase_unit": unidad,
+                "package_text": package_text,
+            })
+
+    if tipo_rescate == "empaque" and ambiguas:
+        filas_txt = "\n".join(
+            f'{x["row_index"]}. {x["description"]} | '
+            f'UdM={x["purchase_unit"] or "(vacía)"} | '
+            f'Presentación={x["package_text"] or "(vacía)"}'
+            for x in ambiguas[:100]
+        )
+
+        prompt = f"""
+SEGUNDA Y ÚLTIMA REVISIÓN DE ESTA IMAGEN.
+NO vuelvas a interpretar toda la factura. Revisa SOLAMENTE estas filas:
+
+{filas_txt}
+
+Necesito determinar la CANTIDAD POR EMPAQUE de cada fila.
+
+Busca evidencia visual que pertenezca a la misma fila o a su continuación:
+- 12X400ML, 24X330ML, 12/500ML, 24/350ML
+- Caja-12, Caja 24, Pack 12, CJ12BOT, CJ24BOT
+- una continuación como "400ML 12 1", "500ML 12", "32 OZ 12 1"
+- texto explícito "12 UND", "24 BOT", "6 PZA"
+- cualquier otra notación inequívoca del contenido del paquete.
+
+REGLAS:
+- 400ML, 500ML, 32 OZ, 750ML son TAMAÑO, no empaque.
+- EA/PC/PCS NO significa automáticamente una unidad física.
+- No uses conocimiento externo de la marca.
+- No infieras 12/24 por precio.
+- Si no existe evidencia suficiente, usa units_per_package=null.
+- Copia package_evidence_text EXACTAMENTE de la imagen.
+- confidence="high" sólo cuando la evidencia sea inequívoca.
+
+Devuelve SOLO JSON:
+{{
+  "rows": [
+    {{
+      "row_index": 1,
+      "units_per_package": 12,
+      "package_evidence_text": "texto exacto",
+      "confidence": "high|medium|low"
+    }}
+  ]
+}}
+"""
+        modo = "empaque"
+    else:
+        prompt = """
+SEGUNDA Y ÚLTIMA REVISIÓN DE ESTA FACTURA.
+
+La primera lectura tiene filas faltantes o datos esenciales incompletos.
+Recorre TODA la tabla de arriba hacia abajo y devuelve TODAS las filas reales.
+
+Para cada fila devuelve evidencia, no conclusiones inventadas:
+- barcode/internal_code exactos como texto
+- description completa
+- quantity_packages EXACTA de la columna cantidad
+- purchase_unit EXACTA
+- package_text EXACTO
+- units_per_package sólo si está demostrado visualmente
+- net_price_per_package
+- price_unit_per_package
+- line_cost_net
+- subtotal_net
+- tax_value
+- gross_line_total
+- itbis_rate
+
+IMPORTANTE:
+- si EA/PC/PCS corresponde a un multipack, busca su contenido en la misma fila
+  o continuación de descripción.
+- no confundas 400ML/500ML/32OZ con número de unidades.
+- no inventes códigos, cantidad ni empaque.
+
+Devuelve SOLO JSON:
+{
+  "visible_product_rows": 0,
+  "rows": [
+    {
+      "row_index": 1,
+      "barcode": null,
+      "internal_code": null,
+      "description": "",
+      "quantity_packages": 1,
+      "purchase_unit": "",
+      "package_text": "",
+      "units_per_package": null,
+      "net_price_per_package": null,
+      "price_unit_per_package": null,
+      "line_cost_net": null,
+      "subtotal_net": null,
+      "tax_value": null,
+      "gross_line_total": null,
+      "itbis_rate": 0.18,
+      "confidence": "high|medium|low"
+    }
+  ]
+}
+"""
+        modo = "completo"
+
+    try:
+        resp = client.responses.create(
+            model=modelo,
+            store=False,
+            reasoning={"effort": "low"},
+            input=[{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": prompt},
+                    {"type": "input_image", "image_url": data_url, "detail": "high"},
+                ],
+            }],
+            text={"verbosity": "low"},
+            max_output_tokens=9000 if modo == "completo" else 5000,
+        )
+
+        txt = str(getattr(resp, "output_text", "") or "").strip()
+        txt = re.sub(r"^```(?:json)?\s*", "", txt, flags=re.I)
+        txt = re.sub(r"\s*```$", "", txt).strip()
+        if not txt:
+            return data
+
+        res = json.loads(txt)
+        rows = [r for r in (res.get("rows") or []) if isinstance(r, dict)]
+    except Exception as exc:
+        _diag_vision(
+            nombre_archivo,
+            "rescate único R30.2",
+            "ERROR",
+            f"{type(exc).__name__}: {str(exc)[:700]}",
+        )
+        return data
+
+    if modo == "empaque":
+        for r in rows:
+            try:
+                idx = int(r.get("row_index") or 0) - 1
+                emp = int(float(r.get("units_per_package") or 0))
+            except Exception:
+                continue
+
+            conf = str(r.get("confidence") or "").lower()
+            if idx < 0 or idx >= len(productos):
+                continue
+            if conf != "high" or not (2 <= emp <= 144):
+                continue
+
+            productos[idx]["units_per_package"] = emp
+            evidencia = " ".join(str(r.get("package_evidence_text") or "").split()).strip()
+            if evidencia:
+                productos[idx]["package_text"] = evidencia
+            productos[idx]["package_rescue_source"] = "rescate_unico_r30_2"
+            productos[idx]["package_rescue_confidence"] = "high"
+
+        data["products"] = productos
+        return data
+
+    # Modo completo: fusionar por row_index conservando campos existentes buenos.
+    for r in rows:
+        try:
+            idx = int(r.get("row_index") or 0) - 1
+        except Exception:
+            continue
+
+        if idx < 0:
+            continue
+
+        if idx >= len(productos):
+            productos.append({
+                "barcode": r.get("barcode"),
+                "internal_code": r.get("internal_code"),
+                "code_status": "read" if (r.get("barcode") or r.get("internal_code")) else "unknown",
+                "description": r.get("description"),
+                "quantity_packages": r.get("quantity_packages"),
+                "purchase_unit": r.get("purchase_unit"),
+                "package_text": r.get("package_text"),
+                "units_per_package": r.get("units_per_package"),
+                "net_price_per_package": r.get("net_price_per_package"),
+                "price_unit_per_package": r.get("price_unit_per_package"),
+                "line_cost_net": r.get("line_cost_net"),
+                "subtotal_net": r.get("subtotal_net"),
+                "tax_value": r.get("tax_value"),
+                "gross_line_total": r.get("gross_line_total"),
+                "itbis_rate": r.get("itbis_rate"),
+            })
+            continue
+
+        p = productos[idx]
+        conf = str(r.get("confidence") or "").lower()
+
+        # Sólo una segunda lectura HIGH puede corregir campos críticos.
+        if conf == "high":
+            for campo in (
+                "description",
+                "quantity_packages",
+                "purchase_unit",
+                "package_text",
+                "units_per_package",
+                "net_price_per_package",
+                "price_unit_per_package",
+                "line_cost_net",
+                "subtotal_net",
+                "tax_value",
+                "gross_line_total",
+                "itbis_rate",
+            ):
+                valor = r.get(campo)
+                if valor not in (None, ""):
+                    p[campo] = valor
+
+        # Códigos: completar si faltan, no reemplazar uno ya leído.
+        if not p.get("barcode") and r.get("barcode"):
+            p["barcode"] = r.get("barcode")
+        if not p.get("internal_code") and r.get("internal_code"):
+            p["internal_code"] = r.get("internal_code")
+
+    data["products"] = productos
+
+    try:
+        vis = int(res.get("visible_product_rows") or 0)
+        if vis > int(data.get("visible_product_rows") or 0):
+            data["visible_product_rows"] = vis
+    except Exception:
+        pass
+
+    return data
+
+
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R30_2"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -10345,30 +10740,47 @@ REGLAS:
             # BASE6-R30 — MODO ECONÓMICO:
             # La lectura principal debe ser suficiente en la mayoría de facturas.
             # Sólo se permite UNA segunda llamada si faltan filas o datos esenciales.
-            necesita_rescate, motivo_rescate = _vision_necesita_rescate_economico(data)
+            necesita_rescate, motivo_rescate, tipo_rescate = _vision_necesita_rescate_economico(data)
             if necesita_rescate:
                 _diag_vision(
                     nombre_archivo,
-                    "modo económico",
+                    "modo económico R30.2",
                     "INTENTO",
-                    f"Se autoriza 1 rescate: {motivo_rescate}",
+                    f"Se autoriza 1 único rescate ({tipo_rescate}): {motivo_rescate}",
                 )
                 _registrar_llamada_ia("rescate")
-                data = _rescatar_filas_factura_vision(
+                data = _rescate_unico_calidad_vision(
                     client,
                     modelo,
                     data_url,
                     data,
                     nombre_archivo,
-                    instrucciones,
+                    tipo_rescate=tipo_rescate,
                 )
             else:
                 _diag_vision(
                     nombre_archivo,
-                    "modo económico",
+                    "modo económico R30.2",
                     "OK",
                     "Lectura principal suficiente; 0 llamadas IA adicionales.",
                 )
+
+            # Última pasada LOCAL (sin costo IA) sobre evidencia de empaque.
+            for _p in (data.get("products") or []):
+                if not isinstance(_p, dict):
+                    continue
+                _texto_emp = " ".join(str(x or "") for x in (
+                    _p.get("package_text"),
+                    _p.get("description"),
+                ))
+                _emp_local = _extraer_empaque_desde_tamano(_texto_emp)
+                try:
+                    _emp_actual = int(float(_p.get("units_per_package") or 1))
+                except Exception:
+                    _emp_actual = 1
+                if _emp_local > _emp_actual:
+                    _p["units_per_package"] = _emp_local
+                    _p["package_rescue_source"] = "parser_local_post_rescate"
 
             resultado = _normalizar_resultado_vision_factura(data, nombre_archivo)
             if resultado is None:
@@ -13750,7 +14162,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R30_1_FIX_DIALOG_20260907"
+EXTRACTOR_CACHE_VERSION = "BASE6_R30_2_RESCATE_UNICO_EMPAQUE_20260907"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
@@ -14165,8 +14577,8 @@ def render_carga_facturas(titulo=True):
         llamadas_rescate = int(st.session_state.get("ia_llamadas_rescate", 0))
         st.caption(
             f"💰 IA esta sesión: {llamadas_principales} lectura(s) principal(es) + "
-            f"{llamadas_rescate} rescate(s). Máximo normal: 1 llamada por imagen; "
-            "segunda llamada sólo si faltan datos esenciales."
+            f"{llamadas_rescate} rescate(s). Máximo por imagen/página: 1 lectura + "
+            "1 único rescate sólo si faltan filas, cantidad, costo o empaque."
         )
     else:
         st.warning(
