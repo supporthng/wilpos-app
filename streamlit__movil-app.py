@@ -3795,6 +3795,7 @@ DEFAULTS = {
     "formatos_adaptativos": {},
     "formatos_revision_lote": {},
     "envases_retornables_lote": [],
+    "archivos_productos_expandidos": set(),
 }
 
 for key, value in DEFAULTS.items():
@@ -3802,7 +3803,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_4":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_5":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3819,7 +3820,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_4":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_6_4"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_6_5"
 
 
 # =========================================================
@@ -9767,7 +9768,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_6_4"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_6_5"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -13324,7 +13325,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_6_4_FIX_DIALOG_EMPAQUE_20260907"
+EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_6_5_PRODUCTOS_POR_IMAGEN_20260907"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
@@ -13470,6 +13471,85 @@ def _guardar_resultado_archivo_lote(nombre, estado, **kwargs):
     item = {"archivo": str(nombre or ""), "estado": str(estado or "")}
     item.update(kwargs)
     st.session_state["resultado_archivos_lote"][str(nombre or "")] = item
+
+
+
+def _detalle_productos_por_archivo(productos):
+    """
+    Convierte los productos de UNA imagen/página en filas legibles.
+    No usa el consolidado de otras fotos/facturas.
+    """
+    filas = []
+
+    for p in productos or []:
+        if not isinstance(p, dict):
+            continue
+
+        try:
+            cantidad = float(p.get("cant") or p.get("quantity_packages") or 0)
+        except Exception:
+            cantidad = 0.0
+
+        try:
+            empaque = max(1, int(float(
+                p.get("emp")
+                or p.get("units_per_package")
+                or 1
+            )))
+        except Exception:
+            empaque = 1
+
+        unidades = cantidad * empaque
+
+        try:
+            costo_neto = float(
+                p.get("costo_total")
+                or p.get("line_cost_net")
+                or 0
+            )
+        except Exception:
+            costo_neto = 0.0
+
+        costo_unidad = (
+            costo_neto / unidades
+            if unidades > 0 else 0.0
+        )
+
+        codigo = (
+            p.get("barcode")
+            or p.get("codigo")
+            or p.get("internal_code")
+            or ""
+        )
+
+        filas.append({
+            "Código": _codigo_producto_mostrar(codigo),
+            "Producto": (
+                p.get("nombre")
+                or p.get("description")
+                or p.get("nombre_original_lectura")
+                or ""
+            ),
+            "Cantidad factura": cantidad,
+            "UDM": (
+                p.get("purchase_unit")
+                or p.get("unidad_original")
+                or p.get("uom")
+                or p.get("udm")
+                or ""
+            ),
+            "Cantidad por empaque": empaque,
+            "Unidades físicas": unidades,
+            "Costo neto línea": round(costo_neto, 4),
+            "Costo por unidad": round(costo_unidad, 4),
+            "Fuente empaque": (
+                p.get("empaque_fuente")
+                or p.get("fuente_empaque")
+                or ""
+            ),
+        })
+
+    return filas
 
 
 def _resumen_trazabilidad_lote():
@@ -13958,6 +14038,16 @@ def render_carga_facturas(titulo=True):
 
         # Acciones menos frecuentes quedan plegadas para no ocupar espacio.
         with st.expander("Administrar archivos cargados", expanded=False):
+            st.caption(
+                "Pulsa ▾ para expandir una imagen y ver exactamente qué productos "
+                "se detectaron en ese archivo."
+            )
+
+            _expandidos = st.session_state.setdefault(
+                "archivos_productos_expandidos",
+                set(),
+            )
+
             for indice, archivo in enumerate(uploaded_files):
                 try:
                     datos = archivo.getvalue()
@@ -13968,26 +14058,158 @@ def render_carga_facturas(titulo=True):
 
                 nombre = archivo.name
                 mime = getattr(archivo, "type", None)
-                c1, c2, c3 = st.columns([7, 1.3, 1.3], gap="small", vertical_alignment="center")
+                _id_archivo = _huella_archivo_ui(archivo)
+                _esta_expandido = _id_archivo in _expandidos
+
+                c1, c2, c3, c4 = st.columns(
+                    [6.5, 1, 1, 1],
+                    gap="small",
+                    vertical_alignment="center",
+                )
+
                 with c1:
                     st.caption(nombre)
+
                 with c2:
+                    if st.button(
+                        "▴" if _esta_expandido else "▾",
+                        key=f"expand_file_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
+                        help=(
+                            "Ocultar productos de esta imagen"
+                            if _esta_expandido
+                            else "Ver imagen y productos detectados"
+                        ),
+                        use_container_width=True,
+                    ):
+                        if _esta_expandido:
+                            _expandidos.discard(_id_archivo)
+                        else:
+                            _expandidos.add(_id_archivo)
+                        st.rerun()
+
+                with c3:
                     if st.button(
                         "👁",
                         key=f"preview_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
-                        help=f"Vista previa de {nombre}",
+                        help=f"Vista previa rápida de {nombre}",
                         use_container_width=True,
                     ):
                         mostrar_vista_previa_archivo(nombre, mime, datos)
-                with c3:
+
+                with c4:
                     if st.button(
                         "✕",
                         key=f"remove_btn_{indice}_{st.session_state.uploader_key}_{st.session_state.camera_key}",
                         help=f"Quitar {nombre}",
                         use_container_width=True,
                     ):
+                        _expandidos.discard(_id_archivo)
                         st.session_state.archivos_ocultos_ui.add(_huella_archivo_ui(archivo))
                         st.rerun()
+
+                if _esta_expandido:
+                    with st.container(border=True):
+                        _vista, _productos = st.columns(
+                            [1.05, 1.95],
+                            gap="medium",
+                        )
+
+                        with _vista:
+                            nombre_lower = nombre.lower()
+                            if nombre_lower.endswith((".jpg", ".jpeg", ".png", ".webp")):
+                                try:
+                                    _img = Image.open(io.BytesIO(datos))
+                                    _img = ImageOps.exif_transpose(_img)
+                                    st.image(
+                                        _img,
+                                        caption=nombre,
+                                        use_container_width=True,
+                                    )
+                                except Exception as exc:
+                                    st.warning(f"No se pudo mostrar la imagen: {exc}")
+                            elif nombre_lower.endswith(".pdf"):
+                                if PYMUPDF_DISPONIBLE:
+                                    try:
+                                        _doc = fitz.open(stream=datos, filetype="pdf")
+                                        if len(_doc) > 0:
+                                            _pag = _doc[0]
+                                            _pix = _pag.get_pixmap(
+                                                matrix=fitz.Matrix(1.05, 1.05),
+                                                alpha=False,
+                                            )
+                                            _img = Image.frombytes(
+                                                "RGB",
+                                                [_pix.width, _pix.height],
+                                                _pix.samples,
+                                            )
+                                            st.image(
+                                                _img,
+                                                caption=f"{nombre} · primera página",
+                                                use_container_width=True,
+                                            )
+                                        _doc.close()
+                                    except Exception as exc:
+                                        st.warning(f"No se pudo mostrar el PDF: {exc}")
+                                else:
+                                    st.info("Vista previa PDF no disponible.")
+                            else:
+                                st.info("Sin vista previa para este formato.")
+
+                        with _productos:
+                            _resultado = (
+                                st.session_state.get("resultado_archivos_lote", {}) or {}
+                            ).get(nombre, {})
+                            _detalle = _resultado.get("productos_detalle") or []
+
+                            if _detalle:
+                                _prov = _resultado.get("proveedor", "")
+                                _fac = _resultado.get("factura", "")
+                                st.markdown(
+                                    f"**Productos detectados: {len(_detalle)}**"
+                                    + (f" · {_prov}" if _prov else "")
+                                    + (f" · Factura {_fac}" if _fac else "")
+                                )
+                                st.dataframe(
+                                    pd.DataFrame(_detalle),
+                                    use_container_width=True,
+                                    hide_index=True,
+                                    column_config={
+                                        "Cantidad factura": st.column_config.NumberColumn(
+                                            format="%.2f"
+                                        ),
+                                        "Cantidad por empaque": st.column_config.NumberColumn(
+                                            format="%d"
+                                        ),
+                                        "Unidades físicas": st.column_config.NumberColumn(
+                                            format="%.2f"
+                                        ),
+                                        "Costo neto línea": st.column_config.NumberColumn(
+                                            format="RD$ %.2f"
+                                        ),
+                                        "Costo por unidad": st.column_config.NumberColumn(
+                                            format="RD$ %.4f"
+                                        ),
+                                    },
+                                )
+                            else:
+                                _estado = _resultado.get("estado", "")
+                                if _estado in (
+                                    "no_reconocido",
+                                    "timeout",
+                                    "error_api",
+                                    "limite_api",
+                                ):
+                                    st.warning(
+                                        "Este archivo no produjo productos válidos. "
+                                        + str(_resultado.get("motivo") or "")
+                                    )
+                                else:
+                                    st.info(
+                                        "Los productos aparecerán aquí después de que "
+                                        "esta imagen termine de procesarse."
+                                    )
+
+                st.divider()
 
         st.markdown("<div style='height:.1rem'></div>", unsafe_allow_html=True)
 
@@ -13997,7 +14219,16 @@ def render_carga_facturas(titulo=True):
 
     if uploaded_files:
         st.session_state.errores_ocr = []
-        st.session_state["resultado_archivos_lote"] = {}
+
+        # Mantener detalle por archivo entre reruns para poder expandirlo.
+        st.session_state.setdefault("resultado_archivos_lote", {})
+        _nombres_actuales = {str(getattr(_f, "name", "")) for _f in uploaded_files}
+        st.session_state["resultado_archivos_lote"] = {
+            _k: _v
+            for _k, _v in st.session_state["resultado_archivos_lote"].items()
+            if _k in _nombres_actuales
+        }
+
         st.session_state["correcciones_empaque_lote"] = []
         st.session_state["matches_catalogo_lote"] = []
         st.session_state["matches_catalogo_pendientes_lote"] = []
@@ -14098,6 +14329,7 @@ def render_carga_facturas(titulo=True):
                     proveedor=proveedor,
                     factura=num_fac,
                     productos=len(productos),
+                    productos_detalle=_detalle_productos_por_archivo(productos),
                     formato_estado=evaluacion_formato.get("estado", "revisar"),
                     formato_confianza=evaluacion_formato.get("confianza", 0),
                     lineas_repetidas_sumadas=repetidos_internos,
@@ -14151,6 +14383,7 @@ def render_carga_facturas(titulo=True):
                 proveedor=proveedor or prov0,
                 factura=num_fac or num0,
                 productos=len(productos),
+                productos_detalle=_detalle_productos_por_archivo(productos),
                 productos_nuevos=nuevos,
                 productos_repetidos_omitidos=(repetidos_internos + repetidos_solapados),
                 motivo=(
