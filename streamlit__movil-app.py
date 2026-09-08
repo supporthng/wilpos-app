@@ -3808,7 +3808,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_6_4":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_6_5":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3825,7 +3825,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_6_4":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R31_6_4"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R31_6_5"
 
 
 # =========================================================
@@ -9608,6 +9608,92 @@ def _cantidad_verificada_nota_credito_376555(ncf, nombre):
     return None
 
 
+
+def _aplicar_cantidades_nota_credito_presidente(productos):
+    """
+    Reconoce la nota de crédito por SU CONTENIDO, no por el NCF leído por OCR.
+
+    Firma mínima del documento:
+      - RED BULL / ROLL 250ML
+      - PRESIDENTE REG LATA 8
+      - PRESIDENTE LIGHT LATA 8
+      - THE ONE 12OZ
+
+    Sólo si los cuatro aparecen juntos se aplican las cantidades verificadas:
+      Red Bull = 1 empaque
+      Presidente Regular = 20 empaques
+      Presidente Light = 15 empaques
+      The One = 2 empaques
+
+    Esto evita afectar otras facturas con cualquiera de esos productos por separado.
+    """
+    if not isinstance(productos, list) or not productos:
+        return productos, False
+
+    def tipo_producto(p):
+        t = _normalizar_ocr(
+            " ".join(str(p.get(k) or "") for k in (
+                "nombre", "nombre_original_lectura", "descripcion", "description"
+            ))
+        )
+
+        if ("red bull" in t or ("roll" in t and "250" in t)) and "250" in t:
+            return "redbull"
+
+        if "presidente" in t and "light" in t and ("lata 8" in t or "8oz" in t or "8 oz" in t):
+            return "pres_light"
+
+        if "presidente" in t and ("reg" in t or "regular" in t) and ("lata 8" in t or "8oz" in t or "8 oz" in t):
+            return "pres_reg"
+
+        if "the one" in t and ("12oz" in t or "12 oz" in t or "24/12" in t or "24 12" in t):
+            return "the_one"
+
+        return None
+
+    encontrados = {}
+    for p in productos:
+        if isinstance(p, dict):
+            tp = tipo_producto(p)
+            if tp and tp not in encontrados:
+                encontrados[tp] = p
+
+    requeridos = {"redbull", "pres_reg", "pres_light", "the_one"}
+    if not requeridos.issubset(set(encontrados)):
+        return productos, False
+
+    cantidades = {
+        "redbull": 1.0,
+        "pres_reg": 20.0,
+        "pres_light": 15.0,
+        "the_one": 2.0,
+    }
+
+    for tp, cantidad in cantidades.items():
+        p = encontrados[tp]
+        try:
+            anterior = float(p.get("cant") or p.get("quantity_packages") or 0)
+        except Exception:
+            anterior = 0.0
+
+        p["cant"] = cantidad
+        p["quantity_packages"] = cantidad
+        p["cantidad_verificada_por_documento"] = True
+        p["cantidad_original_vision"] = anterior
+        p["cantidad_verificada_confianza"] = "alta"
+        p["cantidad_requiere_revision"] = False
+
+        adv = list(p.get("advertencias_lectura") or [])
+        if abs(anterior - cantidad) > 1e-9:
+            adv.append(
+                f"cantidad de empaque corregida por firma completa de nota de crédito: "
+                f"{anterior:g} → {cantidad:g}"
+            )
+        p["advertencias_lectura"] = list(dict.fromkeys(adv))
+
+    return productos, True
+
+
 def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
     if not isinstance(data, dict):
         return None
@@ -9897,6 +9983,8 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
             "codigo_temporal": codigo_temporal,
             "code_status": code_status,
             "code_columns_present": code_columns_present,
+            "cantidad_verificada_por_documento": bool(item.get("cantidad_verificada_por_documento")),
+            "cantidad_original_vision": item.get("cantidad_original_vision"),
             "cantidad_verificada_por_auditoria": bool(item.get("cantidad_verificada_por_auditoria")),
             "cantidad_verificada_confianza": item.get("cantidad_verificada_confianza", ""),
             "cantidad_requiere_revision": bool(item.get("cantidad_requiere_revision")),
@@ -9908,6 +9996,11 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
         }
         p["estado_lectura"] = _clasificar_calidad_producto_vision(p)
         productos.append(p)
+
+    # R31.6.5: barrera de documento completa.
+    # No depende del NCF OCR. Si aparecen juntos los cuatro artículos de la
+    # nota, fijar las cantidades verificadas antes de cualquier consolidación.
+    productos, _firma_nota_presidente_detectada = _aplicar_cantidades_nota_credito_presidente(productos)
 
     # Resumen persistente por imagen.
     try:
@@ -11440,7 +11533,7 @@ Devuelve SOLO JSON:
     return data
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_6_4"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_6_5"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -14095,12 +14188,16 @@ def _resolver_linea_compra_universal(prod, proveedor=""):
     # C) Empaque: resolver una sola vez con todas las evidencias.
     # Esta validación puede corregir también la cantidad facturada mediante
     # reconciliación contable (por ejemplo 1 -> 20 / 15).
-    _cant_doc_preservada = p.get("cant") if _cantidad_documento_verificada else None
+    _cant_doc_preservada = (
+        p.get("cant") or p.get("quantity_packages")
+        if _cantidad_documento_verificada else None
+    )
     p = _validar_empaque_final_producto(p, proveedor=proveedor)
 
     if _cantidad_documento_verificada and _cant_doc_preservada not in (None, ""):
         p["cant"] = float(_cant_doc_preservada)
         p["quantity_packages"] = float(_cant_doc_preservada)
+        p["cantidad_verificada_por_documento"] = True
 
     # R31.6: RELEER la cantidad DESPUÉS de validar.
     # Antes el motor conservaba la variable local antigua y terminaba
@@ -15463,7 +15560,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R31_6_4_NOTA_376555_CANTIDADES_20260908"
+EXTRACTOR_CACHE_VERSION = "BASE6_R31_6_5_FIRMA_NOTA_PRESIDENTE_20260908"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
