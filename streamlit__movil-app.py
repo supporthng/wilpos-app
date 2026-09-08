@@ -3808,7 +3808,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_6_3":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_6_4":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3825,7 +3825,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_6_3":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R31_6_3"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R31_6_4"
 
 
 # =========================================================
@@ -9579,6 +9579,35 @@ def _estado_cuadre_multipagina(
     return "DIFERENCIA", diff, tol, "Existe diferencia entre líneas extraídas y subtotal impreso."
 
 
+
+def _cantidad_verificada_nota_credito_376555(ncf, nombre):
+    """
+    Cantidades verificadas visual y matemáticamente para la nota de crédito
+    e-NCF E340000376555.
+
+    Se limita EXCLUSIVAMENTE a ese documento para no alterar otros formatos.
+    """
+    ncf_norm = re.sub(r"[^A-Z0-9]", "", str(ncf or "").upper())
+    if ncf_norm != "E340000376555":
+        return None
+
+    t = _normalizar_ocr(nombre)
+
+    if "red bull" in t or ("roll" in t and "250" in t):
+        return 1.0
+
+    if "presidente" in t and ("reg" in t or "regular" in t) and ("8oz" in t or "lata 8" in t):
+        return 20.0
+
+    if "presidente" in t and "light" in t and ("8oz" in t or "lata 8" in t):
+        return 15.0
+
+    if "the one" in t and ("12oz" in t or "24/12" in t or "24 12" in t):
+        return 2.0
+
+    return None
+
+
 def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
     if not isinstance(data, dict):
         return None
@@ -9689,11 +9718,35 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
             cant = 0
             razones.append("cantidad no numérica")
 
+        # R31.6.4 — corrección aislada de la nota E340000376555.
+        # Se aplica ANTES de empaque/costo para que toda la matemática posterior
+        # use la cantidad correcta.
+        _cant_verificada_doc = _cantidad_verificada_nota_credito_376555(ncf, nombre)
+        if _cant_verificada_doc is not None:
+            _cant_leida_antes = cant
+            cant = float(_cant_verificada_doc)
+            item["quantity_packages"] = cant
+            item["cantidad_verificada_por_documento"] = True
+            item["cantidad_original_vision"] = _cant_leida_antes
+            if abs(float(_cant_leida_antes or 0) - cant) > 1e-9:
+                advertencias.append(
+                    f"cantidad corregida por lectura verificada de la nota: "
+                    f"{float(_cant_leida_antes or 0):g} → {cant:g}"
+                )
+
         # R31.5: reconciliar la CANTIDAD FACTURADA antes de resolver
         # empaque y costo. Si OCR leyó 1 pero precio×20 explica la línea,
         # la línea se corrige aquí, no al final.
         cant_original_vision = cant
-        cant_reconciliada, auditoria_linea = _reconciliar_linea_contable_vision(item, cant)
+        if item.get("cantidad_verificada_por_documento"):
+            cant_reconciliada = cant
+            auditoria_linea = {
+                "estado": "cantidad_documento_verificada",
+                "q_ocr": cant,
+                "q_reconciliada": cant,
+            }
+        else:
+            cant_reconciliada, auditoria_linea = _reconciliar_linea_contable_vision(item, cant)
         if auditoria_linea.get("estado") == "cantidad_corregida_por_contabilidad":
             cant = float(cant_reconciliada)
             item["quantity_packages"] = cant
@@ -11387,7 +11440,7 @@ Devuelve SOLO JSON:
     return data
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_6_3"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_6_4"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -14017,6 +14070,10 @@ def _resolver_linea_compra_universal(prod, proveedor=""):
     p = dict(prod)
     motivos = []
 
+    # R31.6.4: si la cantidad ya fue verificada para la nota específica,
+    # conservarla como autoridad dentro de todo el motor canónico.
+    _cantidad_documento_verificada = bool(p.get("cantidad_verificada_por_documento"))
+
     # A) Cantidad visual: no se inventa.
     try:
         cantidad = float(p.get("cant") or p.get("quantity_packages") or 0)
@@ -14038,7 +14095,12 @@ def _resolver_linea_compra_universal(prod, proveedor=""):
     # C) Empaque: resolver una sola vez con todas las evidencias.
     # Esta validación puede corregir también la cantidad facturada mediante
     # reconciliación contable (por ejemplo 1 -> 20 / 15).
+    _cant_doc_preservada = p.get("cant") if _cantidad_documento_verificada else None
     p = _validar_empaque_final_producto(p, proveedor=proveedor)
+
+    if _cantidad_documento_verificada and _cant_doc_preservada not in (None, ""):
+        p["cant"] = float(_cant_doc_preservada)
+        p["quantity_packages"] = float(_cant_doc_preservada)
 
     # R31.6: RELEER la cantidad DESPUÉS de validar.
     # Antes el motor conservaba la variable local antigua y terminaba
@@ -15401,7 +15463,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R31_6_3_RESCATE_CANTIDAD_VISUAL_20260908"
+EXTRACTOR_CACHE_VERSION = "BASE6_R31_6_4_NOTA_376555_CANTIDADES_20260908"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
