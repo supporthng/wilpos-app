@@ -3806,7 +3806,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R30_2":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R30_3":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3823,7 +3823,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R30_2":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R30_2"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R30_3"
 
 
 # =========================================================
@@ -8202,17 +8202,20 @@ def _clasificar_calidad_producto_vision(prod):
 
 def _resolver_costo_neto_linea_vision(item, cantidad, unidades_empaque):
     """
-    Resuelve el COSTO NETO TOTAL DE LA LÍNEA (sin ITBIS).
+    Resuelve el COSTO NETO TOTAL DE LA LÍNEA sin ITBIS mediante consenso.
 
-    Regla principal:
-        si existe un precio neto por unidad facturada/empaque,
-        el costo esperado de línea = cantidad × precio neto.
+    R30.3 corrige un error estructural:
+    Vision puede colocar un TOTAL DE LÍNEA en un campo llamado
+    net_price_per_package / price_unit_per_package. Si luego se multiplica
+    por cantidad, el costo queda inflado.
 
-    No acepta subtotal_net, line_cost_net ni columnas monetarias desplazadas
-    de forma automática. Cada candidato se valida contra la aritmética disponible.
-
-    Devuelve:
-        (costo_neto_linea, fuente, advertencias)
+    Reglas universales:
+    - precio neto por empaque <= precio lista, salvo tolerancia de redondeo;
+    - si hay descuento, precio neto debe aproximarse a lista - descuento;
+    - total neto + ITBIS ≈ total con impuesto cuando esos campos existen;
+    - si un supuesto "precio por empaque" coincide con un total de línea
+      y cantidad > 1, se considera posible columna desplazada;
+    - elegir el candidato respaldado por más relaciones contables.
     """
     adv = []
 
@@ -8270,156 +8273,174 @@ def _resolver_costo_neto_linea_vision(item, cantidad, unidades_empaque):
         or fnum(item.get("line_total_with_tax"))
     )
 
-    # --------------------------------------------------------
-    # 1. Construir el mejor precio NETO por unidad facturada.
-    # --------------------------------------------------------
-    precios_neto = []
-
-    if net_pkg is not None and net_pkg > 0:
-        precios_neto.append(("precio_neto_empaque", net_pkg, 100))
-
-    if unit_cost is not None and unit_cost > 0:
-        precios_neto.append(("unit_cost_net", unit_cost, 95))
-
-    if price_unit_package is not None and price_unit_package > 0:
-        # Puede ser neto o precio previo a impuesto según formato.
-        # Se acepta con menor prioridad y luego se valida contra total/impuesto.
-        precios_neto.append(("precio_unit_empaque", price_unit_package, 80))
-
-    # Lista menos descuento = precio neto por unidad facturada.
+    # Precio neto esperado desde lista/descuento.
+    neto_lista = None
     if list_price is not None and list_price > 0:
         neto_lista = list_price
-        fuente_lista = "precio_lista"
         if discount_value is not None and 0 <= discount_value <= list_price * 1.05:
             neto_lista = list_price - discount_value
-            fuente_lista = "precio_lista_menos_descuento"
         elif discount_rate is not None and 0 <= discount_rate <= 100:
             tasa = discount_rate / 100.0 if discount_rate > 1 else discount_rate
             neto_lista = list_price * (1.0 - tasa)
-            fuente_lista = "precio_lista_menos_descuento_pct"
-        if neto_lista > 0:
-            precios_neto.append((fuente_lista, neto_lista, 85))
 
-    # --------------------------------------------------------
-    # 2. Candidatos de COSTO NETO TOTAL de línea.
-    # --------------------------------------------------------
+    # Total neto contable derivado de total con ITBIS.
+    neto_desde_total = None
+    if gross_line is not None and gross_line > 0 and tax_value is not None and tax_value >= 0:
+        candidato = gross_line - tax_value
+        if candidato > 0:
+            neto_desde_total = candidato
+
+    # Totales explícitos visibles.
+    totales_visibles = [
+        ("line_cost_net", line_cost),
+        ("subtotal_net", subtotal_net),
+        ("total_menos_itbis", neto_desde_total),
+    ]
+    totales_visibles = [(f, v) for f, v in totales_visibles if v is not None and v > 0]
+
+    # Detectar campos "por empaque" sospechosos.
+    def precio_por_empaque_confiable(nombre, precio):
+        if precio is None or precio <= 0:
+            return False, "vacío"
+
+        # Neto pre-ITBIS no debe ser mucho mayor que precio lista.
+        if list_price is not None and list_price > 0 and precio > list_price * 1.03:
+            return False, "supera_precio_lista"
+
+        # Con descuento conocido, el neto debe aproximarse al neto calculado.
+        if neto_lista is not None and neto_lista > 0:
+            if not cercanos(precio, neto_lista, rel=0.025, abs_min=0.25):
+                # price_unit puede ser lista, pero net_price/unit_cost no deberían divergir tanto.
+                if nombre in ("net_price_per_package", "unit_cost_net"):
+                    return False, "no_cuadra_lista_descuento"
+
+        # Si q>1 y este supuesto precio coincide con un total de línea,
+        # es probable que Vision haya desplazado una columna.
+        if q > 1:
+            for fuente_total, total in totales_visibles:
+                if cercanos(precio, total, rel=0.008):
+                    return False, f"parece_{fuente_total}"
+
+        return True, "ok"
+
     candidatos = []
 
-    def agregar(valor, fuente, score):
+    def agregar(valor, fuente, score, detalle=""):
         if valor is not None and valor > 0 and math.isfinite(valor):
             candidatos.append({
                 "valor": float(valor),
                 "fuente": fuente,
                 "score": float(score),
+                "detalle": detalle,
             })
 
-    # Aritmética cantidad × precio: candidato de máxima prioridad.
-    if q > 0:
-        for fuente_precio, precio, prioridad in precios_neto:
-            esperado = q * precio
-            score = prioridad + 40
+    # A) Total con ITBIS - ITBIS: evidencia contable muy fuerte.
+    if neto_desde_total is not None:
+        score = 170
+        if line_cost is not None and cercanos(line_cost, neto_desde_total):
+            score += 25
+        if subtotal_net is not None and cercanos(subtotal_net, neto_desde_total):
+            score += 20
+        agregar(neto_desde_total, "total_menos_itbis", score)
 
-            # Si gross = neto + ITBIS, confirmar todavía más.
-            if gross_line is not None and tax_value is not None:
-                if cercanos(esperado + tax_value, gross_line, rel=0.008):
-                    score += 35
-
-            # Si line_cost/subtotal coinciden, confirmar.
-            if line_cost is not None and cercanos(line_cost, esperado):
-                score += 25
-            if subtotal_net is not None and cercanos(subtotal_net, esperado):
-                score += 20
-
-            agregar(esperado, f"{fuente_precio}_x_cantidad", score)
-
-    # Total con impuesto menos ITBIS: fuerte si ambos campos existen.
-    if gross_line is not None and gross_line > 0 and tax_value is not None and tax_value >= 0:
-        neto_total = gross_line - tax_value
-        if neto_total > 0:
-            score = 120
-            # premiar si coincide con cantidad × precio
-            for _, precio, _ in precios_neto:
-                if q > 0 and cercanos(neto_total, q * precio):
-                    score += 30
-                    break
-            agregar(neto_total, "total_menos_itbis", score)
-
-    # line_cost y subtotal sólo entran como candidatos, no como verdad absoluta.
-    if line_cost is not None and line_cost > 0:
-        score = 75
-        if tax_value is not None and cercanos(line_cost, tax_value, rel=0.01):
-            score -= 80
-        if gross_line is not None and tax_value is not None and cercanos(line_cost + tax_value, gross_line):
+    # B) Precio lista menos descuento × cantidad.
+    if q > 0 and neto_lista is not None and neto_lista > 0:
+        esperado = q * neto_lista
+        score = 145
+        if line_cost is not None and cercanos(line_cost, esperado):
+            score += 30
+        if subtotal_net is not None and cercanos(subtotal_net, esperado):
+            score += 25
+        if neto_desde_total is not None and cercanos(neto_desde_total, esperado):
             score += 35
-        if q > 0:
-            for _, precio, _ in precios_neto:
-                esperado = q * precio
-                if cercanos(line_cost, esperado):
-                    score += 45
-                    break
-                # Si line_cost parece precio unitario y q>1, penalizar.
-                if q > 1 and cercanos(line_cost, precio):
-                    score -= 50
+        agregar(esperado, "lista_descuento_x_cantidad", score)
+
+    # C) Precios por empaque transcritos.
+    precios = [
+        ("net_price_per_package", net_pkg, 140),
+        ("unit_cost_net", unit_cost, 135),
+        ("price_unit_per_package", price_unit_package, 120),
+    ]
+
+    for nombre_precio, precio, base_score in precios:
+        ok, motivo = precio_por_empaque_confiable(nombre_precio, precio)
+        if not ok:
+            if precio is not None and precio > 0:
+                adv.append(
+                    f"{nombre_precio} descartado como precio por empaque: {motivo}"
+                )
+            continue
+
+        esperado = q * precio if q > 0 else None
+        score = base_score
+
+        if line_cost is not None and esperado is not None and cercanos(line_cost, esperado):
+            score += 35
+        if subtotal_net is not None and esperado is not None and cercanos(subtotal_net, esperado):
+            score += 30
+        if neto_desde_total is not None and esperado is not None and cercanos(neto_desde_total, esperado):
+            score += 40
+        if neto_lista is not None and cercanos(precio, neto_lista, rel=0.025, abs_min=0.25):
+            score += 25
+
+        agregar(esperado, f"{nombre_precio}_x_cantidad", score)
+
+    # D) Totales explícitos como candidatos, pero no ganan solos frente
+    # a una relación precio×cantidad validada.
+    if line_cost is not None and line_cost > 0:
+        score = 100
+        if tax_value is not None and cercanos(line_cost, tax_value, rel=0.01):
+            score -= 100
+            adv.append("line_cost_net parecía contener ITBIS")
+        if neto_desde_total is not None and cercanos(line_cost, neto_desde_total):
+            score += 50
+        if q > 0 and neto_lista is not None and cercanos(line_cost, q * neto_lista):
+            score += 45
         agregar(line_cost, "line_cost_net", score)
 
     if subtotal_net is not None and subtotal_net > 0:
-        score = 70
+        score = 95
         if tax_value is not None and cercanos(subtotal_net, tax_value, rel=0.01):
-            score -= 80
-        if gross_line is not None and tax_value is not None and cercanos(subtotal_net + tax_value, gross_line):
-            score += 35
-        if q > 0:
-            for _, precio, _ in precios_neto:
-                esperado = q * precio
-                if cercanos(subtotal_net, esperado):
-                    score += 45
-                    break
-                # subtotal que contradice fuertemente cantidad × precio debe perder.
-                if esperado > 0:
-                    ratio = subtotal_net / esperado
-                    if ratio < 0.70 or ratio > 1.30:
-                        score -= 45
+            score -= 100
+            adv.append("subtotal_net parecía contener ITBIS")
+        if neto_desde_total is not None and cercanos(subtotal_net, neto_desde_total):
+            score += 50
+        if q > 0 and neto_lista is not None and cercanos(subtotal_net, q * neto_lista):
+            score += 45
         agregar(subtotal_net, "subtotal_neto_linea", score)
 
     if not candidatos:
         return 0.0, "sin_costo_valido", adv
 
-    candidatos.sort(key=lambda x: (x["score"], x["valor"]), reverse=True)
+    # Agrupar candidatos cercanos y premiar consenso.
+    for i, c in enumerate(candidatos):
+        consenso = 0
+        for j, d in enumerate(candidatos):
+            if i == j:
+                continue
+            if cercanos(c["valor"], d["valor"], rel=0.012, abs_min=0.25):
+                consenso += 1
+        c["score"] += consenso * 18
+
+    candidatos.sort(key=lambda x: (x["score"], -x["valor"]), reverse=True)
     mejor = candidatos[0]
 
-    # --------------------------------------------------------
-    # 3. Diagnóstico de contradicciones.
-    # --------------------------------------------------------
-    if q > 0 and precios_neto:
-        fuente_precio, precio_ref, _ = max(precios_neto, key=lambda x: x[2])
-        esperado_ref = q * precio_ref
-
-        if subtotal_net is not None and not cercanos(subtotal_net, esperado_ref):
-            adv.append(
-                f"subtotal_net descartado/penalizado: {subtotal_net:.2f} no cuadra con "
-                f"cantidad × precio neto ({q:g} × {precio_ref:.2f} = {esperado_ref:.2f})"
-            )
-
-        if line_cost is not None and not cercanos(line_cost, esperado_ref):
-            if tax_value is not None and cercanos(line_cost, tax_value, rel=0.01):
-                adv.append(
-                    "line_cost_net parecía contener el valor de ITBIS; no se usó como costo neto"
-                )
-            else:
-                adv.append(
-                    f"line_cost_net no cuadra con cantidad × precio neto; "
-                    f"se priorizó la aritmética de la línea"
-                )
-
-    # Guardar diagnóstico útil para auditoría posterior.
+    # Guardar diagnóstico.
     item["_costo_candidatos_debug"] = [
         {
             "fuente": c["fuente"],
             "valor": round(c["valor"], 6),
             "score": round(c["score"], 2),
+            "detalle": c.get("detalle", ""),
         }
-        for c in candidatos[:6]
+        for c in candidatos[:8]
     ]
+
+    # Confianza del costo para la barrera canónica.
+    segunda = candidatos[1] if len(candidatos) > 1 else None
+    diferencia_score = mejor["score"] - (segunda["score"] if segunda else 0)
+    item["_costo_resuelto_score"] = float(mejor["score"])
+    item["_costo_resuelto_margen"] = float(diferencia_score)
 
     return round(mejor["valor"], 6), mejor["fuente"], list(dict.fromkeys(adv))
 
@@ -9036,7 +9057,10 @@ def _normalizar_resultado_vision_factura(data, nombre_archivo=""):
             "fuente_empaque": fuente_empaque,
             "costo_total": costo_total,
             "fuente_costo": fuente_costo,
+            "costo_resuelto_score": item.get("_costo_resuelto_score", 0),
+            "costo_resuelto_margen": item.get("_costo_resuelto_margen", 0),
             "net_price_per_package": item.get("net_price_per_package"),
+            "unit_cost_net": item.get("unit_cost_net"),
             "price_unit_per_package": item.get("price_unit_per_package"),
             "subtotal_net": item.get("subtotal_net"),
             "isc_value": item.get("isc_value"),
@@ -10441,7 +10465,7 @@ Devuelve SOLO JSON:
     return data
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R30_2"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R30_3"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -12309,6 +12333,53 @@ def restaurar_productos_excluidos():
     st.session_state.productos_excluidos = set()
 
 
+def _detectar_costos_atipicos_origen():
+    """
+    Diagnóstico solamente. No sustituye costos por comparación entre productos.
+
+    Para el MISMO código/producto, si diferentes compras tienen costo físico
+    muy disperso, devuelve una alerta para revisar el origen monetario.
+    """
+    alertas = []
+    for codigo, apariciones in (st.session_state.get("origen_productos_facturas", {}) or {}).items():
+        filas = []
+        for item in apariciones or []:
+            try:
+                unidades = float(item.get("unidades") or 0)
+                total = float(item.get("costo_total") or 0)
+            except Exception:
+                continue
+            if unidades <= 0 or total <= 0:
+                continue
+            filas.append((item, total / unidades))
+
+        if len(filas) < 2:
+            continue
+
+        costos = sorted(c for _, c in filas if c > 0)
+        if not costos:
+            continue
+
+        mediana = costos[len(costos)//2]
+        if mediana <= 0:
+            continue
+
+        for item, costo in filas:
+            ratio = costo / mediana
+            if ratio < 0.65 or ratio > 1.55:
+                alertas.append({
+                    "Código": codigo,
+                    "Producto": item.get("nombre", ""),
+                    "Factura": item.get("factura", ""),
+                    "Proveedor": item.get("proveedor", ""),
+                    "Costo físico": round(costo, 4),
+                    "Referencia mediana": round(mediana, 4),
+                    "Fuente costo": item.get("fuente_costo", ""),
+                    "Estado": "REVISAR COSTO",
+                })
+    return alertas
+
+
 def construir_df_productos():
     """
     Construye SIEMPRE un consolidado final:
@@ -12960,6 +13031,20 @@ def _resolver_linea_compra_universal(prod, proveedor=""):
     if costo_linea <= 0:
         motivos.append("costo neto de línea inválido")
 
+    # R30.3: marcar costos cuya fuente no tiene suficiente separación
+    # frente a otra interpretación monetaria de la misma fila.
+    try:
+        costo_score = float(p.get("costo_resuelto_score") or 0)
+        costo_margen = float(p.get("costo_resuelto_margen") or 0)
+    except Exception:
+        costo_score, costo_margen = 0.0, 0.0
+
+    # Si no hay score (por rutas históricas/locales), no bloquear.
+    if costo_score > 0 and costo_score < 115:
+        motivos.append("costo con evidencia insuficiente")
+    elif costo_score > 0 and costo_margen < 8:
+        motivos.append("costo monetario ambiguo")
+
     # E) Invariantes matemáticos.
     unidades_fisicas = cantidad * emp if cantidad > 0 else 0.0
     costo_por_empaque = (
@@ -13026,6 +13111,8 @@ def _resolver_linea_compra_universal(prod, proveedor=""):
         and costo_linea > 0
         and costo_fisico > 0
         and not p.get("requiere_revision_empaque")
+        and "costo con evidencia insuficiente" not in motivos
+        and "costo monetario ambiguo" not in motivos
     )
 
     canon = {
@@ -14162,7 +14249,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R30_2_RESCATE_UNICO_EMPAQUE_20260907"
+EXTRACTOR_CACHE_VERSION = "BASE6_R30_3_COSTO_CONTABLE_CONSENSO_20260907"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
@@ -14432,6 +14519,18 @@ def _render_auditoria_costo_fisico_ui():
             f"🔎 {pendientes_lectura} línea(s) tienen discrepancia entre la primera "
             "lectura y la auditoría independiente de cantidad. No se corrigieron "
             "automáticamente salvo cuando la segunda lectura tuvo confianza alta."
+        )
+
+    alertas_costo = _detectar_costos_atipicos_origen()
+    if alertas_costo:
+        st.warning(
+            f"💲 {len(alertas_costo)} compra(s) del mismo producto tienen un costo físico "
+            "muy distinto de otras compras del mismo producto. Revísalas antes de exportar."
+        )
+        st.dataframe(
+            pd.DataFrame(alertas_costo),
+            use_container_width=True,
+            hide_index=True,
         )
 
     with st.expander(
