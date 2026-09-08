@@ -3802,7 +3802,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_4":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_5":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3819,7 +3819,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R29_1_6_4":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_6_4"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R29_1_6_5"
 
 
 # =========================================================
@@ -6357,20 +6357,22 @@ def _inferir_empaque_universal(prod, proveedor=""):
     """
     Devuelve (empaque, fuente, confianza, necesita_revision).
 
-    Prioridad segura:
-    1) Override manual confirmado.
-    2) UdM explícita.
-    3) Presentación impresa.
-    4) Descripción con notación fuerte.
-    5) Catálogo comercial confirmado.
-    6) units_per_package leído/inferido por Vision (>1).
-    7) EA/PC/PCS sin evidencia fuerte => 1.
-    8) Sin UDM y sin evidencia suficiente => REVISAR, nunca asumir 1.
+    El STOCK SIEMPRE se calcula automáticamente:
+        stock_fisico = cantidad_factura × empaque
+
+    Prioridad:
+    1) override manual previo, si existe;
+    2) UdM explícita;
+    3) presentación impresa;
+    4) descripción con notación fuerte;
+    5) catálogo comercial confirmado;
+    6) units_per_package leído por Vision;
+    7) EA/PC/PCS sin evidencia fuerte => 1;
+    8) UDM vacía/desconocida => mejor estimación disponible, nunca bloquear.
     """
     if not isinstance(prod, dict):
-        return 1, "default", 0, True
+        return 1, "default_auto", 20, True
 
-    # 1) Corrección manual explícita del usuario.
     try:
         emp_manual = int(float(prod.get("emp_override_manual") or 0))
     except Exception:
@@ -6399,30 +6401,29 @@ def _inferir_empaque_universal(prod, proveedor=""):
         ("deposito", "depos.", "depos ", "retornable vacio", "envase vacio")
     )
 
-    # 2) UdM explícita inequívoca.
     unidad_ambigua = _unidad_es_comercial_ambigua(unidad)
+
+    # 1) UdM explícita.
     emp_udm, fuente_udm, conf_udm = _extraer_empaque_udm_universal(unidad)
     if conf_udm >= 100:
         return int(emp_udm), fuente_udm, conf_udm, False
 
-    # 3) Presentación exacta.
+    # 2) Presentación impresa.
     emp_pres = _extraer_empaque_desde_tamano(presentacion)
     if emp_pres > 1 and not es_deposito:
-        return int(emp_pres), "presentacion_impresa", 97 if unidad_ambigua else 95, False
+        return int(emp_pres), "presentacion_impresa", 98 if unidad_ambigua else 96, False
 
-    # 4) Descripción original.
+    # 3) Descripción original.
     emp_desc = _extraer_empaque_desde_tamano(nombre)
     if emp_desc > 1 and not es_deposito:
-        return int(emp_desc), "descripcion_impresa", 96 if unidad_ambigua else 90, False
+        return int(emp_desc), "descripcion_impresa", 97 if unidad_ambigua else 92, False
 
-    # 5) Catálogo confirmado.
+    # 4) Catálogo comercial confirmado.
     emp_catalogo, fuente_catalogo = _empaque_confirmado_por_nombre(nombre)
     if emp_catalogo > 1 and not es_deposito:
-        return int(emp_catalogo), fuente_catalogo, 94 if unidad_ambigua else 82, False
+        return int(emp_catalogo), fuente_catalogo, 95 if unidad_ambigua else 85, False
 
-    # 6) IMPORTANTE R29.1.6.3:
-    # Antes este respaldo estaba DESPUÉS de "sin UDM => 1", por lo que un
-    # units_per_package=12/24 leído por Vision podía perderse.
+    # 5) Vision: debe respetarse antes de cualquier fallback a 1.
     try:
         emp_api = int(float(
             prod.get("units_per_package")
@@ -6433,26 +6434,23 @@ def _inferir_empaque_universal(prod, proveedor=""):
         emp_api = 1
 
     if emp_api > 1 and not es_deposito:
-        return int(emp_api), "vision_units_per_package", 88, False
+        return int(emp_api), "vision_units_per_package", 90, False
 
-    # 7) EA/PC/PCS son unidades comerciales explícitas. Sin evidencia fuerte,
-    # conservar 1 para tickets tipo PriceSmart.
+    # 6) EA/PC/PCS sin otra evidencia: tratar como unidad física.
     if unidad_ambigua:
-        return 1, "udm_comercial_sin_empaque_confirmado", 92, False
+        return 1, "udm_comercial_sin_empaque_confirmado", 90, False
 
-    # 8) Si la factura realmente declara BOT/UND/PZA, la función de UdM
-    # ya debió resolverlo arriba. Si no hay UdM, NO podemos afirmar que
-    # "cantidad × precio = total" significa unidad física; también puede ser caja.
-    unidad_vacia = not str(unidad or "").strip()
-    if unidad_vacia:
-        return 1, "sin_udm_empaque_no_confirmado", 0, True
-
-    # Caja sin contenido legible => revisión.
+    # 7) Si la UdM es caja pero no se conoce el contenido, no bloquear:
+    # usar 1 como estimación temporal y marcar revisión.
     if _parece_empaque_caja(unidad, nombre):
-        return 1, "caja_sin_cantidad", 0, True
+        return 1, "caja_sin_cantidad_auto", 15, True
 
-    # UDM desconocida/no concluyente: revisión conservadora.
-    return 1, "udm_no_concluyente", 25, True
+    # 8) Sin UdM / UDM no concluyente: el stock se calcula automáticamente
+    # con empaque 1, pero queda claramente marcado como baja confianza.
+    if not str(unidad or "").strip():
+        return 1, "sin_udm_auto", 20, True
+
+    return 1, "udm_no_concluyente_auto", 25, True
 
 
 def _reconciliar_cantidad_desde_costo_y_precio(prod):
@@ -6612,18 +6610,12 @@ def _validar_empaque_final_producto(prod, proveedor=""):
 
 def _calcular_costo_unitario_seguro(prod):
     """
-    Calcula el costo por UNIDAD FÍSICA, siempre sin ITBIS.
+    Cálculo automático y único de existencia/costo físico.
 
-    Fórmula:
-        unidades_fisicas = cantidad_facturada * unidades_por_empaque
-        costo_unitario = costo_neto_linea / unidades_fisicas
+        stock_fisico = cantidad_factura × cantidad_por_empaque
+        costo_unitario = costo_neto_linea / stock_fisico
 
-    Reglas:
-    - BOT / BOTELLA / UND / UNIDAD / PZA / PIEZA => emp = 1.
-    - CAJA / CJ / CJA / CASE / PC / EA pueden requerir empaque >1
-      cuando la presentación lo confirma.
-    - Si la factura parece caja/empaque y no hay evidencia suficiente,
-      se conserva la marca de revisión; nunca se inventa un divisor.
+    Nunca usa directamente la cantidad facturada como stock si el empaque > 1.
     """
     try:
         cantidad = float(prod.get("cant") or 0)
@@ -6643,7 +6635,7 @@ def _calcular_costo_unitario_seguro(prod):
         or ""
     ).upper().strip()
 
-    # UDM que ya representa unidad física: nunca dividir otra vez.
+    # UdM física explícita manda.
     if re.search(r"\b(BOT(?:ELLA)?S?|UND|UNID(?:AD(?:ES)?)?|PZA|PZAS|PIEZA|PIEZAS)\b", udm):
         emp = 1
         prod["emp"] = 1
@@ -6654,15 +6646,20 @@ def _calcular_costo_unitario_seguro(prod):
     except Exception:
         costo_linea = 0.0
 
-    unidades = cantidad * emp
-    costo_unitario = (costo_linea / unidades) if unidades > 0 else 0.0
+    stock_fisico = cantidad * emp
+    costo_unitario = (
+        costo_linea / stock_fisico
+        if stock_fisico > 0 else 0.0
+    )
 
     prod["cantidad_facturada_validada"] = cantidad
-    prod["unidades_fisicas_calculadas"] = unidades
+    prod["cantidad_por_empaque_validada"] = emp
+    prod["unidades_fisicas_calculadas"] = stock_fisico
+    prod["stock_fisico_calculado"] = stock_fisico
     prod["costo_neto_linea_validado"] = costo_linea
     prod["costo_unitario_fisico"] = costo_unitario
 
-    return unidades, costo_unitario
+    return stock_fisico, costo_unitario
 
 
 def _parsear_linea_distribuidor_con_barcode(linea):
@@ -9767,7 +9764,7 @@ REGLAS ADICIONALES:
     return mejor
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_6_4"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R29_1_6_5"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -12252,60 +12249,17 @@ def modal_confirmacion(validas, duplicadas_count, margen):
             "Las fotos/páginas distintas con el mismo número de factura sí se procesan."
         )
 
-    # BASE6-R29.1.6.3:
-    # Nunca consolidar silenciosamente una fila sin saber si la cantidad
-    # facturada representa unidad física o caja/empaque.
-    filas_revision_emp, refs_revision_emp = _preparar_revision_empaques_modal(validas)
-    revisiones_pendientes = 0
-
+    # BASE6-R29.1.6.5:
+    # El stock se calcula automáticamente. No se detiene el flujo para pedir
+    # confirmación manual de empaque. Las filas de baja confianza se marcan
+    # para auditoría, pero el cálculo usa el mejor empaque inferido disponible.
+    filas_revision_emp, _ = _preparar_revision_empaques_modal(validas)
     if filas_revision_emp:
-        st.warning(
-            "📦 Hay productos cuya factura no permite confirmar automáticamente cuántas "
-            "unidades físicas contiene cada cantidad comprada. Revísalos antes de consolidar."
+        st.info(
+            f"📦 {len(filas_revision_emp)} línea(s) tienen empaque de baja confianza. "
+            "El sistema calculará el stock automáticamente con la mejor evidencia disponible "
+            "y las dejará marcadas en la auditoría."
         )
-        st.caption(
-            "Ejemplo: si la factura dice 4 cajas y cada caja trae 12 unidades, escribe 12. "
-            "Si realmente son 4 unidades sueltas, deja 1."
-        )
-
-        df_rev_emp = pd.DataFrame(filas_revision_emp)
-        df_editado_emp = st.data_editor(
-            df_rev_emp,
-            hide_index=True,
-            use_container_width=True,
-            disabled=[
-                "_id", "Factura", "Producto", "Cantidad factura",
-                "UDM", "Presentación", "Motivo",
-            ],
-            column_config={
-                "_id": None,
-                "Cantidad por empaque": st.column_config.NumberColumn(
-                    "Cantidad por empaque",
-                    min_value=1,
-                    step=1,
-                    required=True,
-                ),
-            },
-            key="revision_empaque_antes_consolidar_r29163",
-        )
-
-        # Aplicar override directamente a los diccionarios de `validas`.
-        for _, fila_editada in df_editado_emp.iterrows():
-            rid = str(fila_editada.get("_id") or "")
-            prod_ref = refs_revision_emp.get(rid)
-            if prod_ref is None:
-                continue
-            try:
-                emp_manual = int(float(fila_editada.get("Cantidad por empaque") or 0))
-            except Exception:
-                emp_manual = 0
-            if emp_manual >= 1:
-                prod_ref["emp_override_manual"] = emp_manual
-                prod_ref["emp"] = emp_manual
-
-        # Todos tienen un valor >=1 por el editor. La confirmación de este modal
-        # convierte ese valor en decisión explícita del usuario.
-        revisiones_pendientes = 0
 
     b1, b2 = st.columns(2)
     with b1:
@@ -12415,9 +12369,12 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                     p = _validar_empaque_final_producto(p, proveedor=proveedor)
                     cantidad_comprada_unidades, costo_unitario_preview = _calcular_costo_unitario_seguro(p)
 
-                    # El stock siempre son unidades físicas.
+                    # El stock siempre son unidades físicas calculadas.
+                    # Si no puede calcularse, la línea queda en 0 y debe revisarse;
+                    # nunca sustituir silenciosamente por cantidad facturada.
                     if cantidad_comprada_unidades <= 0:
-                        cantidad_comprada_unidades = float(p["cant"])
+                        p["cantidad_requiere_revision"] = True
+                        cantidad_comprada_unidades = 0.0
 
                     moneda_original = str(p.get("moneda", "DOP")).upper()
                     costo_original = float(p["costo_total"])
@@ -13324,7 +13281,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_6_4_FIX_DIALOG_EMPAQUE_20260907"
+EXTRACTOR_CACHE_VERSION = "BASE6_R29_1_6_5_STOCK_AUTOMATICO_20260907"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
