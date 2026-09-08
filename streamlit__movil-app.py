@@ -3808,7 +3808,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_6":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_7":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3825,7 +3825,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_6":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R31_6"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R31_7"
 
 
 # =========================================================
@@ -6660,7 +6660,8 @@ def _pack_comun_final_nombre(texto):
     """
     t = " ".join(str(texto or "").upper().split())
     m = re.search(
-        r"\b(6|8|10|12|18|20|24|30|32|36|40|48|60|72|96|100|120)\s*$",
+        r"\b(6|8|10|12|18|20|24|30|32|36|40|48|60|72|96|100|120)"
+        r"(?:\s+1)?\s*$",
         t,
     )
     return int(m.group(1)) if m else None
@@ -6735,7 +6736,9 @@ def _inferir_empaque_desde_maestro_y_costo(prod):
     if costo_maestro <= 0:
         return None
 
-    # Candidato visible al final del nombre (ej. TORONJA 12).
+    # Candidato visible al final del nombre.
+    # Soporta también OCR con columna adyacente:
+    # "AGUA DASANI TORONJA 12 1" -> candidato pack 12.
     nombre = (
         prod.get("nombre_original_lectura")
         or prod.get("nombre")
@@ -11140,7 +11143,7 @@ Devuelve SOLO JSON:
     return data
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_6"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_7"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -12398,7 +12401,8 @@ def _normalizar_nombre_match_catalogo(valor):
     # "DASANI TORONJA 12", "COCA COLA 400ML 12".
     # Se elimina sólo para comparar contra el maestro.
     t = re.sub(
-        r"\s+(?:6|8|10|12|18|20|24|30|32|36|40|48|60|72|96|100|120)\s*$",
+        r"\s+(?:6|8|10|12|18|20|24|30|32|36|40|48|60|72|96|100|120)"
+        r"(?:\s+1)?\s*$",
         "",
         t,
     ).strip()
@@ -15131,7 +15135,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R31_6_STOCK_CANTIDAD_VALIDADA_20260908"
+EXTRACTOR_CACHE_VERSION = "BASE6_R31_7_DASANI_12_1_PACK_20260908"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
