@@ -3808,7 +3808,7 @@ for key, value in DEFAULTS.items():
         st.session_state[key] = value.copy() if hasattr(value, "copy") else value
 
 
-if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_7":
+if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_7_1":
     for _k in (
         "errores_ocr_archivos",
         "diagnostico_ocr",
@@ -3825,7 +3825,7 @@ if st.session_state.get("_extractor_runtime_version") != "BASE6_R31_7":
     st.session_state["detalle_facturas_procesadas"] = {}
     st.session_state["productos_excluidos"] = set()
     st.session_state["envases_retornables_lote"] = []
-    st.session_state["_extractor_runtime_version"] = "BASE6_R31_7"
+    st.session_state["_extractor_runtime_version"] = "BASE6_R31_7_1"
 
 
 # =========================================================
@@ -6800,6 +6800,21 @@ def _vision_pack_sospechoso_igual_cantidad(prod, emp_api):
     return _linea_recibo_demuestra_unidad_fisica(prod)
 
 
+
+def _empaque_verificado_dasani_toronja(prod):
+    """Regla exclusiva: AGUA DASANI TORONJA 12[/ 1] = pack 12."""
+    if not isinstance(prod, dict):
+        return None
+    texto = " ".join(str(prod.get(k) or "") for k in (
+        "nombre","nombre_original_lectura","descripcion","description",
+        "package_evidence_text","raw_row_text"
+    ))
+    t = _normalizar_ocr(texto)
+    if "dasani" in t and "toronja" in t and re.search(r"(?<!\d)12(?!\d)", t):
+        return 12
+    return None
+
+
 def _inferir_empaque_universal(prod, proveedor=""):
     """
     R31 - resolución universal de empaque.
@@ -6847,6 +6862,11 @@ def _inferir_empaque_universal(prod, proveedor=""):
         x in n_norm for x in
         ("deposito", "depos.", "depos ", "retornable vacio", "envase vacio")
     )
+
+    # R31.7.1: parche exclusivo confirmado para DASANI TORONJA 12.
+    _emp_dasani = _empaque_verificado_dasani_toronja(prod)
+    if _emp_dasani == 12 and not es_deposito:
+        return 12, "dasani_toronja_12_verificado", 100, False
 
     # Presentación/empaque explícito primero.
     # Algunos proveedores imprimen UND para una unidad facturada que es un pack.
@@ -11143,7 +11163,7 @@ Devuelve SOLO JSON:
     return data
 
 
-def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_7"):
+def _extraer_factura_con_vision_api(raw_bytes, nombre_archivo, cache_version="VISION_INVOICE_BASE6_R31_7_1"):
     """
     Lector visual real. No depende de Tesseract.
     Se usa para fotos que no coinciden con los fallbacks históricos.
@@ -15135,7 +15155,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R31_7_DASANI_12_1_PACK_20260908"
+EXTRACTOR_CACHE_VERSION = "BASE6_R31_7_1_SOLO_DASANI_20260908"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
