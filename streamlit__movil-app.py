@@ -1,3 +1,4 @@
+# TEXT9_V4_3_FRITOLAY_FORMAT_20260909
 # TEXT9_V4_2_PDF_ROBUST_RECEIPT_FIX_20260909
 # TEXT9_V4_1_FAST_LOCAL_DEFAULT_SESSION_CACHE_20260909
 # TEXT9_POTENTE_DB_V4_DIAGNOSTICO_20260909
@@ -7607,6 +7608,149 @@ def _limpiar_nombre_recibo_multilinea(lineas):
     return nombre
 
 
+
+def _extraer_factura_fritolay_tabla(texto, nombre_archivo=""):
+    """
+    Parser para facturas FritoLay Dominicana S.A.
+
+    Columnas:
+    No | Código | Descripción | Caj/Und | Cant | Und Medida |
+    Precio | Total Bruto | Descuento | ITBIS | Total Neto
+
+    Reglas:
+    - Cant + UND ya representa unidades físicas.
+    - NO multiplicar por 16X1 / 30X1 / 50X1 del texto de descripción.
+    - Precio es costo unitario SIN ITBIS.
+    - Total Bruto - Descuento es costo neto de línea SIN ITBIS.
+    - ITBIS está separado.
+    - El código impreso se conserva exactamente.
+    """
+    texto = str(texto or "")
+    if not texto.strip():
+        return None
+
+    norm = _normalizar_ocr(texto)
+    if not (
+        ("FRITOLAY" in norm or "FRITO LAY" in norm)
+        and "TOTAL BRUTO" in norm
+        and "ITBIS" in norm
+    ):
+        return None
+
+    lineas = [" ".join(x.split()) for x in texto.splitlines() if x.strip()]
+    if not lineas:
+        return None
+
+    patron = re.compile(
+        r"(?ix)"
+        r"(?:^|\s)(?P<fila>\d{1,2})\s+"
+        r"(?P<codigo>\d{8,10})\s*[-–—:]?\s*"
+        r"(?P<descripcion>.*?)\s+"
+        r"(?P<cajund>\d{1,3}\s*/\s*\d{1,3})\s+"
+        r"(?P<cant>\d+(?:[.,]\d+)?)\s+"
+        r"(?P<udm>UND|UN|PZA|BOT|CAJ|CAJA)\s+"
+        r"(?P<precio>\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))\s+"
+        r"(?P<bruto>\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))\s+"
+        r"(?P<descuento>\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))\s+"
+        r"(?P<itbis_val>\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))\s+"
+        r"(?P<total_neto>\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))"
+        r"(?:\s|$)"
+    )
+
+    # OCR puede partir una fila en 2-3 líneas.
+    candidatos = []
+    for i in range(len(lineas)):
+        candidatos.append(lineas[i])
+        if i + 1 < len(lineas):
+            candidatos.append(lineas[i] + " " + lineas[i + 1])
+        if i + 2 < len(lineas):
+            candidatos.append(lineas[i] + " " + lineas[i + 1] + " " + lineas[i + 2])
+
+    productos = []
+    filas_vistas = set()
+
+    for candidato in candidatos:
+        m = patron.search(candidato)
+        if not m:
+            continue
+
+        fila = int(m.group("fila"))
+        if fila in filas_vistas:
+            continue
+
+        try:
+            cantidad = float(_numero_documento_a_float(m.group("cant")))
+            precio = float(_numero_documento_a_float(m.group("precio")))
+            bruto = float(_numero_documento_a_float(m.group("bruto")))
+            descuento = float(_numero_documento_a_float(m.group("descuento")))
+            itbis_val = float(_numero_documento_a_float(m.group("itbis_val")))
+            total_neto = float(_numero_documento_a_float(m.group("total_neto")))
+        except Exception:
+            continue
+
+        if cantidad <= 0 or precio <= 0 or bruto <= 0:
+            continue
+
+        esperado = cantidad * precio
+        if abs(esperado - bruto) > max(1.0, bruto * 0.025):
+            continue
+
+        costo_neto = bruto - descuento
+        if costo_neto <= 0:
+            continue
+
+        codigo = str(m.group("codigo")).strip()
+        descripcion = " ".join(m.group("descripcion").split()).strip(" -")
+        if len(descripcion) < 3:
+            continue
+
+        productos.append({
+            "codigo": codigo,
+            "codigo_interno": codigo,
+            "nombre": descripcion,
+            "cant": float(cantidad),
+            "emp": 1,
+            "costo_total": round(costo_neto, 4),
+            "costo_unitario_documento": round(costo_neto / cantidad, 6),
+            "precio_unitario_documento": round(precio, 6),
+            "itbis": 0.18,
+            "itbis_valor_linea": round(itbis_val, 4),
+            "total_con_itbis_linea": round(total_neto, 4),
+            "descuento_linea": round(descuento, 4),
+            "cat": _inferir_categoria_generica(descripcion),
+            "unidad_original": "UND",
+            "costo_incluia_itbis": False,
+            "itbis_detectado": "separado_por_linea",
+            "origen_parser": "fritolay_tabla",
+            "fila_documento": fila,
+            "presentacion_logistica_texto": m.group("cajund").replace(" ", ""),
+            "moneda": "DOP",
+        })
+        filas_vistas.add(fila)
+
+    if not productos:
+        return None
+
+    productos.sort(key=lambda p: int(p.get("fila_documento", 9999)))
+
+    proveedor = "FritoLay Dominicana S.A."
+
+    numero = ""
+    m_ncf = re.search(r"(?i)\bE\d{10,14}\b", texto)
+    if m_ncf:
+        numero = m_ncf.group(0)
+    if not numero:
+        numero = _extraer_numero_documento_generico(texto)
+    if not numero:
+        base = re.sub(r"[^A-Za-z0-9]+", "-", str(nombre_archivo or "fritolay")).strip("-")
+        numero = base[:60] or "FRITOLAY-SIN-NUMERO"
+
+    fecha = _extraer_fecha_generica(texto)
+    firma = (proveedor, str(numero))
+    return firma, proveedor, numero, fecha, productos
+
+
+
 def _extraer_recibo_multilinea_local(texto, nombre_archivo=""):
     """
     Reconstruye recibos donde cada producto ocupa varias líneas.
@@ -12398,6 +12542,29 @@ def extraer_datos_factura(uploaded_file):
         return any(re.sub(r"\D", "", str(t)) in solo_digitos for t in terminos)
 
     # =========================================================
+    # V4.3: FRITOLAY DOMINICANA
+    # =========================================================
+    resultado_fritolay = _extraer_factura_fritolay_tabla(
+        extracted_text,
+        uploaded_file.name,
+    )
+    _wilpos_trace(
+        uploaded_file.name,
+        "Parser FritoLay V4.3",
+        "OK" if resultado_fritolay is not None else "SIN COINCIDENCIA",
+        (
+            f"{len(resultado_fritolay[4])} línea(s) FritoLay reconstruida(s)."
+            if resultado_fritolay is not None
+            else "No coincidió con el formato FritoLay."
+        ),
+    )
+    if resultado_fritolay is not None:
+        ff, pf, nf, fef, prods_f = resultado_fritolay
+        prods_f = [p for p in prods_f if _producto_extraido_es_valido(p)]
+        if len(prods_f) >= 1:
+            return ff, pf, nf, fef, prods_f
+
+    # =========================================================
     # LOCAL V3: RECIBOS MULTILÍNEA
     # =========================================================
     # Antes de exigir una fila tabular completa, reconstruir recibos térmicos
@@ -14874,6 +15041,16 @@ def _aplicar_motor_universal_compra(proveedor, productos):
     for prod in productos or []:
         if not isinstance(prod, dict):
             continue
+
+        # V4.3 FritoLay:
+        # Cant + UND ya son unidades físicas.
+        # No convertir 120GX16X1 / 55GRX30X1 en multiplicador de stock.
+        if str(prod.get("origen_parser", "")).lower() == "fritolay_tabla":
+            prod["emp"] = 1
+            prod["unidad_original"] = "UND"
+            prod["evidencia_empaque"] = "FritoLay: Cant + UND = unidad física"
+            prod["confianza_empaque"] = "alta"
+
         salida.append(_resolver_linea_compra_universal(prod, proveedor=proveedor))
     return salida
 
@@ -16077,7 +16254,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "TEXT9_V4_2_PDF_ROBUST_20260909"
+EXTRACTOR_CACHE_VERSION = "TEXT9_V4_3_FRITOLAY_20260909"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
