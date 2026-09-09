@@ -23,6 +23,7 @@ from pathlib import Path
 # TEXT9_LOCAL_OCR_V2_MULTIPASS_20260909
 # TEXT9_PRODUCT_DB_SQLITE_V1_20260909
 # TEXT9_PRODUCT_DB_SQLITE_V1_IMPORT_FIX_20260909
+# TEXT9_LOCAL_V3_STRUCTURAL_MULTILINE_20260909
 
 try:
     import fitz
@@ -7517,6 +7518,242 @@ def _parsear_linea_producto_generica(linea):
     return None
 
 
+
+def _es_linea_total_recibo_local(linea):
+    t = _normalizar_ocr(linea or "")
+    return bool(re.match(
+        r"^(SUB ?TOTAL|MAS ITBIS|ITBIS|TOTAL|EFECTIVO|CAMBIO|MONEDA|"
+        r"METODO PAGO|MONTO PAGO|CONTADO|DOCUMENTO|CAJERO|GRACIAS|"
+        r"CODIGO DE SEGURIDAD|FECHA FIRMA)",
+        t,
+    ))
+
+
+def _extraer_empaque_recibo_multilinea(texto):
+    """
+    Extrae únicamente evidencia logística explícita del bloque:
+      Caja-24, Paquete-10, 12/1, 24/1, etc.
+    Si no hay evidencia, devuelve 1.
+    """
+    t = str(texto or "").upper()
+
+    m = re.search(
+        r"\b(?:CAJA|CAJ|CJ|PAQUETE|PAQ|PACK)\s*[-:]?\s*(\d{1,3})\b",
+        t,
+    )
+    if m:
+        try:
+            return max(1, int(m.group(1)))
+        except Exception:
+            pass
+
+    # Líneas aisladas frecuentes en recibos: "12 1", "24 1".
+    m = re.search(r"(?m)^\s*(\d{1,3})\s+1\s*$", t)
+    if m:
+        try:
+            n = int(m.group(1))
+            if 2 <= n <= 120:
+                return n
+        except Exception:
+            pass
+
+    # Presentaciones como 12/1, 24/1.
+    m = re.search(r"\b(\d{1,3})\s*[/X]\s*1\b", t)
+    if m:
+        try:
+            n = int(m.group(1))
+            if 2 <= n <= 120:
+                return n
+        except Exception:
+            pass
+
+    return 1
+
+
+def _limpiar_nombre_recibo_multilinea(lineas):
+    """
+    Conserva el nombre comercial y presentación física,
+    quitando barcode/SKU, precio y textos logísticos.
+    """
+    partes = []
+    for linea in lineas:
+        s = " ".join(str(linea or "").split()).strip()
+        if not s:
+            continue
+
+        if re.fullmatch(r"\d{3,14}", re.sub(r"\D", "", s)) and len(re.sub(r"\D", "", s)) >= 3:
+            continue
+
+        if re.search(r"(?i)\b(?:CAJA|CAJ|PAQUETE|PAQ|PACK)\s*[-:]?\s*\d+\b", s):
+            continue
+
+        if re.fullmatch(r"\s*\d{1,3}\s+1\s*", s):
+            continue
+
+        # Quitar importes sueltos o tasas.
+        if re.fullmatch(r"\s*\d[\d.,]*\s*", s):
+            continue
+        if re.fullmatch(r"\s*\d[\d.,]*\s+I?18\s*", s, flags=re.I):
+            continue
+
+        partes.append(s)
+
+    nombre = " ".join(partes)
+    nombre = re.sub(r"\s+", " ", nombre).strip(" -")
+    return nombre
+
+
+def _extraer_recibo_multilinea_local(texto, nombre_archivo=""):
+    """
+    Reconstruye recibos donde cada producto ocupa varias líneas.
+
+    Patrón principal:
+        cantidad x precio
+        [barcode o SKU]
+        descripción (1..n líneas)
+        [Caja-24 / Paquete-10 / 12 1]
+
+    Es deliberadamente proveedor-independiente.
+    Preserva filas repetidas reales dentro de la misma página.
+    """
+    raw_lines = [x.rstrip() for x in str(texto or "").splitlines()]
+    lineas = [" ".join(x.split()) for x in raw_lines if x.strip()]
+    if not lineas:
+        return None
+
+    # Debe parecer recibo de factura/venta, no texto arbitrario.
+    texto_norm = _normalizar_ocr(" ".join(lineas[:80]))
+    if not any(k in texto_norm for k in (
+        "FACTURA", "CREDITO FISCAL", "NCF", "ITBIS", "SUB TOTAL",
+        "SUBTOTAL", "DESCRIPCION", "VALOR"
+    )):
+        return None
+
+    patron_inicio = re.compile(
+        r"^\s*(\d+(?:[.,]\d+)?)\s*[xX×]\s*"
+        r"(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))\s*$"
+    )
+
+    productos = []
+    i = 0
+    while i < len(lineas):
+        m = patron_inicio.match(lineas[i])
+        if not m:
+            i += 1
+            continue
+
+        try:
+            cantidad = _numero_documento_a_float(m.group(1))
+            precio = _numero_documento_a_float(m.group(2))
+        except Exception:
+            i += 1
+            continue
+
+        if cantidad <= 0 or precio < 0:
+            i += 1
+            continue
+
+        bloque = []
+        j = i + 1
+        while j < len(lineas):
+            if patron_inicio.match(lineas[j]):
+                break
+            if _es_linea_total_recibo_local(lineas[j]):
+                break
+            # Máximo razonable por producto para evitar tragarse el documento.
+            if len(bloque) >= 7:
+                break
+            bloque.append(lineas[j])
+            j += 1
+
+        bloque_txt = "\n".join(bloque)
+
+        # Barcode: preferir 8-14 dígitos y preservarlo/recuperar cero inicial.
+        barcode = ""
+        codigo_interno = ""
+        for bl in bloque:
+            dig = re.sub(r"\D", "", bl)
+            if 8 <= len(dig) <= 14:
+                candidato = _normalizar_barcode_ocr(dig)
+                if candidato:
+                    barcode = candidato
+                    break
+
+        # SKU interno: 3-7 dígitos, sólo como respaldo.
+        for bl in bloque:
+            if re.fullmatch(r"\s*\d{3,7}\s*", bl):
+                codigo_interno = re.sub(r"\D", "", bl)
+                break
+
+        nombre = _limpiar_nombre_recibo_multilinea(bloque)
+        if len(nombre) < 3:
+            i = max(i + 1, j)
+            continue
+
+        emp = _extraer_empaque_recibo_multilinea(bloque_txt)
+
+        # Si el nombre/UDM expresa unidad física individual, no inventar pack.
+        if re.search(r"(?i)\b(BOT(?:ELLA)?|UND|PZA)\b", bloque_txt):
+            # Sólo fuerza 1 cuando no existe evidencia explícita Caja/Paquete.
+            if not re.search(r"(?i)\b(CAJA|CAJ|PAQUETE|PAQ|PACK)\s*[-:]?\s*\d+", bloque_txt):
+                emp = 1
+
+        codigo = barcode or codigo_interno
+        if not codigo:
+            # Permitir producto sin código; matching SQLite podrá completarlo.
+            codigo = "TMP-" + hashlib.sha1(
+                f"{nombre_archivo}|{i}|{nombre}".encode("utf-8", errors="ignore")
+            ).hexdigest()[:10].upper()
+
+        productos.append({
+            "codigo": codigo,
+            "barcode": barcode or None,
+            "codigo_interno": codigo_interno or None,
+            "nombre": nombre,
+            "cant": float(cantidad),
+            "emp": int(max(1, emp)),
+            "costo_total": round(float(cantidad) * float(precio), 4),
+            "itbis": 0.18,
+            "cat": _inferir_categoria_generica(nombre),
+            "unidad_original": "CAJA" if emp > 1 else "UND",
+            "empaque_fuente": "recibo_multilinea" if emp > 1 else "sin_evidencia_pack",
+            "costo_incluia_itbis": None,
+            "itbis_detectado": "pendiente_totales",
+            "parser_fuente": "recibo_multilinea_local_v3",
+        })
+
+        i = max(i + 1, j)
+
+    if not productos:
+        return None
+
+    # Usar totales del documento para decidir si cantidad*precio venía
+    # con ITBIS o sin ITBIS (ej. recibos Ron Depot vs CDC).
+    productos, _ = _normalizar_costos_sin_itbis(texto, productos)
+
+    proveedor = _extraer_proveedor_generico(lineas)
+    numero = _extraer_numero_documento_generico(texto)
+    fecha = _extraer_fecha_generica(texto)
+    moneda = detectar_moneda_documento(texto)
+
+    if not numero:
+        base = re.sub(r"[^A-Za-z0-9]+", "-", str(nombre_archivo or "recibo")).strip("-")
+        numero = base[:60] or "RECIBO-SIN-NUMERO"
+
+    for p in productos:
+        p["moneda"] = moneda
+
+    _diag_vision(
+        nombre_archivo,
+        "Local V3 recibo multilínea",
+        "OK",
+        f"{len(productos)} línea(s) reconstruida(s) localmente.",
+    )
+
+    return (proveedor, str(numero)), proveedor, str(numero), fecha, productos
+
+
+
 def _extraer_productos_genericos(texto):
     lineas = [" ".join(x.split()) for x in str(texto or "").splitlines() if x.strip()]
     if not lineas:
@@ -7543,20 +7780,16 @@ def _extraer_productos_genericos(texto):
             header_idx = 0
 
     productos = []
-    firmas_productos = set()
     i = header_idx + 1
 
     def agregar_si_valido(prod):
+        """
+        Las filas repetidas dentro de la MISMA página son líneas reales.
+        No se deduplican aquí. La deduplicación de solapamientos pertenece
+        a la capa que compara fotos/páginas diferentes de la misma factura.
+        """
         if not prod:
             return False
-        firma = (
-            _codigo_producto_canonico(prod.get("codigo", "")),
-            _nombre_producto_canonico(prod.get("nombre", "")),
-            round(float(prod.get("costo_total", 0) or 0), 2),
-        )
-        if firma in firmas_productos:
-            return False
-        firmas_productos.add(firma)
         productos.append(prod)
         return True
 
@@ -11997,6 +12230,21 @@ def extraer_datos_factura(uploaded_file):
         return any(re.sub(r"\D", "", str(t)) in solo_digitos for t in terminos)
 
     # =========================================================
+    # LOCAL V3: RECIBOS MULTILÍNEA
+    # =========================================================
+    # Antes de exigir una fila tabular completa, reconstruir recibos térmicos
+    # donde cantidad, barcode, nombre y empaque aparecen en líneas separadas.
+    resultado_recibo_v3 = _extraer_recibo_multilinea_local(
+        extracted_text,
+        uploaded_file.name,
+    )
+    if resultado_recibo_v3 is not None:
+        fr3, pr3, nr3, fer3, prods_r3 = resultado_recibo_v3
+        prods_r3 = [p for p in prods_r3 if _producto_extraido_es_valido(p)]
+        if len(prods_r3) >= 1:
+            return fr3, pr3, nr3, fer3, prods_r3
+
+    # =========================================================
     # PRIMERA PRIORIDAD: EXTRACCIÓN GENÉRICA
     # =========================================================
     # Un proveedor nuevo NO necesita estar programado.
@@ -12010,7 +12258,13 @@ def extraer_datos_factura(uploaded_file):
     if resultado_tabla is not None:
         ft, pt, nt, fet, prods_t = resultado_tabla
         prods_t = [p for p in prods_t if _producto_extraido_es_valido(p)]
-        if len(prods_t) >= 2:
+        if len(prods_t) >= 1:
+            _diag_vision(
+                uploaded_file.name,
+                "Local V3 tabla",
+                "OK",
+                f"{len(prods_t)} producto(s) válidos; se acepta incluso factura de una sola línea.",
+            )
             return ft, pt, nt, fet, prods_t
 
     resultado_generico = _extraer_generico_factura(
@@ -12020,7 +12274,13 @@ def extraer_datos_factura(uploaded_file):
     if resultado_generico is not None:
         fg, pg, ng, feg, prods_g = resultado_generico
         prods_g = [p for p in prods_g if _producto_extraido_es_valido(p)]
-        if len(prods_g) >= 2:
+        if len(prods_g) >= 1:
+            _diag_vision(
+                uploaded_file.name,
+                "Local V3 genérico",
+                "OK",
+                f"{len(prods_g)} producto(s) válidos; se acepta incluso factura de una sola línea.",
+            )
             return fg, pg, ng, feg, prods_g
 
     # Fallback directo para fotos de tablas giradas.
@@ -15626,7 +15886,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "BASE6_R31_6_STOCK_CANTIDAD_VALIDADA_20260908"
+EXTRACTOR_CACHE_VERSION = "TEXT9_POTENTE_DB_LOCAL_V3_STRUCTURAL_20260909"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
@@ -15760,10 +16020,18 @@ def _motivo_fallo_archivo(nombre_archivo):
                 "Procesar por separado o usar una foto más nítida."
             )
 
+    diagnostico_local = ""
+    try:
+        muestra = str((st.session_state.get("diagnostico_ocr", {}) or {}).get(nombre, "") or "")
+        if muestra.strip():
+            diagnostico_local = " OCR sí produjo texto, pero ningún parser estructural logró una línea válida."
+    except Exception:
+        diagnostico_local = ""
+
     return (
         "sin_productos",
-        "No se pudieron extraer productos válidos de este archivo.",
-        "Procesar este archivo por separado y revisar la calidad/encuadre."
+        "No se pudieron extraer productos válidos de este archivo." + diagnostico_local,
+        "Revisar el detalle OCR/local; ya se intentó tabla, genérico y recibo multilínea V3."
     )
 
 
