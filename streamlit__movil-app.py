@@ -15,12 +15,14 @@ from urllib.request import Request, urlopen
 from difflib import SequenceMatcher
 import math
 import sqlite3
+import csv
 from pathlib import Path
 
 # BARCODE_ZERO_LEFT_FIX_BASE_TEXT9_20260908
 # TEXT9_HYBRID_READING_MODES_V1
 # TEXT9_LOCAL_OCR_V2_MULTIPASS_20260909
 # TEXT9_PRODUCT_DB_SQLITE_V1_20260909
+# TEXT9_PRODUCT_DB_SQLITE_V1_IMPORT_FIX_20260909
 
 try:
     import fitz
