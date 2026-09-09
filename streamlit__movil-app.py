@@ -1,3 +1,4 @@
+# TEXT9_POTENTE_DB_V4_DIAGNOSTICO_20260909
 import io
 import base64
 import os
@@ -8848,6 +8849,57 @@ def _obtener_openai_api_key():
 
 
 
+
+def _wilpos_trace_init(nombre_archivo):
+    try:
+        st.session_state.setdefault("wilpos_trace", {})
+        st.session_state["wilpos_trace"][str(nombre_archivo)] = {
+            "archivo": str(nombre_archivo), "etapas": [], "resultado": "EN PROCESO"
+        }
+    except Exception:
+        pass
+
+
+def _wilpos_trace(nombre_archivo, etapa, estado, detalle=""):
+    try:
+        st.session_state.setdefault("wilpos_trace", {})
+        item = st.session_state["wilpos_trace"].setdefault(
+            str(nombre_archivo),
+            {"archivo": str(nombre_archivo), "etapas": [], "resultado": "EN PROCESO"},
+        )
+        item["etapas"].append({
+            "etapa": str(etapa),
+            "estado": str(estado),
+            "detalle": str(detalle or "")[:1800],
+        })
+    except Exception:
+        pass
+
+
+def _wilpos_trace_resultado(nombre_archivo, resultado, detalle=""):
+    try:
+        st.session_state.setdefault("wilpos_trace", {})
+        item = st.session_state["wilpos_trace"].setdefault(
+            str(nombre_archivo), {"archivo": str(nombre_archivo), "etapas": []}
+        )
+        item["resultado"] = str(resultado)
+        item["detalle_final"] = str(detalle or "")[:2500]
+    except Exception:
+        pass
+
+
+def _wilpos_trace_resumen(nombre_archivo):
+    try:
+        item = (st.session_state.get("wilpos_trace", {}) or {}).get(str(nombre_archivo), {}) or {}
+        etapas = item.get("etapas", []) or []
+        return " | ".join(
+            f'{x.get("etapa","?")}: {x.get("estado","?")} - {x.get("detalle","")}'
+            for x in etapas[-10:]
+        ) or "Sin etapas registradas."
+    except Exception:
+        return "Sin trazabilidad disponible."
+
+
 def _diag_vision(nombre_archivo, etapa, estado, detalle=""):
     """Guarda diagnóstico visible por archivo, incluso si luego hay rerun."""
     try:
@@ -12091,6 +12143,8 @@ def _ocr_tabla_generica_fallback_seguro(raw_bytes, nombre_archivo=""):
 
 def extraer_datos_factura(uploaded_file):
     file_name = uploaded_file.name.lower()
+    _wilpos_trace_init(uploaded_file.name)
+    _wilpos_trace(uploaded_file.name, "Archivo", "OK", "Inicio de extracción.")
     extracted_text = ""
     errores_locales = []
 
@@ -12206,6 +12260,13 @@ def extraer_datos_factura(uploaded_file):
             [],
         )
 
+    _wilpos_trace(
+        uploaded_file.name,
+        "OCR / texto",
+        "OK" if str(extracted_text or "").strip() else "VACÍO",
+        f"{len(str(extracted_text or '').splitlines())} líneas · {len(str(extracted_text or ''))} caracteres.",
+    )
+
     # ---------------------------------------------------------
     # IDENTIFICACIÓN AUTOMÁTICA
     # ---------------------------------------------------------
@@ -12238,6 +12299,16 @@ def extraer_datos_factura(uploaded_file):
         extracted_text,
         uploaded_file.name,
     )
+    _wilpos_trace(
+        uploaded_file.name,
+        "Recibo multilínea V3",
+        "OK" if resultado_recibo_v3 is not None else "SIN COINCIDENCIA",
+        (
+            f"{len(resultado_recibo_v3[4])} línea(s) reconstruida(s)."
+            if resultado_recibo_v3 is not None
+            else "No se reconstruyeron bloques multilínea válidos."
+        ),
+    )
     if resultado_recibo_v3 is not None:
         fr3, pr3, nr3, fer3, prods_r3 = resultado_recibo_v3
         prods_r3 = [p for p in prods_r3 if _producto_extraido_es_valido(p)]
@@ -12255,6 +12326,12 @@ def extraer_datos_factura(uploaded_file):
         extracted_text,
         uploaded_file.name,
     )
+    _wilpos_trace(
+        uploaded_file.name,
+        "Parser tabla",
+        "OK" if resultado_tabla is not None else "SIN COINCIDENCIA",
+        f"{len(resultado_tabla[4]) if resultado_tabla is not None else 0} línea(s) candidatas.",
+    )
     if resultado_tabla is not None:
         ft, pt, nt, fet, prods_t = resultado_tabla
         prods_t = [p for p in prods_t if _producto_extraido_es_valido(p)]
@@ -12270,6 +12347,12 @@ def extraer_datos_factura(uploaded_file):
     resultado_generico = _extraer_generico_factura(
         extracted_text,
         uploaded_file.name,
+    )
+    _wilpos_trace(
+        uploaded_file.name,
+        "Parser genérico",
+        "OK" if resultado_generico is not None else "SIN COINCIDENCIA",
+        f"{len(resultado_generico[4]) if resultado_generico is not None else 0} línea(s) candidatas.",
     )
     if resultado_generico is not None:
         fg, pg, ng, feg, prods_g = resultado_generico
@@ -15886,7 +15969,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "TEXT9_POTENTE_DB_LOCAL_V3_STRUCTURAL_20260909"
+EXTRACTOR_CACHE_VERSION = "TEXT9_POTENTE_DB_V4_DIAGNOSTICO_20260909"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
@@ -16028,10 +16111,12 @@ def _motivo_fallo_archivo(nombre_archivo):
     except Exception:
         diagnostico_local = ""
 
+    resumen_trace = _wilpos_trace_resumen(nombre)
+    _wilpos_trace_resultado(nombre, "NO RECONOCIDO", resumen_trace)
     return (
         "sin_productos",
-        "No se pudieron extraer productos válidos de este archivo." + diagnostico_local,
-        "Revisar el detalle OCR/local; ya se intentó tabla, genérico y recibo multilínea V3."
+        "No se pudieron extraer productos válidos. " + resumen_trace + diagnostico_local,
+        "Abrir Diagnóstico por archivo para ver OCR y cada etapa."
     )
 
 
@@ -16322,6 +16407,7 @@ def _limpiar_cache_lectura_lote():
         "diagnostico_visual_directo",
         "fallback_574652_eventos",
         "resultado_archivos_lote",
+        "wilpos_trace",
     ):
         if clave in st.session_state:
             st.session_state.pop(clave, None)
@@ -16536,6 +16622,53 @@ def render_carga_facturas(titulo=True):
 """,
             unsafe_allow_html=True,
         )
+
+        with st.expander("🔎 Diagnóstico por archivo", expanded=False):
+            st.caption(
+                "Trazabilidad real del extractor: OCR → recibo multilínea → tabla → genérico. "
+                "Sirve para saber exactamente por qué un archivo termina como NO RECONOCIDO."
+            )
+            trazas = st.session_state.get("wilpos_trace", {}) or {}
+            if not trazas:
+                st.info("Procesa archivos para generar el diagnóstico.")
+            else:
+                resumen_diag = []
+                for nom, item in trazas.items():
+                    etapas = item.get("etapas", []) or []
+                    ultima = etapas[-1] if etapas else {}
+                    resumen_diag.append({
+                        "Archivo": nom,
+                        "Resultado": item.get("resultado", "EN PROCESO"),
+                        "Última etapa": ultima.get("etapa", ""),
+                        "Estado": ultima.get("estado", ""),
+                        "Detalle": ultima.get("detalle", ""),
+                    })
+                st.dataframe(pd.DataFrame(resumen_diag), use_container_width=True, hide_index=True)
+
+                st.download_button(
+                    "⬇️ Descargar diagnóstico JSON",
+                    data=json.dumps(trazas, ensure_ascii=False, indent=2).encode("utf-8"),
+                    file_name="wilpos_diagnostico.json",
+                    mime="application/json",
+                    use_container_width=True,
+                    key="descargar_diagnostico_v4",
+                )
+
+                diag_ocr = st.session_state.get("diagnostico_ocr", {}) or {}
+                for nom, item in trazas.items():
+                    with st.expander(f"Detalle: {nom}", expanded=False):
+                        etapas = item.get("etapas", []) or []
+                        if etapas:
+                            st.dataframe(pd.DataFrame(etapas), use_container_width=True, hide_index=True)
+                        muestra = str(diag_ocr.get(nom, "") or "")
+                        if muestra:
+                            st.text_area(
+                                "Texto OCR capturado",
+                                value=muestra[:8000],
+                                height=240,
+                                key=f"ocr_v4_{hashlib.sha1(str(nom).encode()).hexdigest()[:12]}",
+                                disabled=True,
+                            )
 
         uploaded_files = st.file_uploader(
             "Seleccionar archivos",
