@@ -1,3 +1,4 @@
+# TEXT9_V4_1_FAST_LOCAL_DEFAULT_SESSION_CACHE_20260909
 # TEXT9_POTENTE_DB_V4_DIAGNOSTICO_20260909
 import io
 import base64
@@ -6,6 +7,7 @@ import hashlib
 import html
 import re
 import json
+import copy
 import html as html_lib
 import pandas as pd
 import streamlit as st
@@ -8925,7 +8927,7 @@ def _modo_lectura_facturas():
       local     -> nunca usar OpenAI.
       ia        -> OpenAI Vision primero; si falla, continuar localmente.
     """
-    modo = str(st.session_state.get("modo_lectura_facturas", "economico") or "economico").strip().lower()
+    modo = str(st.session_state.get("modo_lectura_facturas", "local") or "economico").strip().lower()
     if modo not in ("economico", "local", "ia"):
         modo = "economico"
     return modo
@@ -14887,6 +14889,7 @@ def modal_confirmacion(validas, duplicadas_count, margen):
 
     b1, b2 = st.columns(2)
     with b1:
+        st.caption("⚡ Usa las lecturas ya procesadas; no vuelve a ejecutar OCR.")
         if st.button("✅ Confirmar y consolidar", type="primary", use_container_width=True):
             st.session_state.margen_usado = margen
 
@@ -16414,6 +16417,31 @@ def _limpiar_cache_lectura_lote():
     st.session_state.pop("vision_ultimo_error_directo", None)
 
 
+
+def _cache_lecturas_wilpos():
+    """Cache por contenido para evitar OCR repetido en reruns de Streamlit."""
+    if not isinstance(st.session_state.get("_wilpos_cache_lecturas"), dict):
+        st.session_state["_wilpos_cache_lecturas"] = {}
+    return st.session_state["_wilpos_cache_lecturas"]
+
+
+def _cache_lectura_get(huella):
+    item = _cache_lecturas_wilpos().get(str(huella))
+    return copy.deepcopy(item) if item is not None else None
+
+
+def _cache_lectura_set(huella, item):
+    cache = _cache_lecturas_wilpos()
+    cache[str(huella)] = copy.deepcopy(item)
+    # Límite simple para sesiones largas.
+    while len(cache) > 120:
+        cache.pop(next(iter(cache)), None)
+
+
+def _cache_lectura_clear():
+    st.session_state["_wilpos_cache_lecturas"] = {}
+
+
 def render_carga_facturas(titulo=True):
     # Selector de costo/lectura. Económico es el predeterminado.
     opciones_modo = {
@@ -16422,7 +16450,7 @@ def render_carga_facturas(titulo=True):
         "🤖 IA completa": "ia",
     }
     actual = _modo_lectura_facturas()
-    etiqueta_actual = next((k for k, v in opciones_modo.items() if v == actual), "💰 Económico (recomendado)")
+    etiqueta_actual = next((k for k, v in opciones_modo.items() if v == actual), "🆓 Solo local / gratis")
 
     seleccion = st.selectbox(
         "Modo de lectura de facturas",
@@ -16670,6 +16698,20 @@ def render_carga_facturas(titulo=True):
                                 disabled=True,
                             )
 
+        if st.button(
+            "🔄 Forzar nueva lectura de las facturas",
+            key="forzar_nueva_lectura_v4_1",
+            help="Borra la caché de lectura. Úsalo sólo cuando quieras reprocesar las imágenes desde cero.",
+            use_container_width=True,
+        ):
+            _cache_lectura_clear()
+            try:
+                _extraer_factura_upload_cache.clear()
+            except Exception:
+                pass
+            st.session_state.pop("wilpos_trace", None)
+            st.rerun()
+
         uploaded_files = st.file_uploader(
             "Seleccionar archivos",
             type=["pdf", "png", "jpg", "jpeg"],
@@ -16810,6 +16852,8 @@ def render_carga_facturas(titulo=True):
         st.session_state["matches_catalogo_pendientes_lote"] = []
         st.session_state["empaques_pendientes_revision"] = []
         st.session_state["formatos_revision_lote"] = {}
+        st.session_state["_wilpos_cache_hits_lote"] = 0
+        st.session_state["_wilpos_cache_misses_lote"] = 0
 
         # Los errores/diagnósticos pertenecen al intento actual, no a uno anterior.
         # No limpiamos el cache exitoso aquí; sólo descartamos estados visuales viejos.
@@ -16859,36 +16903,112 @@ def render_carga_facturas(titulo=True):
             min(99, int(((indice_ocr - 1) / total_archivos_ocr) * 100)),
             text=f"Leyendo {indice_ocr} de {total_archivos_ocr}: {f.name}",
             )
-            firma, proveedor, num_fac, fecha_fac, productos = _extraer_factura_upload_cache(f)
+            # V4.1 RÁPIDO: cache por bytes del archivo.
+            # Esto evita volver a ejecutar OCR/extracción en cualquier rerun,
+            # incluido el clic en "Confirmar y consolidar".
+            try:
+                raw_cache = f.getvalue()
+            except Exception:
+                f.seek(0)
+                raw_cache = f.read()
+                f.seek(0)
+            huella_lectura = hashlib.sha256(raw_cache).hexdigest()
 
-            if not productos:
-                archivos_invalidos.append(f.name)
-                tipo_fallo, motivo_fallo, accion_fallo = _motivo_fallo_archivo(f.name)
-                estado_fallo = tipo_fallo if tipo_fallo in ("timeout", "limite_api", "error_api") else "no_reconocido"
-                _guardar_resultado_archivo_lote(
-                    f.name,
-                    estado_fallo,
-                    motivo=motivo_fallo,
-                    accion=accion_fallo,
+            cache_item = _cache_lectura_get(huella_lectura)
+
+            if cache_item is not None:
+                st.session_state["_wilpos_cache_hits_lote"] += 1
+                firma = cache_item.get("firma")
+                proveedor = cache_item.get("proveedor")
+                num_fac = cache_item.get("num_fac")
+                fecha_fac = cache_item.get("fecha_fac")
+                productos = cache_item.get("productos") or []
+                repetidos_internos = int(cache_item.get("repetidos_internos", 0) or 0)
+                evaluacion_formato = cache_item.get("evaluacion_formato") or {}
+                fallo_cache = cache_item.get("fallo")
+
+                progreso_ocr.progress(
+                    min(99, int((indice_ocr / total_archivos_ocr) * 100)),
+                    text=f"⚡ Reutilizando {indice_ocr} de {total_archivos_ocr}: {f.name}",
                 )
-                continue
 
-            # BASE6-R29.1.2:
-            # Repeticiones reales dentro de la MISMA página se SUMAN.
-            # Los solapamientos entre fotos/páginas se deduplican más abajo sin sumar.
-            productos, repetidos_internos = _sumar_lineas_repetidas_misma_pagina(productos)
+                if fallo_cache or not productos:
+                    archivos_invalidos.append(f.name)
+                    tipo_fallo = (fallo_cache or {}).get("tipo", "no_reconocido")
+                    motivo_fallo = (fallo_cache or {}).get(
+                        "motivo", "No se pudieron extraer productos válidos."
+                    )
+                    accion_fallo = (fallo_cache or {}).get(
+                        "accion", "Abrir Diagnóstico por archivo."
+                    )
+                    _guardar_resultado_archivo_lote(
+                        f.name,
+                        tipo_fallo if tipo_fallo in ("timeout", "limite_api", "error_api") else "no_reconocido",
+                        motivo=motivo_fallo,
+                        accion=accion_fallo,
+                    )
+                    continue
 
-            # BASE6-R30:
-            # Toda línea pasa primero por el Motor Universal de Compra.
-            # La IA sólo aporta evidencia; Python resuelve stock/costo.
-            productos = _aplicar_motor_universal_compra(
-                proveedor,
-                productos,
-            )
-            evaluacion_formato = _evaluar_formato_factura(
-                proveedor,
-                productos,
-            )
+            else:
+                st.session_state["_wilpos_cache_misses_lote"] += 1
+                firma, proveedor, num_fac, fecha_fac, productos = _extraer_factura_upload_cache(f)
+
+                if not productos:
+                    archivos_invalidos.append(f.name)
+                    tipo_fallo, motivo_fallo, accion_fallo = _motivo_fallo_archivo(f.name)
+                    estado_fallo = tipo_fallo if tipo_fallo in ("timeout", "limite_api", "error_api") else "no_reconocido"
+                    _guardar_resultado_archivo_lote(
+                        f.name,
+                        estado_fallo,
+                        motivo=motivo_fallo,
+                        accion=accion_fallo,
+                    )
+                    _cache_lectura_set(
+                        huella_lectura,
+                        {
+                            "firma": None,
+                            "proveedor": None,
+                            "num_fac": None,
+                            "fecha_fac": None,
+                            "productos": [],
+                            "repetidos_internos": 0,
+                            "evaluacion_formato": {},
+                            "fallo": {
+                                "tipo": tipo_fallo,
+                                "motivo": motivo_fallo,
+                                "accion": accion_fallo,
+                            },
+                        },
+                    )
+                    continue
+
+                # Repeticiones reales dentro de la MISMA página se SUMAN.
+                productos, repetidos_internos = _sumar_lineas_repetidas_misma_pagina(productos)
+
+                # Motor universal y evaluación también se cachean.
+                productos = _aplicar_motor_universal_compra(
+                    proveedor,
+                    productos,
+                )
+                evaluacion_formato = _evaluar_formato_factura(
+                    proveedor,
+                    productos,
+                )
+
+                _cache_lectura_set(
+                    huella_lectura,
+                    {
+                        "firma": firma,
+                        "proveedor": proveedor,
+                        "num_fac": num_fac,
+                        "fecha_fac": fecha_fac,
+                        "productos": productos,
+                        "repetidos_internos": repetidos_internos,
+                        "evaluacion_formato": evaluacion_formato,
+                        "fallo": None,
+                    },
+                )
+
             st.session_state.setdefault(
                 "formatos_revision_lote",
                 {},
@@ -16970,6 +17090,14 @@ def render_carga_facturas(titulo=True):
 
         progreso_ocr.progress(100, text="Lectura completada")
         progreso_ocr.empty()
+
+        hits_lectura = int(st.session_state.get("_wilpos_cache_hits_lote", 0))
+        misses_lectura = int(st.session_state.get("_wilpos_cache_misses_lote", 0))
+        if hits_lectura:
+            st.caption(
+                f"⚡ Lectura rápida: {hits_lectura} archivo(s) reutilizado(s) sin OCR "
+                f"· {misses_lectura} archivo(s) leído(s) desde cero."
+            )
 
         _dup_binarios = _resumen_duplicados_archivos_ui(uploaded_files)[2]
         _mostrar_resumen_procesamiento_archivos_ui(
