@@ -17,6 +17,7 @@ import math
 
 # BARCODE_ZERO_LEFT_FIX_BASE_TEXT9_20260908
 # TEXT9_HYBRID_READING_MODES_V1
+# TEXT9_LOCAL_OCR_V2_MULTIPASS_20260909
 
 try:
     import fitz
@@ -5221,6 +5222,129 @@ def _normalizar_ocr(texto):
     texto = texto.lower()
     texto = re.sub(r"[^a-z0-9]+", " ", texto)
     return re.sub(r"\s+", " ", texto).strip()
+
+
+def _puntuar_texto_ocr_local(texto):
+    """Puntaje simple para escoger la mejor lectura OCR local."""
+    t = str(texto or "")
+    if not t.strip():
+        return -100000
+    lineas = [x.strip() for x in t.splitlines() if x.strip()]
+    digitos = sum(ch.isdigit() for ch in t)
+    letras = sum(ch.isalpha() for ch in t)
+    importes = len(re.findall(r"\b\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})\b", t))
+    palabras_factura = sum(
+        1 for p in (
+            "FACTURA", "NCF", "TOTAL", "SUBTOTAL", "ITBIS", "CANT",
+            "CANTIDAD", "PRECIO", "IMPORTE", "DESCRIP", "CODIGO", "CÓDIGO"
+        )
+        if p in t.upper()
+    )
+    # Premia contenido estructurado y evita elegir una variante sólo por ruido.
+    return (len(lineas) * 8) + digitos + min(letras, 1500) * 0.15 + importes * 18 + palabras_factura * 30
+
+
+def _variantes_imagen_ocr_local(img):
+    """
+    Genera variantes gratuitas para rescatar fotos difíciles.
+    No usa OpenAI ni servicios externos.
+    """
+    variantes = [("original", img)]
+    try:
+        from PIL import ImageOps, ImageEnhance, ImageFilter
+
+        base = ImageOps.exif_transpose(img).convert("L")
+
+        # Ampliar imágenes pequeñas mejora mucho Tesseract en tickets/facturas.
+        w, h = base.size
+        if max(w, h) < 2200:
+            escala = min(2.2, 2200.0 / max(w, h))
+            base = base.resize(
+                (max(1, int(w * escala)), max(1, int(h * escala)))
+            )
+
+        auto = ImageOps.autocontrast(base)
+        variantes.append(("gris_autocontraste", auto))
+
+        fuerte = ImageEnhance.Contrast(auto).enhance(1.65)
+        fuerte = fuerte.filter(ImageFilter.SHARPEN)
+        variantes.append(("contraste_nitidez", fuerte))
+
+        # Binarización adaptada al histograma sin numpy/opencv.
+        hist = auto.histogram()
+        total = sum(hist)
+        acumulado = 0
+        mediana = 180
+        for i, n in enumerate(hist):
+            acumulado += n
+            if acumulado >= total * 0.55:
+                mediana = i
+                break
+        umbral = max(125, min(210, mediana))
+        bw = auto.point(lambda p: 255 if p > umbral else 0)
+        variantes.append(("binarizada", bw))
+
+        # Rotación 180 rescata fotos tomadas al revés.
+        variantes.append(("rotada_180", auto.rotate(180, expand=True)))
+
+    except Exception:
+        pass
+
+    return variantes
+
+
+def _ocr_local_multipasada(img, idiomas=None):
+    """
+    Ejecuta OCR local sobre varias versiones de la misma foto y devuelve
+    la lectura con mayor señal de factura.
+    """
+    try:
+        import pytesseract
+    except Exception:
+        return "", "pytesseract no disponible"
+
+    configs = [
+        "--oem 3 --psm 6",
+        "--oem 3 --psm 4",
+        "--oem 3 --psm 11",
+    ]
+    lang = idiomas or "spa+eng"
+    mejor_texto = ""
+    mejor_meta = ""
+    mejor_score = -100000
+
+    for nombre, variante in _variantes_imagen_ocr_local(img):
+        # No multiplicar innecesariamente el costo CPU:
+        # original/autocontraste prueban dos segmentaciones; el resto una.
+        cfgs = configs[:2] if nombre in ("original", "gris_autocontraste") else [configs[0]]
+        for cfg in cfgs:
+            try:
+                texto = pytesseract.image_to_string(variante, lang=lang, config=cfg)
+            except Exception:
+                # Algunos despliegues sólo tienen inglés instalado.
+                try:
+                    texto = pytesseract.image_to_string(variante, config=cfg)
+                except Exception:
+                    continue
+
+            score = _puntuar_texto_ocr_local(texto)
+            if score > mejor_score:
+                mejor_score = score
+                mejor_texto = texto
+                mejor_meta = f"{nombre} · {cfg} · score={score:.1f}"
+
+            # Salida temprana si ya tenemos una lectura claramente útil.
+            mayus = str(texto or "").upper()
+            if (
+                score >= 420
+                and ("TOTAL" in mayus or "ITBIS" in mayus)
+                and sum(ch.isdigit() for ch in mayus) >= 35
+            ):
+                return mejor_texto, mejor_meta
+
+    return mejor_texto, mejor_meta
+
+
 
 def _ocr_imagen(image):
     """
@@ -11697,7 +11821,7 @@ def _ocr_tabla_generica_fallback_seguro(raw_bytes, nombre_archivo=""):
             firma, proveedor, numero, fecha, productos = resultado
             productos_validos = [p for p in productos if _producto_extraido_es_valido(p)]
 
-            if len(productos_validos) >= 2:
+            if len(productos_validos) >= 1:
                 mejores.append(
                     (
                         len(productos_validos),
@@ -15034,7 +15158,7 @@ def construir_productos_repetidos_historicos():
                     facturas[key]["costo_total"] += float(item.get("costo_total", 0))
 
         items = list(facturas.values())
-        if len(items) < 2:
+        if len(items) < 1:
             continue
 
         unidades_total = sum(float(x.get("unidades", 0)) for x in items)
