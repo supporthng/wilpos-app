@@ -1,3 +1,4 @@
+# TEXT9_V4_4_FRITOLAY_PHOTO_ROBUST_20260909
 # TEXT9_V4_3_FRITOLAY_FORMAT_20260909
 # TEXT9_V4_2_PDF_ROBUST_RECEIPT_FIX_20260909
 # TEXT9_V4_1_FAST_LOCAL_DEFAULT_SESSION_CACHE_20260909
@@ -7609,21 +7610,116 @@ def _limpiar_nombre_recibo_multilinea(lineas):
 
 
 
+def _fritolay_codigo_canonico(raw):
+    """
+    Corrige únicamente errores OCR típicos de la primera posición.
+    En este formato los códigos impresos son de 9 dígitos y comienzan por 3.
+    """
+    s = str(raw or "").upper()
+    # Sustituciones OCR sólo dentro del token de código.
+    s = s.replace("O", "0").replace("I", "1").replace("L", "1")
+    dig = re.sub(r"\D", "", s)
+
+    if len(dig) == 8 and dig.startswith("000"):
+        dig = "3" + dig
+    elif len(dig) == 9 and dig[1:4] == "000" and not dig.startswith("3"):
+        dig = "3" + dig[1:]
+
+    return dig if len(dig) == 9 else ""
+
+
+def _fritolay_dinero_token(token):
+    """
+    Convierte dinero OCR tolerando pérdida del punto decimal:
+    8740 -> 87.40, 5167 -> 51.67, 26220 -> 262.20.
+    """
+    s = str(token or "").strip()
+    s = re.sub(r"[^0-9.,]", "", s)
+    if not s:
+        return None
+
+    try:
+        if "." in s or "," in s:
+            return float(_numero_documento_a_float(s))
+
+        if s.isdigit():
+            n = int(s)
+            if len(s) >= 3:
+                return n / 100.0
+            return float(n)
+    except Exception:
+        return None
+    return None
+
+
+def _fritolay_elegir_costo(cantidad, valores, descuento_global_cero=False):
+    """
+    Elige costo unitario sin ITBIS usando consistencia matemática.
+    Prioridad:
+    1) precio * cantidad ~= total bruto
+    2) total bruto / cantidad
+    3) total con ITBIS / 1.18 / cantidad cuando descuento global = 0
+    """
+    vals = [float(v) for v in valores if v is not None and float(v) > 0]
+    if not vals or cantidad <= 0:
+        return None, None, None
+
+    mejor = None
+
+    # precio y bruto presentes
+    for p in vals:
+        bruto_esp = p * cantidad
+        for bruto in vals:
+            err = abs(bruto - bruto_esp)
+            tol = max(0.60, bruto_esp * 0.015)
+            if err <= tol:
+                score = err
+                cand = (score, p, bruto, None)
+                if mejor is None or cand[0] < mejor[0]:
+                    mejor = cand
+
+    if mejor is not None:
+        return mejor[1], mejor[2], mejor[3]
+
+    # Buscar bruto + total con ITBIS.
+    for bruto in vals:
+        total_esp = bruto * 1.18
+        for total in vals:
+            err = abs(total - total_esp)
+            tol = max(0.80, total_esp * 0.018)
+            if err <= tol:
+                return bruto / cantidad, bruto, total
+
+    # Si el documento confirma descuento total 0, el último valor de línea
+    # puede ser Total Neto con ITBIS.
+    if descuento_global_cero:
+        for total in sorted(vals, reverse=True):
+            bruto = total / 1.18
+            precio = bruto / cantidad
+            # evitar valores absurdos
+            if 5 <= precio <= 50000:
+                return precio, bruto, total
+
+    # Último recurso seguro: un valor que parezca precio unitario.
+    for v in vals:
+        if 5 <= v <= 50000:
+            return v, v * cantidad, None
+
+    return None, None, None
+
+
 def _extraer_factura_fritolay_tabla(texto, nombre_archivo=""):
     """
-    Parser para facturas FritoLay Dominicana S.A.
+    Parser FritoLay tolerante a OCR fotográfico.
 
-    Columnas:
-    No | Código | Descripción | Caj/Und | Cant | Und Medida |
-    Precio | Total Bruto | Descuento | ITBIS | Total Neto
+    La foto puede deformar:
+    - 3 -> 8/B/1 al inicio del código
+    - 87.40 -> 8740
+    - 51.67 -> 5167
+    - UND -> UNO
+    - 0/6 -> 016
 
-    Reglas:
-    - Cant + UND ya representa unidades físicas.
-    - NO multiplicar por 16X1 / 30X1 / 50X1 del texto de descripción.
-    - Precio es costo unitario SIN ITBIS.
-    - Total Bruto - Descuento es costo neto de línea SIN ITBIS.
-    - ITBIS está separado.
-    - El código impreso se conserva exactamente.
+    No exige que todas las columnas monetarias estén perfectas.
     """
     texto = str(texto or "")
     if not texto.strip():
@@ -7631,78 +7727,110 @@ def _extraer_factura_fritolay_tabla(texto, nombre_archivo=""):
 
     norm = _normalizar_ocr(texto)
     if not (
-        ("FRITOLAY" in norm or "FRITO LAY" in norm)
-        and "TOTAL BRUTO" in norm
+        ("FRITOLAY" in norm or "FRITO LAY" in norm or ("FRITO" in norm and "DOMINICANA" in norm))
         and "ITBIS" in norm
     ):
         return None
 
-    lineas = [" ".join(x.split()) for x in texto.splitlines() if x.strip()]
-    if not lineas:
-        return None
-
-    patron = re.compile(
-        r"(?ix)"
-        r"(?:^|\s)(?P<fila>\d{1,2})\s+"
-        r"(?P<codigo>\d{8,10})\s*[-–—:]?\s*"
-        r"(?P<descripcion>.*?)\s+"
-        r"(?P<cajund>\d{1,3}\s*/\s*\d{1,3})\s+"
-        r"(?P<cant>\d+(?:[.,]\d+)?)\s+"
-        r"(?P<udm>UND|UN|PZA|BOT|CAJ|CAJA)\s+"
-        r"(?P<precio>\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))\s+"
-        r"(?P<bruto>\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))\s+"
-        r"(?P<descuento>\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))\s+"
-        r"(?P<itbis_val>\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))\s+"
-        r"(?P<total_neto>\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))"
-        r"(?:\s|$)"
+    descuento_global_cero = bool(
+        re.search(r"(?is)\bDESCUENTO\b.{0,60}\b0[.,]00\b", texto)
     )
 
-    # OCR puede partir una fila en 2-3 líneas.
-    candidatos = []
-    for i in range(len(lineas)):
-        candidatos.append(lineas[i])
-        if i + 1 < len(lineas):
-            candidatos.append(lineas[i] + " " + lineas[i + 1])
-        if i + 2 < len(lineas):
-            candidatos.append(lineas[i] + " " + lineas[i + 1] + " " + lineas[i + 2])
+    lineas = [" ".join(x.split()) for x in texto.splitlines() if x.strip()]
+
+    # Formar bloques por código de producto. Cada código impreso está
+    # inmediatamente antes de "-" y suele ser 9 dígitos.
+    bloques = []
+    actual = ""
+    for ln in lineas:
+        if re.search(r"(?i)(?:[B8F\[\{]?\d{8,10})\s*[-–—]", ln):
+            if actual:
+                bloques.append(actual)
+            actual = ln
+        elif actual:
+            # Sólo una continuación corta; evita tragarse la siguiente zona.
+            if not re.search(r"(?i)\bTOTAL\s+(?:CAJAS|BRUTO|A\s+PAGAR)\b", ln):
+                actual += " " + ln
+            else:
+                bloques.append(actual)
+                actual = ""
+    if actual:
+        bloques.append(actual)
 
     productos = []
     filas_vistas = set()
 
-    for candidato in candidatos:
-        m = patron.search(candidato)
-        if not m:
+    for bloque in bloques:
+        # Código y descripción.
+        mc = re.search(
+            r"(?i)(?P<raw>[B8F\[\{]?\d{8,10})\s*[-–—]\s*(?P<resto>.+)",
+            bloque,
+        )
+        if not mc:
             continue
 
-        fila = int(m.group("fila"))
-        if fila in filas_vistas:
+        codigo = _fritolay_codigo_canonico(mc.group("raw"))
+        if not codigo:
             continue
 
-        try:
-            cantidad = float(_numero_documento_a_float(m.group("cant")))
-            precio = float(_numero_documento_a_float(m.group("precio")))
-            bruto = float(_numero_documento_a_float(m.group("bruto")))
-            descuento = float(_numero_documento_a_float(m.group("descuento")))
-            itbis_val = float(_numero_documento_a_float(m.group("itbis_val")))
-            total_neto = float(_numero_documento_a_float(m.group("total_neto")))
-        except Exception:
+        resto = mc.group("resto")
+
+        # Cantidad: buscar justo antes de UND/UNO/UN0.
+        mq = re.search(
+            r"(?i)(?P<cant>\d{1,3})\s*[\]\)\|,;:_-]*\s*(?:UND|UNO|UN0)\b",
+            resto,
+        )
+        if not mq:
             continue
 
-        if cantidad <= 0 or precio <= 0 or bruto <= 0:
+        cantidad = int(mq.group("cant"))
+        if cantidad <= 0:
             continue
 
-        esperado = cantidad * precio
-        if abs(esperado - bruto) > max(1.0, bruto * 0.025):
+        # Descripción = texto antes de la zona Cant/UND, limpiando Caj/Und.
+        desc_part = resto[:mq.start()]
+        desc_part = re.sub(
+            r"(?i)\s+[0OQ]\s*[/|]\s*\d{1,3}\s*$",
+            "",
+            desc_part,
+        )
+        desc_part = re.sub(r"(?i)\s+[0OQ]\d{1,2}\s*$", "", desc_part)
+        descripcion = re.sub(r"\s+", " ", desc_part).strip(" _-|")
+        if len(descripcion) < 4:
             continue
 
-        costo_neto = bruto - descuento
-        if costo_neto <= 0:
+        # Dinero después de UND. Se aceptan puntos perdidos.
+        tail = resto[mq.end():]
+        tokens = re.findall(r"\d[\d.,]{1,12}", tail)
+        valores = []
+        for tok in tokens:
+            v = _fritolay_dinero_token(tok)
+            if v is not None and v > 0:
+                valores.append(v)
+
+        precio, bruto, total_con_itbis = _fritolay_elegir_costo(
+            cantidad,
+            valores,
+            descuento_global_cero=descuento_global_cero,
+        )
+        if precio is None or bruto is None:
             continue
 
-        codigo = str(m.group("codigo")).strip()
-        descripcion = " ".join(m.group("descripcion").split()).strip(" -")
-        if len(descripcion) < 3:
+        # Validar precio razonable.
+        if not (1 <= precio <= 50000):
             continue
+
+        # Número de fila si OCR lo conservó.
+        mfila = re.match(r"\s*(\d{1,2})\b", bloque)
+        fila = int(mfila.group(1)) if mfila else len(productos) + 1
+        clave = (fila, codigo, descripcion)
+        if clave in filas_vistas:
+            continue
+        filas_vistas.add(clave)
+
+        itbis_val = max(0.0, bruto * 0.18)
+        if total_con_itbis is None:
+            total_con_itbis = bruto + itbis_val
 
         productos.append({
             "codigo": codigo,
@@ -7710,27 +7838,36 @@ def _extraer_factura_fritolay_tabla(texto, nombre_archivo=""):
             "nombre": descripcion,
             "cant": float(cantidad),
             "emp": 1,
-            "costo_total": round(costo_neto, 4),
-            "costo_unitario_documento": round(costo_neto / cantidad, 6),
+            "costo_total": round(bruto, 4),
+            "costo_unitario_documento": round(precio, 6),
             "precio_unitario_documento": round(precio, 6),
             "itbis": 0.18,
             "itbis_valor_linea": round(itbis_val, 4),
-            "total_con_itbis_linea": round(total_neto, 4),
-            "descuento_linea": round(descuento, 4),
+            "total_con_itbis_linea": round(total_con_itbis, 4),
+            "descuento_linea": 0.0,
             "cat": _inferir_categoria_generica(descripcion),
             "unidad_original": "UND",
             "costo_incluia_itbis": False,
-            "itbis_detectado": "separado_por_linea",
-            "origen_parser": "fritolay_tabla",
+            "itbis_detectado": "fritolay_18",
+            "origen_parser": "fritolay_tabla_v44",
             "fila_documento": fila,
-            "presentacion_logistica_texto": m.group("cajund").replace(" ", ""),
             "moneda": "DOP",
         })
-        filas_vistas.add(fila)
 
     if not productos:
         return None
 
+    # Quitar duplicados OCR por código+cantidad+nombre conservando mejor fila.
+    unicos = {}
+    for p in productos:
+        key = (
+            p.get("codigo"),
+            round(float(p.get("cant", 0)), 4),
+            re.sub(r"\s+", " ", str(p.get("nombre", "")).upper()).strip(),
+        )
+        if key not in unicos:
+            unicos[key] = p
+    productos = list(unicos.values())
     productos.sort(key=lambda p: int(p.get("fila_documento", 9999)))
 
     proveedor = "FritoLay Dominicana S.A."
@@ -7742,11 +7879,11 @@ def _extraer_factura_fritolay_tabla(texto, nombre_archivo=""):
     if not numero:
         numero = _extraer_numero_documento_generico(texto)
     if not numero:
-        base = re.sub(r"[^A-Za-z0-9]+", "-", str(nombre_archivo or "fritolay")).strip("-")
-        numero = base[:60] or "FRITOLAY-SIN-NUMERO"
+        numero = re.sub(r"[^A-Za-z0-9]+", "-", str(nombre_archivo or "fritolay")).strip("-")[:60]
 
     fecha = _extraer_fecha_generica(texto)
-    firma = (proveedor, str(numero))
+    firma = (proveedor, str(numero or "FRITOLAY-SIN-NUMERO"))
+
     return firma, proveedor, numero, fecha, productos
 
 
@@ -8343,7 +8480,7 @@ def _ocr_multilectura(imagen):
     return "\n".join(partes)
 
 
-OCR_CACHE_VERSION = "TEXT9_V4_2_PDF_ROBUST_20260909"
+OCR_CACHE_VERSION = "TEXT9_V4_4_FRITOLAY_FOTO_20260909"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=64)
@@ -8422,6 +8559,41 @@ def _ocr_pdf_pagina_robusto(imagen):
 
 
 
+
+def _ocr_fritolay_foto_robusto(imagen):
+    """
+    OCR de alta resolución para facturas FritoLay fotografiadas.
+    Se usa sólo cuando el OCR inicial detecta FritoLay.
+    """
+    try:
+        base = ImageOps.exif_transpose(imagen).convert("RGB")
+        w, h = base.size
+
+        # La foto de tabla necesita más ancho que el OCR genérico.
+        objetivo_ancho = 1800
+        escala = objetivo_ancho / float(max(1, w))
+        if 0.85 <= escala <= 2.5:
+            base = base.resize(
+                (int(w * escala), int(h * escala)),
+                Image.Resampling.LANCZOS,
+            )
+
+        gris = ImageOps.grayscale(base)
+        gris = ImageOps.autocontrast(gris, cutoff=1)
+        gris = ImageEnhance.Contrast(gris).enhance(1.35)
+        gris = ImageEnhance.Sharpness(gris).enhance(1.15)
+
+        return pytesseract.image_to_string(
+            gris,
+            lang="eng",
+            config="--oem 3 --psm 6",
+            timeout=35,
+        ) or ""
+    except Exception:
+        return ""
+
+
+
 def _ocr_imagen_desde_bytes_cache(raw_bytes, cache_version=OCR_CACHE_VERSION):
     """Cachea OCR por contenido y conserva el motivo real de fallo."""
     if not raw_bytes:
@@ -8439,6 +8611,21 @@ def _ocr_imagen_desde_bytes_cache(raw_bytes, cache_version=OCR_CACHE_VERSION):
     try:
         imagen = Image.open(io.BytesIO(raw_bytes))
         resultado = _ocr_multilectura(imagen)
+
+        texto_probe = str(resultado or "")
+        probe_norm = _normalizar_ocr(texto_probe)
+
+        # V4.4: si el encabezado identifica FritoLay, usar una lectura
+        # tabular de alta resolución en vez de depender del OCR genérico.
+        if (
+            "FRITOLAY" in probe_norm
+            or "FRITO LAY" in probe_norm
+            or ("FRITO" in probe_norm and "DOMINICANA" in probe_norm)
+        ):
+            especial = _ocr_fritolay_foto_robusto(imagen)
+            if len(str(especial or "").strip()) >= 300:
+                resultado = especial
+
         if not str(resultado or "").strip():
             return "__OCR_ERROR__:Tesseract no produjo texto legible"
         return resultado
@@ -15045,7 +15232,7 @@ def _aplicar_motor_universal_compra(proveedor, productos):
         # V4.3 FritoLay:
         # Cant + UND ya son unidades físicas.
         # No convertir 120GX16X1 / 55GRX30X1 en multiplicador de stock.
-        if str(prod.get("origen_parser", "")).lower() == "fritolay_tabla":
+        if str(prod.get("origen_parser", "")).lower().startswith("fritolay_tabla"):
             prod["emp"] = 1
             prod["unidad_original"] = "UND"
             prod["evidencia_empaque"] = "FritoLay: Cant + UND = unidad física"
@@ -16254,7 +16441,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "TEXT9_V4_3_FRITOLAY_20260909"
+EXTRACTOR_CACHE_VERSION = "TEXT9_V4_4_FRITOLAY_FOTO_20260909"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
