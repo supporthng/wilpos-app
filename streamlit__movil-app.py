@@ -14,10 +14,13 @@ from datetime import datetime
 from urllib.request import Request, urlopen
 from difflib import SequenceMatcher
 import math
+import sqlite3
+from pathlib import Path
 
 # BARCODE_ZERO_LEFT_FIX_BASE_TEXT9_20260908
 # TEXT9_HYBRID_READING_MODES_V1
 # TEXT9_LOCAL_OCR_V2_MULTIPASS_20260909
+# TEXT9_PRODUCT_DB_SQLITE_V1_20260909
 
 try:
     import fitz
@@ -12749,6 +12752,287 @@ def _similitud_producto_catalogo(nombre_factura, nombre_catalogo):
     return max(0.0, min(float(score), 1.0))
 
 
+
+# =========================================================
+# BASE LOCAL DE PRODUCTOS WILPOS
+# Sólo guarda: nombre + código de barra.
+# =========================================================
+def _ruta_base_productos_wilpos():
+    """
+    Ruta del catálogo local.
+    Puede sobrescribirse con la variable de entorno WILPOS_PRODUCT_DB.
+    """
+    personalizada = str(os.environ.get("WILPOS_PRODUCT_DB", "") or "").strip()
+    if personalizada:
+        return Path(personalizada)
+
+    try:
+        base_dir = Path(__file__).resolve().parent
+    except Exception:
+        base_dir = Path.cwd()
+
+    return base_dir / "wilpos_productos.db"
+
+
+def _normalizar_nombre_base_productos(nombre):
+    """
+    Clave estable para evitar duplicados de escritura.
+    El matching real sigue usando _similitud_producto_catalogo().
+    """
+    return _normalizar_nombre_match_catalogo(nombre)
+
+
+def _barcode_valido_para_base(valor):
+    """
+    Un valor se considera barcode utilizable para la base cuando:
+    - ya tiene 8, 12, 13 o 14 dígitos; o
+    - OCR entregó 11 dígitos y la reparación 0+codigo produce UPC-A válido.
+
+    No acepta SKU alfanuméricos ni códigos internos cortos.
+    """
+    s = re.sub(r"\D", "", str(valor or ""))
+    if not s:
+        return ""
+
+    if len(s) == 11:
+        candidato = "0" + s
+        if _gtin_check_digit_valido(candidato):
+            return candidato
+        return ""
+
+    # Regla comercial ya usada por WilPOS:
+    # 8/12/13/14 se conservan tal como vienen.
+    if len(s) in (8, 12, 13, 14):
+        return s
+
+    return ""
+
+
+def _inicializar_base_productos_wilpos():
+    """
+    Crea la base si no existe.
+    Sólo contiene nombre + código de barra, más una clave normalizada interna.
+    """
+    ruta = _ruta_base_productos_wilpos()
+    try:
+        ruta.parent.mkdir(parents=True, exist_ok=True)
+        con = sqlite3.connect(str(ruta), timeout=15)
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS productos (
+                nombre TEXT NOT NULL,
+                codigo_barra TEXT NOT NULL,
+                nombre_norm TEXT NOT NULL,
+                UNIQUE(nombre_norm, codigo_barra)
+            )
+            """
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_productos_nombre_norm "
+            "ON productos(nombre_norm)"
+        )
+        con.commit()
+        con.close()
+        return ruta
+    except Exception:
+        return ruta
+
+
+def _guardar_producto_base_wilpos(nombre, codigo_barra):
+    """
+    Aprende un producto nuevo sin alterar registros existentes.
+    Devuelve True sólo si insertó una combinación nueva.
+    """
+    nombre_limpio = " ".join(str(nombre or "").split()).strip()
+    codigo = _barcode_valido_para_base(codigo_barra)
+    nombre_norm = _normalizar_nombre_base_productos(nombre_limpio)
+
+    if not nombre_limpio or not nombre_norm or not codigo:
+        return False
+
+    ruta = _inicializar_base_productos_wilpos()
+    try:
+        con = sqlite3.connect(str(ruta), timeout=15)
+        cur = con.execute(
+            """
+            INSERT OR IGNORE INTO productos(nombre, codigo_barra, nombre_norm)
+            VALUES (?, ?, ?)
+            """,
+            (nombre_limpio, codigo, nombre_norm),
+        )
+        con.commit()
+        insertado = cur.rowcount > 0
+        con.close()
+        return insertado
+    except Exception:
+        return False
+
+
+@st.cache_data(show_spinner=False, ttl=15)
+def _catalogo_base_productos_wilpos(_mtime_token=None):
+    """
+    Devuelve la base SQLite con la misma estructura esperada por el
+    motor actual de matching.
+    """
+    ruta = _inicializar_base_productos_wilpos()
+    if not ruta.exists():
+        return []
+
+    try:
+        con = sqlite3.connect(str(ruta), timeout=15)
+        filas = con.execute(
+            "SELECT nombre, codigo_barra FROM productos ORDER BY nombre"
+        ).fetchall()
+        con.close()
+    except Exception:
+        return []
+
+    out = []
+    for nombre, codigo in filas:
+        codigo = _barcode_valido_para_base(codigo)
+        if not codigo:
+            continue
+        out.append({
+            "nombre": str(nombre or "").strip(),
+            "codigo": codigo,
+            "hoja": "Base WilPOS",
+            "nombre_match": _normalizar_nombre_match_catalogo(nombre),
+            "presentacion_ml": _presentacion_fisica_ml(nombre),
+            "costo_maestro": None,
+            "empaque_maestro": None,
+        })
+    return out
+
+
+def _invalidar_cache_base_productos_wilpos():
+    try:
+        _catalogo_base_productos_wilpos.clear()
+    except Exception:
+        pass
+
+
+def _cantidad_base_productos_wilpos():
+    ruta = _inicializar_base_productos_wilpos()
+    try:
+        con = sqlite3.connect(str(ruta), timeout=15)
+        n = int(con.execute("SELECT COUNT(*) FROM productos").fetchone()[0])
+        con.close()
+        return n
+    except Exception:
+        return 0
+
+
+def _importar_catalogo_a_base_wilpos(catalogo):
+    """
+    Importa un catálogo ya leído desde Excel.
+    Sólo guarda Nombre + Código Barra y omite códigos que no parecen barcode.
+    """
+    nuevos = 0
+    total_validos = 0
+    for item in (catalogo or []):
+        if not isinstance(item, dict):
+            continue
+        nombre = item.get("nombre", "")
+        codigo = item.get("codigo", "")
+        if not _barcode_valido_para_base(codigo):
+            continue
+        total_validos += 1
+        if _guardar_producto_base_wilpos(nombre, codigo):
+            nuevos += 1
+
+    if nuevos:
+        _invalidar_cache_base_productos_wilpos()
+
+    return nuevos, total_validos
+
+
+def _catalogo_matching_wilpos():
+    """
+    Catálogo combinado:
+    1) Base SQLite aprendida/persistente.
+    2) Inventario Excel cargado en la sesión, si existe.
+
+    Se eliminan duplicados exactos nombre+barcode.
+    """
+    ruta = _inicializar_base_productos_wilpos()
+    try:
+        token = ruta.stat().st_mtime_ns if ruta.exists() else 0
+    except Exception:
+        token = 0
+
+    combinados = list(_catalogo_base_productos_wilpos(token))
+    combinados.extend(
+        st.session_state.get("inventario_referencia_catalogo", []) or []
+    )
+
+    out = []
+    vistos = set()
+    for item in combinados:
+        if not isinstance(item, dict):
+            continue
+        codigo = _barcode_valido_para_base(item.get("codigo", ""))
+        nombre = " ".join(str(item.get("nombre", "") or "").split()).strip()
+        if not nombre or not codigo:
+            continue
+        k = (_normalizar_nombre_match_catalogo(nombre), codigo)
+        if k in vistos:
+            continue
+        vistos.add(k)
+
+        nuevo = dict(item)
+        nuevo["nombre"] = nombre
+        nuevo["codigo"] = codigo
+        nuevo.setdefault("hoja", "Base WilPOS")
+        nuevo.setdefault("nombre_match", _normalizar_nombre_match_catalogo(nombre))
+        nuevo.setdefault("presentacion_ml", _presentacion_fisica_ml(nombre))
+        nuevo.setdefault("costo_maestro", None)
+        nuevo.setdefault("empaque_maestro", None)
+        out.append(nuevo)
+    return out
+
+
+def _bytes_base_productos_csv():
+    ruta = _inicializar_base_productos_wilpos()
+    try:
+        con = sqlite3.connect(str(ruta), timeout=15)
+        filas = con.execute(
+            "SELECT nombre, codigo_barra FROM productos ORDER BY nombre"
+        ).fetchall()
+        con.close()
+    except Exception:
+        filas = []
+
+    salida = io.StringIO()
+    writer = csv.writer(salida)
+    writer.writerow(["Nombre", "Código Barra"])
+    for nombre, codigo in filas:
+        writer.writerow([nombre, codigo])
+    return salida.getvalue().encode("utf-8-sig")
+
+
+def _bytes_base_productos_db():
+    ruta = _inicializar_base_productos_wilpos()
+    try:
+        return ruta.read_bytes()
+    except Exception:
+        return b""
+
+
+def _aprender_producto_si_corresponde(nombre, codigo_barra):
+    """
+    Aprende automáticamente cuando el lote trae un barcode real.
+    Nunca aprende SKU interno ni TMP.
+    """
+    codigo = _barcode_valido_para_base(codigo_barra)
+    if not codigo:
+        return False
+    insertado = _guardar_producto_base_wilpos(nombre, codigo)
+    if insertado:
+        _invalidar_cache_base_productos_wilpos()
+    return insertado
+
+
+
 def _detectar_columnas_inventario_referencia(df):
     cols = {str(c).strip().lower(): c for c in df.columns}
 
@@ -12876,28 +13160,29 @@ def _cargar_inventario_referencia_bytes(raw_bytes, nombre_archivo="inventario.xl
 
 def _codigo_confirmado_producto(prod):
     """
-    Regla R28.2:
-    CUALQUIER código real que ya tenga el producto se considera confirmado
-    para este matching y NO se reemplaza.
+    Para completar desde la base local, sólo un BARCODE utilizable se trata
+    como confirmado.
 
-    Sólo se intenta completar:
-    - vacío;
-    - TMP...
+    Esto permite que un SKU/código interno corto NO bloquee la búsqueda
+    por nombre en la base Nombre + Código Barra.
+
+    Un barcode válido existente nunca se reemplaza.
     """
     if not isinstance(prod, dict):
         return False
 
-    barcode = _codigo_producto_mostrar(prod.get("barcode") or "")
-    codigo = _codigo_producto_mostrar(prod.get("codigo") or "")
-
-    # Para ROLL/Red Bull, 93898 es SKU interno, no barcode.
     if _es_roll_red_bull_producto(prod):
         return False
 
-    if barcode and not barcode.upper().startswith("TMP"):
+    barcode = _barcode_valido_para_base(prod.get("barcode") or "")
+    if barcode:
         return True
-    if codigo and not codigo.upper().startswith("TMP"):
+
+    # Algunas rutas históricas colocan el barcode en "codigo".
+    codigo = _barcode_valido_para_base(prod.get("codigo") or "")
+    if codigo:
         return True
+
     return False
 
 
@@ -12943,7 +13228,7 @@ def _buscar_codigo_en_inventario_referencia(prod, catalogo=None):
     catalogo = (
         catalogo
         if catalogo is not None
-        else st.session_state.get("inventario_referencia_catalogo", [])
+        else _catalogo_matching_wilpos()
     )
 
     if not catalogo or not isinstance(prod, dict):
@@ -13009,7 +13294,7 @@ def _mejor_candidato_catalogo_para_revision(prod, catalogo=None):
     catalogo = (
         catalogo
         if catalogo is not None
-        else st.session_state.get("inventario_referencia_catalogo", [])
+        else _catalogo_matching_wilpos()
     )
     if not catalogo or not isinstance(prod, dict):
         return None
@@ -13143,10 +13428,13 @@ def _resolver_codigo_tmp_para_exportacion(nombre, codigo_actual):
     actual = _codigo_producto_mostrar(codigo_actual)
 
     es_roll_red_bull = _es_roll_red_bull_texto(nombre)
-    if actual and not actual.upper().startswith("TMP") and not es_roll_red_bull:
+
+    # Un barcode válido existente es intocable.
+    # SKU/código interno corto puede intentar recuperar barcode desde la base.
+    if _barcode_valido_para_base(actual) and not es_roll_red_bull:
         return actual, None
 
-    catalogo = st.session_state.get("inventario_referencia_catalogo", []) or []
+    catalogo = _catalogo_matching_wilpos()
     if not catalogo:
         return actual, None
 
@@ -14271,6 +14559,7 @@ def modal_confirmacion(validas, duplicadas_count, margen):
             st.session_state.articulos_repetidos_notif = []
             st.session_state.envases_retornables_lote = []
             st.session_state.productos_revision_lote = []
+            st.session_state.base_productos_nuevos_lote = 0
 
             # Solo se recorren facturas válidas y únicas del lote actual.
             for archivo, firma, proveedor, num_fac, fecha_fac, productos_en_archivo in validas:
@@ -14364,6 +14653,15 @@ def modal_confirmacion(validas, duplicadas_count, margen):
                         codigo = _preservar_barcode_original(p.get("barcode"))
                     else:
                         codigo = _codigo_producto_mostrar(p["codigo"])
+
+                    # BASE LOCAL WILPOS:
+                    # si el lote trae Nombre + Barcode utilizable, se aprende
+                    # automáticamente para futuras facturas.
+                    if _aprender_producto_si_corresponde(p.get("nombre", ""), codigo):
+                        st.session_state["base_productos_nuevos_lote"] = int(
+                            st.session_state.get("base_productos_nuevos_lote", 0)
+                        ) + 1
+
                     # BASE6-R30: usar exclusivamente la línea canónica.
                     p = _resolver_linea_compra_universal(p, proveedor=proveedor)
                     canon = p.get("linea_compra_canonica") or {}
@@ -15864,8 +16162,38 @@ def render_carga_facturas(titulo=True):
             unsafe_allow_html=True,
         )
         st.caption(
-            "Opcional · úsalo para asignar códigos a productos que la factura no imprime "
-            "o que no pudieron leerse. Los códigos ya leídos de la factura tienen prioridad."
+            "La app mantiene una base local con sólo Nombre + Código Barra. "
+            "Si una factura no trae un barcode válido, WilPOS intenta recuperarlo por nombre. "
+            "Los nuevos productos con barcode válido se incorporan automáticamente."
+        )
+
+        _inicializar_base_productos_wilpos()
+        cantidad_base = _cantidad_base_productos_wilpos()
+        st.info(f"🗃️ Base local WilPOS: {cantidad_base} producto(s) con Nombre + Código Barra.")
+
+        cdb1, cdb2 = st.columns(2)
+        with cdb1:
+            st.download_button(
+                "⬇️ Respaldar base .DB",
+                data=_bytes_base_productos_db(),
+                file_name="wilpos_productos.db",
+                mime="application/octet-stream",
+                use_container_width=True,
+                key="descargar_base_productos_db",
+            )
+        with cdb2:
+            st.download_button(
+                "⬇️ Exportar Nombre + Barcode",
+                data=_bytes_base_productos_csv(),
+                file_name="wilpos_productos.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="descargar_base_productos_csv",
+            )
+
+        st.caption(
+            "Puedes cargar tu inventario Excel para alimentar esta base. "
+            "Sólo se guardan Nombre y Código Barra; costos, stock y precios NO se copian."
         )
 
         archivo_referencia = st.file_uploader(
@@ -15886,13 +16214,17 @@ def render_carga_facturas(titulo=True):
                 if catalogo_ref:
                     st.session_state.inventario_referencia_catalogo = catalogo_ref
                     st.session_state.inventario_referencia_nombre = archivo_referencia.name
+
+                    nuevos_base, validos_base = _importar_catalogo_a_base_wilpos(catalogo_ref)
+
                     st.success(
-                        f"Catálogo listo: {len(catalogo_ref)} producto(s) de "
-                        f"{diag_ref.get('hoja_usada', 'la hoja detectada')}."
+                        f"Catálogo leído: {len(catalogo_ref)} producto(s) · "
+                        f"{validos_base} barcode(s) utilizables · "
+                        f"{nuevos_base} nuevo(s) incorporado(s) a la base local."
                     )
                     st.caption(
-                        "Matching automático sólo con alta confianza. "
-                        "No reemplaza códigos que ya fueron leídos correctamente."
+                        "La base sólo completa códigos faltantes/no válidos. "
+                        "Un barcode válido ya leído de la factura nunca se reemplaza."
                     )
                 else:
                     st.warning(diag_ref.get("error", "No se pudo construir el catálogo."))
@@ -15905,7 +16237,11 @@ def render_carga_facturas(titulo=True):
             )
 
         if st.session_state.get("inventario_referencia_catalogo"):
-            if st.button("Quitar inventario de referencia", key="quitar_inventario_ref_r28"):
+            if st.button(
+                "Quitar Excel de referencia de esta sesión",
+                key="quitar_inventario_ref_r28",
+                help="No borra la base local WilPOS ya aprendida.",
+            ):
                 st.session_state.inventario_referencia_catalogo = []
                 st.session_state.inventario_referencia_nombre = ""
                 st.session_state.matches_catalogo_lote = []
