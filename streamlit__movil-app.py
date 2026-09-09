@@ -1,3 +1,4 @@
+# TEXT9_V4_2_PDF_ROBUST_RECEIPT_FIX_20260909
 # TEXT9_V4_1_FAST_LOCAL_DEFAULT_SESSION_CACHE_20260909
 # TEXT9_POTENTE_DB_V4_DIAGNOSTICO_20260909
 import io
@@ -7541,7 +7542,7 @@ def _extraer_empaque_recibo_multilinea(texto):
     t = str(texto or "").upper()
 
     m = re.search(
-        r"\b(?:CAJA|CAJ|CJ|PAQUETE|PAQ|PACK)\s*[-:]?\s*(\d{1,3})\b",
+        r"\b(?:CAJA|CAJ|CJ|PAQUETE|PAQUETE|PAQUSTE|PAQ|PACK)\s*[-:.,]?\s*(\d{1,3})\b",
         t,
     )
     if m:
@@ -7634,7 +7635,8 @@ def _extraer_recibo_multilinea_local(texto, nombre_archivo=""):
 
     patron_inicio = re.compile(
         r"^\s*(\d+(?:[.,]\d+)?)\s*[xX×]\s*"
-        r"(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))\s*$"
+        r"(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+(?:[.,]\d{2}))"
+        r"(?:\s+.*)?$"
     )
 
     productos = []
@@ -7692,6 +7694,15 @@ def _extraer_recibo_multilinea_local(texto, nombre_archivo=""):
         if len(nombre) < 3:
             i = max(i + 1, j)
             continue
+
+        # Si el OCR produjo un supuesto barcode pero no pasa una validación razonable,
+        # no lo confirmamos: la base Nombre + Código Barra podrá rescatarlo.
+        if barcode:
+            digits_bar = re.sub(r"\D", "", str(barcode))
+            if len(digits_bar) in (12, 13, 14):
+                # Para GTIN estándar, exigir check digit válido.
+                if not _gtin_check_digit_valido(digits_bar):
+                    barcode = ""
 
         emp = _extraer_empaque_recibo_multilinea(bloque_txt)
 
@@ -8188,10 +8199,85 @@ def _ocr_multilectura(imagen):
     return "\n".join(partes)
 
 
-OCR_CACHE_VERSION = "BASE6_R22_OCR_FRESH_20260904"
+OCR_CACHE_VERSION = "TEXT9_V4_2_PDF_ROBUST_20260909"
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=64)
+
+def _ocr_pdf_pagina_robusto(imagen):
+    """
+    OCR específico para una página PDF renderizada.
+    Mantiene resolución suficiente para recibos térmicos muy altos/estrechos.
+
+    Problema corregido:
+    el OCR general normaliza por lado largo y puede dejar el ancho demasiado
+    pequeño en recibos estrechos, perdiendo casi todo el texto.
+    """
+    if not OCR_DISPONIBLE or not TESSERACT_MOTOR_LISTO:
+        return ""
+
+    try:
+        from PIL import ImageOps, ImageEnhance, ImageFilter
+        base = ImageOps.exif_transpose(imagen).convert("RGB")
+
+        w, h = base.size
+
+        # En recibos verticales estrechos, preservar un ancho mínimo real.
+        # Objetivo: ~1500-1700 px de ancho para OCR.
+        if h > w * 1.7:
+            objetivo_ancho = 1650
+            if w != objetivo_ancho:
+                escala = objetivo_ancho / float(max(1, w))
+                escala = min(max(escala, 0.80), 2.0)
+                base = base.resize(
+                    (max(1, int(w * escala)), max(1, int(h * escala))),
+                    Image.Resampling.LANCZOS,
+                )
+        else:
+            # Facturas normales: mantener lado largo razonable.
+            lado = max(w, h)
+            objetivo = 3200
+            if lado > objetivo:
+                escala = objetivo / float(lado)
+                base = base.resize(
+                    (max(1, int(w * escala)), max(1, int(h * escala))),
+                    Image.Resampling.LANCZOS,
+                )
+
+        gris = ImageOps.grayscale(base)
+        gris = ImageOps.autocontrast(gris, cutoff=1)
+        gris = ImageEnhance.Contrast(gris).enhance(1.25)
+        gris = ImageEnhance.Sharpness(gris).enhance(1.15)
+
+        candidatos = []
+        for psm in (6, 4, 11):
+            try:
+                txt = pytesseract.image_to_string(
+                    gris,
+                    lang="eng",
+                    config=f"--oem 3 --psm {psm}",
+                    timeout=30,
+                )
+                candidatos.append((_puntuar_texto_ocr_factura(txt), txt))
+            except Exception:
+                continue
+
+        if not candidatos:
+            return ""
+
+        candidatos.sort(key=lambda x: x[0], reverse=True)
+
+        # Elegir la mejor lectura, no mezclar lecturas ruidosas si una ya es buena.
+        mejor = (candidatos[0][1] or "").strip()
+        if mejor:
+            return mejor
+
+        return ""
+    except Exception:
+        return ""
+
+
+
 def _ocr_imagen_desde_bytes_cache(raw_bytes, cache_version=OCR_CACHE_VERSION):
     """Cachea OCR por contenido y conserva el motivo real de fallo."""
     if not raw_bytes:
@@ -12210,9 +12296,17 @@ def extraer_datos_factura(uploaded_file):
                     for pagina in doc:
                         pix = pagina.get_pixmap(matrix=fitz.Matrix(1.8, 1.8), alpha=False)
                         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                        buffer_img = io.BytesIO()
-                        img.save(buffer_img, format="PNG")
-                        extracted_text += "\n" + _ocr_imagen_desde_bytes_cache(buffer_img.getvalue())
+
+                        # V4.2: OCR PDF específico; preserva resolución en recibos altos.
+                        texto_pagina_pdf = _ocr_pdf_pagina_robusto(img)
+
+                        # Fallback al OCR general sólo si el específico no produjo texto útil.
+                        if len(str(texto_pagina_pdf or "").strip()) < 120:
+                            buffer_img = io.BytesIO()
+                            img.save(buffer_img, format="PNG")
+                            texto_pagina_pdf = _ocr_imagen_desde_bytes_cache(buffer_img.getvalue())
+
+                        extracted_text += "\n" + str(texto_pagina_pdf or "")
                     doc.close()
                 except Exception as exc:
                     errores_locales.append(
@@ -12268,6 +12362,17 @@ def extraer_datos_factura(uploaded_file):
         "OK" if str(extracted_text or "").strip() else "VACÍO",
         f"{len(str(extracted_text or '').splitlines())} líneas · {len(str(extracted_text or ''))} caracteres.",
     )
+
+    if file_name.endswith(".pdf"):
+        _wilpos_trace(
+            uploaded_file.name,
+            "OCR PDF V4.2",
+            "OK" if len(str(extracted_text or "").strip()) >= 120 else "DÉBIL",
+            (
+                f"Texto PDF/OCR: {len(str(extracted_text or '').splitlines())} líneas · "
+                f"{len(str(extracted_text or ''))} caracteres."
+            ),
+        )
 
     # ---------------------------------------------------------
     # IDENTIFICACIÓN AUTOMÁTICA
@@ -15972,7 +16077,7 @@ class _ArchivoBytesCache:
         return self._pos
 
 
-EXTRACTOR_CACHE_VERSION = "TEXT9_POTENTE_DB_V4_DIAGNOSTICO_20260909"
+EXTRACTOR_CACHE_VERSION = "TEXT9_V4_2_PDF_ROBUST_20260909"
 
 
 @st.cache_data(show_spinner=False, ttl=2592000, max_entries=512)
